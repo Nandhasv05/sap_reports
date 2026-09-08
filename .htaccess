@@ -1,0 +1,10 @@
+RewriteEngine On
+DirectoryIndex index.php
+
+RewriteRule ^(css|js|assets)/(.*)$ public/$1/$2 [L]
+
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+RewriteRule ^ index.php [L]
