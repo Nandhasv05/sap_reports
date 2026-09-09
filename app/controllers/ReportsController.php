@@ -13,7 +13,11 @@ class ReportsController extends Controller
      */ 
     public function index(): void
     {
-        $this->show('fabric');
+        $model = new ReportsModel();
+        $this->view('reports/index', [
+            'pageTitle' => 'SAP Reports',
+            'catalog'   => $model->catalog(),
+        ]);
     }
 
     /*

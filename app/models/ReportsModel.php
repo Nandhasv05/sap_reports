@@ -40,20 +40,20 @@ class ReportsModel
                 'group' => 'Sales',
             ],
             'fabric' => [
-                'title' => 'Fabric Reports',
+                'title' => 'Fabric Utilization',
                 'blurb' => 'SAP fabric utilization by sales order.',
                 'icon'  => 'fa-scroll',
                 'color' => '#0f766e',
                 'bg'    => '#ccfbf1',
-                'group' => 'Fabric Reports',
+                'group' => 'Utilization Reports',
             ],
             'trims' => [
-                'title' => 'Trims Reports',
+                'title' => 'Trims Utilization',
                 'blurb' => 'SAP trims utilization by sales order.',
                 'icon'  => 'fa-tags',
                 'color' => '#c2410c',
                 'bg'    => '#ffedd5',
-                'group' => 'Trims Reports',
+                'group' => 'Utilization Reports',
             ],
         ];
     }

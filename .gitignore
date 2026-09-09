@@ -1,0 +1,52 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Cache
+cache/
+tmp/
+
+# Runtime / generated files
+storage/*
+!storage/.gitkeep
+
+# Uploads
+public/uploads/*
+!public/uploads/.gitkeep
+
+# Dependencies
+vendor/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Local config
+config/config.local.php
+config/config.production.php
+
+# Backup files
+*.bak
+*.backup
+*.old
+*.tmp
+
+# Database dumps
+*.sql
+*.sqlite
+*.sqlite3

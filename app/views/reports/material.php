@@ -12,7 +12,8 @@ $summary = is_array($summary ?? null) ? $summary : [];
 $chart = is_array($chart ?? null) ? $chart : [];
 $hasData = $records !== [] || (int) $total > 0;
 $isLookup = $salesOrder === '' && !$hasData;
-$kindLabel = $isFabric ? 'Fabric Reports' : 'Trims Reports';
+$kindLabel = $isFabric ? 'Fabric Utilization Report' : 'Trims Utilization Report';
+$catalogHome = url('/');
 $qs = static function (array $extra = []) use ($search, $salesOrder, $page, $perPage): string {
     return http_build_query(array_merge([
         'so' => $salesOrder,
@@ -41,7 +42,7 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
         <div class="rpt-boot-card">
             <div class="rpt-boot-brand"><img src="<?= e($logoUrl) ?>" alt="evolv"></div>
             <div class="rpt-spin" aria-hidden="true"></div>
-            <p>Preparing <?= e($kindLabel) ?>…</p>
+            <p>Preparing Utilization Report…</p>
             <span class="rpt-boot-bar"><i></i></span>
         </div>
     </div>
@@ -55,10 +56,13 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
 
     <header class="rpt-bar">
         <div class="rpt-bar-left">
-            <a href="<?= e($home) ?>" class="rpt-brand" aria-label="EVOLV">
+            <a href="<?= e($catalogHome) ?>" class="rpt-brand" aria-label="EVOLV" title="SAP Reports">
                 <img src="<?= e($logoUrl) ?>" alt="evolv">
             </a>
-            <a href="<?= e($home) ?>" class="rpt-home" aria-label="Portal home">
+            <a href="<?= e($catalogHome) ?>" class="rpt-home" aria-label="All Reports" title="Reports Catalog">
+                <span class="material-icons-round">apps</span>
+            </a>
+            <a href="<?= e($home) ?>" class="rpt-home" aria-label="Portal home" title="Portal Dashboard">
                 <span class="material-icons-round">home</span>
             </a>
             <div class="rpt-name">
@@ -119,10 +123,9 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                     </label>
                     <button class="rpt-btn lookup-go" type="submit">
                         <span class="material-icons-round">sync</span>
-                        Load report
+                        <!-- Load report -->
                     </button>
                 </form>
-                <p class="lookup-hint">Example: <a href="<?= e(url($report) . '?so=4203') ?>">4203</a></p>
             </div>
         </main>
     <?php else: ?>
@@ -139,12 +142,13 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                 <?php endforeach; ?>
             </div>
 
+            
             <div class="rpt-charts">
                 <section class="rpt-chart-card">
                     <div class="rpt-chart-head">
                         <span class="material-icons-round">bar_chart</span>
                         <div>
-                            <h2>Quantity mix</h2>
+                            <h2>Sale Order Quantity Utilization</h2>
                             <p>BOM, planned, production, PO, GRN, and issue</p>
                         </div>
                     </div>
@@ -156,7 +160,7 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                     <div class="rpt-chart-head">
                         <span class="material-icons-round">donut_large</span>
                         <div>
-                            <h2>BOM by material</h2>
+                            <h2>Sales Order BOM Quantity By Material</h2>
                             <p>Share of BOM quantity</p>
                         </div>
                     </div>
@@ -166,59 +170,246 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                 </section>
             </div>
 
+            <?php if ($records !== []): ?>
+                <div class="rpt-table-toolbar">
+                    <div class="rpt-tb-search">
+                        <span class="material-icons-round rpt-search-ico">search</span>
+                        <input type="search" id="rptTableSearch" class="rpt-tb-input" placeholder="Quick search table (Material, PO, Qty...)" autocomplete="off" spellcheck="false">
+                        <button type="button" id="rptTableSearchClear" class="rpt-tb-clear" title="Clear search" aria-label="Clear search" style="display: none;">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+
+                    <div class="rpt-tb-actions">
+                        <span class="rpt-tb-count" id="rptTableCount">Showing <?= count($records) ?> of <?= count($records) ?> lines</span>
+                        
+                        <button type="button" class="rpt-tb-btn is-active" id="rptToggleColFilters" title="Toggle column filter inputs">
+                            <i class="fas fa-filter"></i>
+                            <span>Column Filters</span>
+                            <span class="rpt-tb-badge" id="rptActiveFilterBadge" style="display: none;">0</span>
+                        </button>
+
+                        <button type="button" class="rpt-tb-btn rpt-tb-btn-reset" id="rptClearAllFilters" title="Clear all search and filters" style="display: none;">
+                            <i class="fas fa-rotate-left"></i>
+                            <span>Clear All</span>
+                        </button>
+                    </div>
+                </div>
+            <?php endif; ?>
+
             <div class="rpt-table-wrap">
-                <table class="rpt-table">
+                <table class="rpt-table" id="rptDataTable">
                     <thead>
-                        <tr>
-                            <th class="num sno">S.No</th>
-                            <th>Sales Order</th>
-                            <th>Material</th>
-                            <th>Purchase Order</th>
-                            <th>PO Item</th>
-                            <th class="num">SO Qty</th>
-                            <th class="num">BOM Qty</th>
-                            <th class="num">Planned</th>
-                            <th class="num">Production</th>
-                            <th class="num">PO Qty</th>
-                            <th class="num">GRN Qty</th>
-                            <th class="num">Issue Qty</th>
-                            <th>GRN Sales Orders</th>
+                        <tr class="rpt-header-row">
+                            <th class="num sno is-sortable" data-col="0" data-type="num" title="Click to sort by S.No">
+                                <div class="th-content">
+                                    <span>S.No</span>
+                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
+                                </div>
+                            </th>
+                            <th class="is-sortable" data-col="1" data-type="text" title="Click to sort by Sales Order">
+                                <div class="th-content">
+                                    <span>Sales Order</span>
+                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
+                                </div>
+                            </th>
+                            <th class="is-sortable" data-col="2" data-type="text" title="Click to sort by Material">
+                                <div class="th-content">
+                                    <span>Material</span>
+                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
+                                </div>
+                            </th>
+                            <th class="is-sortable" data-col="3" data-type="text" title="Click to sort by Purchase Order">
+                                <div class="th-content">
+                                    <span>Purchase Order</span>
+                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
+                                </div>
+                            </th>
+                            <th class="is-sortable" data-col="4" data-type="num" title="Click to sort by PO Line">
+                                <div class="th-content">
+                                    <span>PO Line</span>
+                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
+                                </div>
+                            </th>
+                            <!-- <th class="num">SO Qty</th> -->
+                            <th class="num is-sortable" data-col="5" data-type="num" title="Click to sort by BOM Qty">
+                                <div class="th-content num">
+                                    <span>BOM Qty</span>
+                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
+                                </div>
+                            </th>
+                            <th class="num is-sortable" data-col="6" data-type="num" title="Click to sort by Planned Qty">
+                                <div class="th-content num">
+                                    <span>Planned</span>
+                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
+                                </div>
+                            </th>
+                            <th class="num is-sortable" data-col="7" data-type="num" title="Click to sort by Production Qty">
+                                <div class="th-content num">
+                                    <span>Production</span>
+                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
+                                </div>
+                            </th>
+                            <th class="num is-sortable" data-col="8" data-type="num" title="Click to sort by PO Qty">
+                                <div class="th-content num">
+                                    <span>PO Qty</span>
+                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
+                                </div>
+                            </th>
+                            <th class="num is-sortable" data-col="9" data-type="num" title="Click to sort by GRN Qty">
+                                <div class="th-content num">
+                                    <span>GRN Qty</span>
+                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
+                                </div>
+                            </th>
+                            <th class="num is-sortable" data-col="10" data-type="num" title="Click to sort by Issue Qty">
+                                <div class="th-content num">
+                                    <span>Issue Qty</span>
+                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
+                                </div>
+                            </th>
+                            <th class="is-sortable" data-col="11" data-type="text" title="Click to sort by Additional Sale Orders">
+                                <div class="th-content">
+                                    <span>Additional Sale Orders</span>
+                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
+                                </div>
+                            </th>
                         </tr>
+                        <?php if ($records !== []): ?>
+                            <tr class="rpt-filter-row" id="rptFilterRow">
+                                <th class="num sno">
+                                    <button type="button" class="rpt-col-filter-reset" id="rptColFilterReset" title="Clear all column filters" aria-label="Clear all column filters">
+                                        <i class="fas fa-eraser"></i>
+                                    </button>
+                                </th>
+                                <th>
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input" data-col="1" placeholder="Filter SO..." title="Filter Sales Order">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th>
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input" data-col="2" placeholder="Filter Material..." title="Filter Material">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th>
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input" data-col="3" placeholder="Filter PO..." title="Filter Purchase Order">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th>
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input" data-col="4" placeholder="PO Line..." title="Filter PO Line">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th class="num">
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input num" data-col="5" data-numeric="true" placeholder="BOM Qty..." title="Filter BOM Qty (e.g. >0, 100)">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th class="num">
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input num" data-col="6" data-numeric="true" placeholder="Planned..." title="Filter Planned Qty (e.g. >0, 100)">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th class="num">
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input num" data-col="7" data-numeric="true" placeholder="Prod Qty..." title="Filter Production Qty (e.g. >0, 100)">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th class="num">
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input num" data-col="8" data-numeric="true" placeholder="PO Qty..." title="Filter PO Qty (e.g. >0, 100)">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th class="num">
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input num" data-col="9" data-numeric="true" placeholder="GRN Qty..." title="Filter GRN Qty (e.g. >0, 100)">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th class="num">
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input num" data-col="10" data-numeric="true" placeholder="Issue Qty..." title="Filter Issue Qty (e.g. >0, 100)">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th>
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input" data-col="11" placeholder="Filter Add. SO..." title="Filter Additional Sale Orders">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                            </tr>
+                        <?php endif; ?>
                     </thead>
-                    <tbody>
+                    <tbody id="rptTableBody">
                         <?php if ($records === []): ?>
-                            <tr><td colspan="13" class="rpt-table-empty"><?= e($emptyHint) ?></td></tr>
+                            <tr><td colspan="12" class="rpt-table-empty"><?= e($emptyHint) ?></td></tr>
                         <?php else: ?>
                             <?php foreach ($records as $i => $row): ?>
-                                <tr>
+                                <tr data-orig-sno="<?= (int) $i + 1 ?>">
                                     <td class="num sno"><?= (int) $i + 1 ?></td>
-                                    <td><?= e($model->dash($row['sales_order'] ?? '')) ?></td>
+                                    <td>
+                                        <?= e(str_replace(',', '', $model->dash($row['sales_order'] ?? ''))) ?>
+                                    </td>
                                     <td class="rpt-mat"><?= e($model->dash($row['material'] ?? '')) ?></td>
-                                    <td><?= e($model->dash($row['purchase_order'] ?? '')) ?></td>
-                                    <td><?= e($model->dash($row['po_item'] ?? '')) ?></td>
-                                    <td class="num"><?= e($model->dash($row['so_qty'] ?? null)) ?></td>
-                                    <td class="num"><?= e($model->dash($row['bom_qty'] ?? null)) ?></td>
-                                    <td class="num"><?= e($model->dash($row['planned_qty'] ?? null)) ?></td>
-                                    <td class="num"><?= e($model->dash($row['production_qty'] ?? null)) ?></td>
-                                    <td class="num"><?= e($model->dash($row['po_qty'] ?? null)) ?></td>
-                                    <td class="num"><?= e($model->dash($row['grn_qty'] ?? null)) ?></td>
-                                    <td class="num"><?= e($model->dash($row['issue_qty'] ?? null)) ?></td>
+                                    <td>
+                                        <?= e(str_replace(',', '', $model->dash($row['purchase_order'] ?? ''))) ?>
+                                    </td>
+                                    <td>
+                                        <?= e(str_replace(',', '', $model->dash($row['po_item'] ?? ''))) ?>
+                                    </td>
+                                    <td class="num">
+                                        <?= e(str_replace(',', '', $model->dash($row['bom_qty'] ?? ''))) ?>
+                                    </td>
+                                    <td class="num">
+                                        <?= e(str_replace(',', '', $model->dash($row['planned_qty'] ?? ''))) ?>
+                                    </td>
+                                    <td class="num">
+                                        <?= e(str_replace(',', '', $model->dash($row['production_qty'] ?? ''))) ?>
+                                    </td>
+                                    <td class="num">
+                                        <?= e(str_replace(',', '', $model->dash($row['po_qty'] ?? ''))) ?>
+                                    </td>
+                                    <td class="num">
+                                        <?= e(str_replace(',', '', $model->dash($row['grn_qty'] ?? ''))) ?>
+                                    </td>
+                                    <td class="num">
+                                        <?= e(str_replace(',', '', $model->dash($row['issue_qty'] ?? ''))) ?>
+                                    </td>
                                     <td class="grn-sos"><?= e($model->dash($row['grn_sales_orders'] ?? '')) ?></td>
                                 </tr>
                             <?php endforeach; ?>
+                            <tr id="rptNoMatchRow" class="rpt-table-no-match" style="display: none;">
+                                <td colspan="12" class="rpt-table-empty">
+                                    <div class="rpt-no-match-card">
+                                        <span class="material-icons-round">filter_alt_off</span>
+                                        <p>No records match the applied search or filter criteria.</p>
+                                        <button type="button" class="rpt-btn rpt-btn-sm" id="rptResetFilterTableBtn">Clear All Filters</button>
+                                    </div>
+                                </td>
+                            </tr>
                         <?php endif; ?>
                     </tbody>
                     <?php if ($records !== []): ?>
                         <tfoot>
-                            <tr>
-                                <th colspan="5">Total (<?= e($model->num($total)) ?> lines)</th>
-                                <th class="num"><?= e($model->dash($summary['so_qty'] ?? null)) ?></th>
-                                <th class="num"><?= e($model->dash($summary['bom_qty'] ?? null)) ?></th>
-                                <th class="num"><?= e($model->dash($summary['planned_qty'] ?? null)) ?></th>
-                                <th class="num"><?= e($model->dash($summary['production_qty'] ?? null)) ?></th>
-                                <th class="num"><?= e($model->dash($summary['po_qty'] ?? null)) ?></th>
-                                <th class="num"><?= e($model->dash($summary['grn_qty'] ?? null)) ?></th>
-                                <th class="num"><?= e($model->dash($summary['issue_qty'] ?? null)) ?></th>
+                            <tr id="rptTableFoot">
+                                <th colspan="5" id="footTotalLabel">Total (<?= e($model->num($total)) ?> lines)</th>
+                                <th class="num" id="footBomQty"><?= e(str_replace(',', '', $model->dash($summary['bom_qty'] ?? null))) ?></th>
+                                <th class="num" id="footPlannedQty"><?= e(str_replace(',', '', $model->dash($summary['planned_qty'] ?? null))) ?></th>
+                                <th class="num" id="footProductionQty"><?= e(str_replace(',', '', $model->dash($summary['production_qty'] ?? null))) ?></th>
+                                <th class="num" id="footPoQty"><?= e(str_replace(',', '', $model->dash($summary['po_qty'] ?? null))) ?></th>
+                                <th class="num" id="footGrnQty"><?= e(str_replace(',', '', $model->dash($summary['grn_qty'] ?? null))) ?></th>
+                                <th class="num" id="footIssueQty"><?= e(str_replace(',', '', $model->dash($summary['issue_qty'] ?? null))) ?></th>
                                 <th></th>
                             </tr>
                         </tfoot>
