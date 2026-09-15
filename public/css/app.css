@@ -588,12 +588,34 @@ body.rpt-loading { cursor: wait; }
     background: #fff;
     border: 1px solid #e2e8e4;
     border-radius: 12px;
-    min-height: 240px;
+    min-height: 280px;
+    max-height: calc(100vh - 215px);
+    position: relative;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.rpt-table-wrap::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+.rpt-table-wrap::-webkit-scrollbar-track {
+    background: #f1f5f9;
+    border-radius: 4px;
+}
+.rpt-table-wrap::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+}
+.rpt-table-wrap::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+.rpt-table-wrap.is-expanded {
+    max-height: none !important;
 }
 .rpt-table {
     width: 100%;
     min-width: 1100px;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     font-size: 13px;
     border: 1px solid #cbd5d1;
 }
@@ -601,8 +623,14 @@ body.rpt-loading { cursor: wait; }
 .rpt-table td {
     padding: 10px 12px;
     text-align: left;
-    border: 1px solid #d7e0dc;
+    border-bottom: 1px solid #d7e0dc;
+    border-right: 1px solid #d7e0dc;
     white-space: nowrap;
+    background-clip: padding-box;
+}
+.rpt-table tr td:last-child,
+.rpt-table tr th:last-child {
+    border-right: none;
 }
 .rpt-table th {
     position: sticky;
@@ -618,11 +646,24 @@ body.rpt-loading { cursor: wait; }
 .rpt-table tfoot td {
     position: sticky;
     bottom: 0;
-    z-index: 2;
+    z-index: 8;
     background: var(--rpt-soft);
     color: var(--rpt);
     font-weight: 700;
-    border: 1px solid #c5d4ce;
+    border-top: 2px solid #cbd5d1;
+    border-bottom: none;
+    border-right: 1px solid #cbd5d1;
+    box-shadow: 0 -2px 4px rgba(0, 0, 0, 0.04);
+}
+.is-trims .rpt-table tfoot th,
+.is-trims .rpt-table tfoot td {
+    background: #fff7ed;
+    color: #c2410c;
+}
+.is-fabric .rpt-table tfoot th,
+.is-fabric .rpt-table tfoot td {
+    background: #ecfdf5;
+    color: #0f766e;
 }
 .rpt-table .sno {
     width: 52px;
@@ -717,6 +758,9 @@ body.rpt-loading { cursor: wait; }
     border-radius: 12px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
     margin-bottom: 2px;
+    position: sticky;
+    top: 56px;
+    z-index: 15;
 }
 .rpt-tb-search {
     position: relative;
@@ -842,14 +886,24 @@ body.rpt-loading { cursor: wait; }
 .rpt-table thead tr.rpt-header-row th {
     position: sticky;
     top: 0;
-    z-index: 4;
+    z-index: 10;
     background: var(--rpt-soft);
     color: var(--rpt);
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: .04em;
-    border: 1px solid #cbd5d1;
+    border-bottom: 1px solid #cbd5d1;
+    border-right: 1px solid #cbd5d1;
     padding: 10px 10px;
+    box-shadow: 0 1px 0 #cbd5d1;
+}
+.is-trims .rpt-table thead tr.rpt-header-row th {
+    background: #fff7ed;
+    color: #c2410c;
+}
+.is-fabric .rpt-table thead tr.rpt-header-row th {
+    background: #ecfdf5;
+    color: #0f766e;
 }
 .rpt-table thead tr.rpt-header-row th.is-sortable {
     cursor: pointer;
@@ -860,7 +914,7 @@ body.rpt-loading { cursor: wait; }
     background: #d1fae5;
 }
 .is-trims .rpt-table thead tr.rpt-header-row th.is-sortable:hover {
-    background: #ffedd5;
+    background: #fed7aa;
 }
 .rpt-table thead tr.rpt-header-row th .th-content {
     display: block;
@@ -882,15 +936,16 @@ body.rpt-loading { cursor: wait; }
     background: #fed7aa;
 }
 
-/* Filter Row */
+/* Filter Row - Sticky right below the column header */
 .rpt-table thead tr.rpt-filter-row th {
     position: sticky;
-    top: 37px;
-    z-index: 3;
+    top: var(--rpt-header-h, 37px);
+    z-index: 9;
     background: #f8fafc;
-    border: 1px solid #d7e0dc;
-    border-top: none;
+    border-bottom: 2px solid #cbd5d1;
+    border-right: 1px solid #d7e0dc;
     padding: 5px 6px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
 }
 .rpt-col-input-wrap {
     position: relative;
@@ -1886,3 +1941,93 @@ body.rpt-loading { cursor: wait; }
     transition: transform 0.2s;
 }
 .rpt-group-header-row.is-collapsed .rpt-group-chevron { transform: rotate(180deg); }
+
+/* ── BOM Qty Trend Indicators ─────────────────────────── */
+
+/* Stat card: compact strip of 5 mini trend badges */
+.bom-trend-strip {
+    display: flex;
+    gap: 4px;
+    margin: 4px 0 3px;
+    flex-wrap: wrap;
+}
+.bom-trend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px 5px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    cursor: default;
+    transition: opacity 0.15s;
+    background: #f1f5f9;
+    color: #64748b;
+}
+.bom-trend-item.is-up {
+    background: #dcfce7;
+    color: #15803d;
+}
+.bom-trend-item.is-down {
+    background: #fee2e2;
+    color: #dc2626;
+}
+.bom-trend-item.is-equal {
+    background: #fef9c3;
+    color: #a16207;
+}
+.bom-trend-arrow {
+    font-size: 11px;
+    line-height: 1;
+}
+.bom-trend-item.is-up   .bom-trend-arrow::before { content: '↑'; }
+.bom-trend-item.is-down .bom-trend-arrow::before { content: '↓'; }
+.bom-trend-item.is-equal .bom-trend-arrow::before { content: '='; }
+.bom-trend-label {
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Table rows: small inline dot strip next to the BOM value */
+.bom-qty-cell {
+    position: relative;
+}
+.bom-row-trend {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: 5px;
+    vertical-align: middle;
+}
+.brt-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    cursor: default;
+    position: relative;
+    flex-shrink: 0;
+    transition: transform 0.15s;
+}
+.brt-dot:hover { transform: scale(1.5); z-index: 2; }
+.brt-dot.up {
+    background: #22c55e;
+    box-shadow: 0 0 0 1.5px #dcfce7;
+}
+.brt-dot.dn {
+    background: #ef4444;
+    box-shadow: 0 0 0 1.5px #fee2e2;
+}
+
+/* Tooltip on hover (CSS-only via title attribute shows natively; style the dot group) */
+.bom-row-trend:hover .brt-dot { opacity: 0.85; }
+
+/* Responsive: hide trend strip on narrow screens */
+@media (max-width: 1100px) {
+    .bom-trend-strip { display: none; }
+    .bom-row-trend   { display: none; }
+}

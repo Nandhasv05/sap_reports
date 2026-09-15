@@ -29,14 +29,30 @@ $tabQs = '?mode=' . rawurlencode($mode) . ($salesOrder !== '' ? ('&so=' . rawurl
 $emptyHint = $salesOrder === ''
     ? 'Enter a sales order to pull utilization from SAP.'
     : 'No ' . ($isFabric ? 'fabric' : 'trims') . ' utilization for sales order ' . $salesOrder . '.';
+$bomQtyRaw      = (float) ($summary['bom_qty']        ?? 0);
+$plannedQtyRaw  = (float) ($summary['planned_qty']     ?? 0);
+$productionRaw  = (float) ($summary['production_qty']  ?? 0);
+$poQtyRaw       = (float) ($summary['po_qty']          ?? 0);
+$grnQtyRaw      = (float) ($summary['grn_qty']         ?? 0);
+$issueQtyRaw    = (float) ($summary['issue_qty']       ?? 0);
 $cards = [
-    ['label' => 'Materials', 'note' => 'Lines', 'icon' => 'layers', 'tone' => 'teal', 'value' => $model->dash($summary['lines'] ?? $total)],
-    ['label' => 'BOM Qty', 'note' => 'Required', 'icon' => 'schema', 'tone' => 'sky', 'value' => $model->dash($summary['bom_qty'] ?? null)],
-    ['label' => 'Planned', 'note' => 'Planned qty', 'icon' => 'event_note', 'tone' => 'indigo', 'value' => $model->dash($summary['planned_qty'] ?? null)],
-    ['label' => 'Production', 'note' => 'Produced', 'icon' => 'precision_manufacturing', 'tone' => 'mint', 'value' => $model->dash($summary['production_qty'] ?? null)],
-    ['label' => 'PO Qty', 'note' => 'Ordered', 'icon' => 'shopping_bag', 'tone' => 'amber', 'value' => $model->dash($summary['po_qty'] ?? null)],
-    ['label' => 'GRN Qty', 'note' => 'Received', 'icon' => 'inventory_2', 'tone' => 'violet', 'value' => $model->dash($summary['grn_qty'] ?? null)],
-    ['label' => 'Issue Qty', 'note' => 'Issued', 'icon' => 'output', 'tone' => 'rose', 'value' => $model->dash($summary['issue_qty'] ?? null)],
+    ['label' => 'Materials',  'note' => 'Lines',       'icon' => 'layers',                 'tone' => 'teal',   'value' => $model->dash($summary['lines'] ?? $total)],
+    ['label' => 'BOM Qty',    'note' => 'Required',    'icon' => 'schema',                 'tone' => 'sky',    'value' => $model->dash($summary['bom_qty'] ?? null),
+        'data' => [
+            'data-bom-card'      => '1',
+            'data-bom'           => $bomQtyRaw,
+            'data-planned'       => $plannedQtyRaw,
+            'data-production'    => $productionRaw,
+            'data-po'            => $poQtyRaw,
+            'data-grn'           => $grnQtyRaw,
+            'data-issue'         => $issueQtyRaw,
+        ],
+    ],
+    ['label' => 'Planned',    'note' => 'Planned qty', 'icon' => 'event_note',             'tone' => 'indigo', 'value' => $model->dash($summary['planned_qty'] ?? null)],
+    ['label' => 'Production', 'note' => 'Produced',    'icon' => 'precision_manufacturing','tone' => 'mint',   'value' => $model->dash($summary['production_qty'] ?? null)],
+    ['label' => 'PO Qty',     'note' => 'Ordered',     'icon' => 'shopping_bag',           'tone' => 'amber',  'value' => $model->dash($summary['po_qty'] ?? null)],
+    ['label' => 'GRN Qty',    'note' => 'Received',    'icon' => 'inventory_2',            'tone' => 'violet', 'value' => $model->dash($summary['grn_qty'] ?? null)],
+    ['label' => 'Issue Qty',  'note' => 'Issued',      'icon' => 'output',                 'tone' => 'rose',   'value' => $model->dash($summary['issue_qty'] ?? null)],
 ];
 $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
 // Trim category filter pills
@@ -197,10 +213,27 @@ if (!$isFabric && $hasData) {
         <main class="rpt-main">
             <div class="rpt-stats">
                 <?php foreach ($cards as $card): ?>
-                    <article class="rpt-stat tone-<?= e($card['tone']) ?>">
+                    <?php
+                        $extraAttrs = '';
+                        if (!empty($card['data'])) {
+                            foreach ($card['data'] as $attrKey => $attrVal) {
+                                $extraAttrs .= ' ' . e($attrKey) . '="' . e((string)$attrVal) . '"';
+                            }
+                        }
+                    ?>
+                    <article class="rpt-stat tone-<?= e($card['tone']) ?>"<?= $extraAttrs ?>>
                         <span class="material-icons-round"><?= e($card['icon']) ?></span>
                         <div>
                             <b><?= e($card['value']) ?></b>
+                            <?php if (!empty($card['data']['data-bom-card'])): ?>
+                                <div class="bom-trend-strip" id="bomTrendStrip">
+                                    <span class="bom-trend-item" id="bomTrend-planned"  title="vs Planned">  <span class="bom-trend-arrow"></span><span class="bom-trend-label">Pln</span></span>
+                                    <span class="bom-trend-item" id="bomTrend-production" title="vs Production"><span class="bom-trend-arrow"></span><span class="bom-trend-label">Prd</span></span>
+                                    <span class="bom-trend-item" id="bomTrend-po"        title="vs PO Qty">   <span class="bom-trend-arrow"></span><span class="bom-trend-label">PO</span></span>
+                                    <span class="bom-trend-item" id="bomTrend-grn"       title="vs GRN Qty">  <span class="bom-trend-arrow"></span><span class="bom-trend-label">GRN</span></span>
+                                    <span class="bom-trend-item" id="bomTrend-issue"     title="vs Issue Qty"><span class="bom-trend-arrow"></span><span class="bom-trend-label">Iss</span></span>
+                                </div>
+                            <?php endif; ?>
                             <small><?= e($card['label']) ?></small>
                         </div>
                     </article>
@@ -255,6 +288,11 @@ if (!$isFabric && $hasData) {
                             </button>
                         <?php endif; ?>
 
+                        <button type="button" class="rpt-tb-btn is-active" id="rptToggleStickyScroll" title="Keep table header fixed and scroll body only">
+                            <i class="fas fa-arrows-up-down"></i>
+                            <span id="rptStickyScrollLabel">Scroll Body Only</span>
+                        </button>
+
                         <button type="button" class="rpt-tb-btn is-active" id="rptToggleColFilters" title="Toggle column filter inputs">
                             <i class="fas fa-filter"></i>
                             <span>Column Filters</span>
@@ -269,7 +307,7 @@ if (!$isFabric && $hasData) {
                 </div>
             <?php endif; ?>
 
-            <div class="rpt-table-wrap">
+            <div class="rpt-table-wrap is-scroll-body" id="rptTableWrap">
                 <table class="rpt-table" id="rptDataTable" <?= !$isFabric ? 'data-has-category="1"' : '' ?>>
                     <thead>
                         <tr class="rpt-header-row">
@@ -431,8 +469,17 @@ if (!$isFabric && $hasData) {
                             <tr><td colspan="<?= $isFabric ? '12' : '13' ?>" class="rpt-table-empty"><?= e($emptyHint) ?></td></tr>
                         <?php else: ?>
                             <?php foreach ($records as $i => $row): ?>
-                                <?php $rowCat = !$isFabric ? (string) ($row['category'] ?? '') : ''; ?>
-                                <tr data-orig-sno="<?= (int) $i + 1 ?>" <?= $rowCat !== '' ? 'data-category="' . e($rowCat) . '"' : '' ?>>
+                                <?php
+                                    $rowCat   = !$isFabric ? (string) ($row['category'] ?? '') : '';
+                                    $rBom     = (float) str_replace(',', '', $row['bom_qty']        ?? 0);
+                                    $rPlan    = (float) str_replace(',', '', $row['planned_qty']     ?? 0);
+                                    $rProd    = (float) str_replace(',', '', $row['production_qty']  ?? 0);
+                                    $rPo      = (float) str_replace(',', '', $row['po_qty']          ?? 0);
+                                    $rGrn     = (float) str_replace(',', '', $row['grn_qty']         ?? 0);
+                                    $rIss     = (float) str_replace(',', '', $row['issue_qty']       ?? 0);
+                                ?>
+                                <tr data-orig-sno="<?= (int) $i + 1 ?>" <?= $rowCat !== '' ? 'data-category="' . e($rowCat) . '"' : '' ?>
+                                    data-r-bom="<?= $rBom ?>" data-r-plan="<?= $rPlan ?>" data-r-prod="<?= $rProd ?>" data-r-po="<?= $rPo ?>" data-r-grn="<?= $rGrn ?>" data-r-iss="<?= $rIss ?>">
                                     <td class="num sno"><?= (int) $i + 1 ?></td>
                                     <?php if (!$isFabric): ?>
                                     <td class="rpt-cat-cell">
@@ -463,8 +510,17 @@ if (!$isFabric && $hasData) {
                                     <td>
                                         <?= e(str_replace(',', '', $model->dash($row['po_item'] ?? ''))) ?>
                                     </td>
-                                    <td class="num">
-                                        <?= e(str_replace(',', '', $model->dash($row['bom_qty'] ?? ''))) ?>
+                                    <td class="num bom-qty-cell">
+                                        <span class="bom-val"><?= e(str_replace(',', '', $model->dash($row['bom_qty'] ?? ''))) ?></span>
+                                        <?php if ($rBom > 0): ?>
+                                        <span class="bom-row-trend" title="BOM vs Planned / Production / PO / GRN / Issue">
+                                            <span class="brt-dot <?= $rPlan  >= $rBom ? 'up' : 'dn' ?>" title="Planned:  <?= number_format($rPlan,  0) ?>">  </span>
+                                            <span class="brt-dot <?= $rProd  >= $rBom ? 'up' : 'dn' ?>" title="Production: <?= number_format($rProd, 0) ?>">  </span>
+                                            <span class="brt-dot <?= $rPo    >= $rBom ? 'up' : 'dn' ?>" title="PO Qty: <?= number_format($rPo,   0) ?>">  </span>
+                                            <span class="brt-dot <?= $rGrn   >= $rBom ? 'up' : 'dn' ?>" title="GRN Qty: <?= number_format($rGrn,  0) ?>">  </span>
+                                            <span class="brt-dot <?= $rIss   >= $rBom ? 'up' : 'dn' ?>" title="Issue Qty: <?= number_format($rIss, 0) ?>">  </span>
+                                        </span>
+                                        <?php endif; ?>
                                     </td>
                                     <td class="num">
                                         <?= e(str_replace(',', '', $model->dash($row['planned_qty'] ?? ''))) ?>
