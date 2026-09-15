@@ -2,35 +2,71 @@
 /*
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 03/09/2026
- * DESCRIPTION : Reports index view - Utilization card only with Fabric/Trims modal
+ * DESCRIPTION : Reports index view - Compact 3-card non-scrolling layout
  */ 
 $dashboardUrl = sap_reports_evol_url('portal_dashboard.php');
 ?>
-<a class="back" href="<?= e($dashboardUrl) ?>">
-    <i class="fas fa-arrow-left"></i>
-    Dashboard
-</a>
-<h1>SAP Reports</h1>
-<p class="lede">Select a report module to view live SAP utilization and order analytics.</p>
+<div class="rpt-index-header">
+    <a class="back" href="<?= e($dashboardUrl) ?>">
+        <i class="fas fa-arrow-left"></i>
+        Dashboard
+    </a>
+    <h1 class="index-title">SAP Reports</h1>
+    <p class="lede">Select a report module to view live SAP utilization and order analytics.</p>
+</div>
 
-<!-- Utilization Report Card (Only Card) -->
-<div class="util-only-wrap">
-    <div class="tile tile-hero" id="openUtilModalBtn" role="button" tabindex="0" aria-haspopup="dialog">
-        <div class="tile-icon tile-hero-icon" style="background: #ccfbf1; color: #0f766e;">
-            <i class="fas fa-layer-group"></i>
-        </div>
-        <div class="tile-body">
-            <span class="tile-badge">MATERIAL ANALYTICS</span>
-            <h2>Utilization Report</h2>
-            <p>Pull BOM, production, PO, GRN, and issue quantities from SAP for Fabric &amp; Trims.</p>
-        </div>
-        <div class="tile-action">
-            <span>Select Material</span>
-            <div class="tile-arrow">
-                <i class="fas fa-arrow-right"></i>
+<!-- Compact 3-Column Non-Scrolling Card Row -->
+<div class="rpt-cards-row">
+    <!-- Card 1: Utilization Report (All Materials - Modal) -->
+    <div class="rpt-card card-all" id="openUtilModalBtn" role="button" tabindex="0" aria-haspopup="dialog">
+        <div class="card-accent-line accent-teal"></div>
+        <div class="card-top">
+            <div class="card-icon icon-teal">
+                <i class="fas fa-layer-group"></i>
             </div>
+            <span class="card-badge badge-teal">ALL MATERIALS</span>
+        </div>
+        <h3>Utilization Report</h3>
+        <p>Combined SAP material analytics for BOM, PO, GRN &amp; issue quantities across Fabric &amp; Trims.</p>
+        <div class="card-action action-teal">
+            <span>Select Material</span>
+            <i class="fas fa-arrow-right"></i>
         </div>
     </div>
+
+    <!-- Card 2: Fabric Utilization Report (Fabric Unit Only) -->
+    <a class="rpt-card card-fabric" href="<?= e(url('fabric') . '?mode=unit') ?>">
+        <div class="card-accent-line accent-sky"></div>
+        <div class="card-top">
+            <div class="card-icon icon-sky">
+                <i class="fas fa-scroll"></i>
+            </div>
+            <span class="card-badge badge-sky">FABRIC UNIT</span>
+        </div>
+        <h3>Fabric Utilization</h3>
+        <p>Dedicated SAP fabric report by sales order with live BOM, PO, GRN &amp; issue data for Fabric team.</p>
+        <div class="card-action action-sky">
+            <span>Open Fabric Unit</span>
+            <i class="fas fa-arrow-right"></i>
+        </div>
+    </a>
+
+    <!-- Card 3: Trims Utilization Report (Trims Unit Only) -->
+    <a class="rpt-card card-trims" href="<?= e(url('trims') . '?mode=unit') ?>">
+        <div class="card-accent-line accent-amber"></div>
+        <div class="card-top">
+            <div class="card-icon icon-amber">
+                <i class="fas fa-tags"></i>
+            </div>
+            <span class="card-badge badge-amber">TRIMS UNIT</span>
+        </div>
+        <h3>Trims Utilization</h3>
+        <p>Dedicated SAP trims report with categorical breakdown (Buttons, Zippers, Thread, Labels &amp; Consumables).</p>
+        <div class="card-action action-amber">
+            <span>Open Trims Unit</span>
+            <i class="fas fa-arrow-right"></i>
+        </div>
+    </a>
 </div>
 
 <!-- Fabric / Trims Modal -->
@@ -49,7 +85,7 @@ $dashboardUrl = sap_reports_evol_url('portal_dashboard.php');
         <div class="modal-body">
             <div class="modal-grid">
                 <!-- Fabric Option -->
-                <a class="modal-tile is-fabric" href="<?= e(url('fabric')) ?>">
+                <a class="modal-tile is-fabric" href="<?= e(url('fabric') . '?mode=all') ?>">
                     <div class="modal-tile-icon">
                         <i class="fas fa-scroll"></i>
                     </div>
@@ -65,7 +101,7 @@ $dashboardUrl = sap_reports_evol_url('portal_dashboard.php');
                 </a>
 
                 <!-- Trims Option -->
-                <a class="modal-tile is-trims" href="<?= e(url('trims')) ?>">
+                <a class="modal-tile is-trims" href="<?= e(url('trims') . '?mode=all') ?>">
                     <div class="modal-tile-icon">
                         <i class="fas fa-tags"></i>
                     </div>

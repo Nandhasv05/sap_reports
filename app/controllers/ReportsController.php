@@ -115,7 +115,31 @@ class ReportsController extends Controller
             foreach ($records as $row) {
                 fputcsv($out, [$row['division'] ?? '', $row['lines'] ?? 0, $row['qty'] ?? 0, $row['net_amount'] ?? 0]);
             }
-        } elseif ($report === 'fabric' || $report === 'trims') {
+        } elseif ($report === 'trims') {
+            fputcsv($out, [
+                'S.No', 'Category', 'Sales Order', 'Material', 'Purchase Order', 'PO Item',
+                'SO Qty', 'BOM Qty', 'Planned Qty', 'Production Qty',
+                'PO Qty', 'GRN Qty', 'Issue Qty', 'GRN Sales Orders',
+            ]);
+            foreach ($records as $i => $row) {
+                fputcsv($out, [
+                    $i + 1,
+                    $row['category'] ?? '',
+                    $row['sales_order'] ?? '',
+                    $row['material'] ?? '',
+                    $row['purchase_order'] ?? '',
+                    $row['po_item'] ?? '',
+                    $row['so_qty'] ?? 0,
+                    $row['bom_qty'] ?? 0,
+                    $row['planned_qty'] ?? 0,
+                    $row['production_qty'] ?? 0,
+                    $row['po_qty'] ?? 0,
+                    $row['grn_qty'] ?? 0,
+                    $row['issue_qty'] ?? 0,
+                    $row['grn_sales_orders'] ?? '',
+                ]);
+            }
+        } elseif ($report === 'fabric') {
             fputcsv($out, [
                 'S.No', 'Sales Order', 'Material', 'Purchase Order', 'PO Item',
                 'SO Qty', 'BOM Qty', 'Planned Qty', 'Production Qty',

@@ -2,7 +2,7 @@
 /*
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 03/09/2026
- * DESCRIPTION : SAP fabric / trims utilization from ZBUSINESS_API_SRV
+ * DESCRIPTION : SAP FABRIC / trims utilization from ZBUSINESS_API_SRV
  */
 require_once base_path('app/core/SapODataClient.php');
 
@@ -118,7 +118,7 @@ class SapUtilizationService
         $rows = [];
         foreach ($result['rows'] as $row) {
             if (is_array($row)) {
-                $rows[] = $this->mapRow($row);
+                $rows[] = $this->mapRow($row, $kind);
             }
         }
 
@@ -126,14 +126,56 @@ class SapUtilizationService
     }
 
     /*
+     * Categorize trim material
+     */
+    public function categorizeTrim(string $material, string $desc = ''): string
+    {
+        $mat = strtoupper(trim($material));
+        $d = strtoupper(trim($desc));
+
+        // 1. Button
+        if (str_starts_with($mat, '60') || str_contains($mat, 'BTN') || str_contains($mat, 'BUTTON') || str_contains($mat, 'LSB') || str_contains($d, 'BUTTON') || str_contains($d, 'BTN')) {
+            return 'Button';
+        }
+        // 2. Zipper
+        if (str_starts_with($mat, '50') || str_contains($mat, 'ZIP') || str_contains($mat, 'FASTENER') || str_contains($mat, 'SLIDER') || str_contains($d, 'ZIPPER') || str_contains($d, 'ZIP')) {
+            return 'Zipper';
+        }
+        // 3. Thread
+        if (str_starts_with($mat, '70') || str_contains($mat, 'THR') || str_contains($mat, 'THREAD') || str_contains($d, 'THREAD')) {
+            return 'Thread';
+        }
+        // 4. Labels
+        if (str_starts_with($mat, '30') || str_contains($mat, 'LBL') || str_contains($mat, 'LABEL') || str_contains($d, 'LABEL') || str_contains($mat, 'MAL') || str_contains($mat, 'CNL') || str_contains($mat, 'SIZ') || str_contains($mat, 'WCA') || str_contains($mat, 'WRL') || str_contains($mat, 'SML')) {
+            return 'Labels';
+        }
+        // 5. Packing
+        if (str_starts_with($mat, '40') || str_contains($mat, 'PLB') || str_contains($mat, 'MTG') || str_contains($mat, 'CBD') || str_contains($mat, 'BKS') || str_contains($mat, 'BFY') || str_contains($mat, 'CRP') || str_contains($mat, 'HNT') || str_contains($mat, 'SLG') || str_contains($mat, 'TIP') || str_contains($d, 'PACKING') || str_contains($d, 'POLY') || str_contains($d, 'CARTON') || str_contains($d, 'HANGTAG')) {
+            return 'Packing';
+        }
+        // 6. Lining / Interlining
+        if (str_starts_with($mat, '80') || str_contains($mat, 'FUS') || str_contains($mat, 'NFU') || str_contains($d, 'FUSIBLE') || str_contains($d, 'LINING') || str_contains($d, 'INTERLINING')) {
+            return 'Lining';
+        }
+        // 7. Consumables / Tape
+        if (str_starts_with($mat, '90') || str_contains($mat, 'GTP') || str_contains($mat, 'TAPE') || str_contains($d, 'TAPE') || str_contains($d, 'CONSUM')) {
+            return 'Consumables';
+        }
+
+        return 'Other';
+    }
+
+    /*
      * Map row method
      */
-    private function mapRow(array $row): array
+    private function mapRow(array $row, string $kind = ''): array
     {
         $soList = $this->parseSoList((string) ($row['GRN_SalesOrders'] ?? ''));
+        $material = (string) ($row['Material'] ?? '');
         return [
             'sales_order'      => $this->displaySo((string) ($row['SalesOrder'] ?? '')),
-            'material'         => (string) ($row['Material'] ?? ''),
+            'category'         => $kind === 'trims' ? $this->categorizeTrim($material) : '',
+            'material'         => $material,
             'purchase_order'   => (string) ($row['PurchaseOrder'] ?? ''),
             'po_item'          => $this->displaySo((string) ($row['PO_Item'] ?? '')),
             'so_qty'           => (float) ($row['SO_QTY'] ?? 0),
@@ -195,14 +237,15 @@ class SapUtilizationService
     private function emptySummary(): array
     {
         return [
-            'lines'           => 0,
-            'so_qty'          => 0,
-            'bom_qty'         => 0,
-            'planned_qty'     => 0,
-            'production_qty'  => 0,
-            'po_qty'          => 0,
-            'grn_qty'         => 0,
-            'issue_qty'       => 0,
+            'lines'            => 0,
+            'so_qty'           => 0,
+            'bom_qty'          => 0,
+            'planned_qty'      => 0,
+            'production_qty'   => 0,
+            'po_qty'           => 0,
+            'grn_qty'          => 0,
+            'issue_qty'        => 0,
+            'category_counts'  => [],
         ];
     }
 
@@ -213,6 +256,8 @@ class SapUtilizationService
             'totals'        => [0, 0, 0, 0, 0, 0],
             'mix_labels'    => [],
             'mix_values'    => [],
+            'cat_labels'    => [],
+            'cat_values'    => [],
         ];
     }
 
@@ -228,6 +273,10 @@ class SapUtilizationService
             $sum['po_qty'] += (float) ($row['po_qty'] ?? 0);
             $sum['grn_qty'] += (float) ($row['grn_qty'] ?? 0);
             $sum['issue_qty'] += (float) ($row['issue_qty'] ?? 0);
+            $cat = (string) ($row['category'] ?? '');
+            if ($cat !== '') {
+                $sum['category_counts'][$cat] = ($sum['category_counts'][$cat] ?? 0) + 1;
+            }
         }
         return $sum;
     }
@@ -238,6 +287,8 @@ class SapUtilizationService
     private function chartPayload(array $rows): array
     {
         $summary = $this->summarize($rows);
+
+        // By-material BOM breakdown (top 7 + Other)
         $byMaterial = [];
         foreach ($rows as $row) {
             $key = (string) ($row['material'] ?? '—');
@@ -265,6 +316,22 @@ class SapUtilizationService
             $mixValues[] = round($other, 3);
         }
 
+        // By-category BOM breakdown (trims only)
+        $byCategory = [];
+        foreach ($rows as $row) {
+            $cat = (string) ($row['category'] ?? '');
+            if ($cat === '') {
+                continue;
+            }
+            if (!isset($byCategory[$cat])) {
+                $byCategory[$cat] = 0.0;
+            }
+            $byCategory[$cat] += (float) ($row['bom_qty'] ?? 0);
+        }
+        arsort($byCategory);
+        $catLabels = array_keys($byCategory);
+        $catValues = array_values(array_map(static fn ($v) => round($v, 3), $byCategory));
+
         return [
             'totals_labels' => ['BOM', 'Planned', 'Production', 'PO', 'GRN', 'Issue'],
             'totals'        => [
@@ -277,6 +344,8 @@ class SapUtilizationService
             ],
             'mix_labels'    => $mixLabels,
             'mix_values'    => $mixValues,
+            'cat_labels'    => $catLabels,
+            'cat_values'    => $catValues,
         ];
     }
 }

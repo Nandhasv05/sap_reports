@@ -35,7 +35,7 @@ if ($base !== '' && $base !== '/sap_reports' && str_starts_with($routePath, $bas
 $routePath = preg_replace('#/index\.php(/|$)#', '/', $routePath) ?: '/';
 $routePath = preg_replace('#/+#', '/', $routePath) ?: '/';
 if ($routePath === '/' || $routePath === '') {
-    $r = strtolower(trim((string) ($_GET['r'] ?? '')));
+    $r = strtolower(trim((string) ($_GET['r'] ?? $_GET['report'] ?? '')));
     $routePath = $r !== '' ? '/' . $r : '/';
 }
 
