@@ -39,7 +39,7 @@ $cards = [
     ['label' => 'Issue Qty', 'note' => 'Issued', 'icon' => 'output', 'tone' => 'rose', 'value' => $model->dash($summary['issue_qty'] ?? null)],
 ];
 $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
-// Trim category filter pills (trims only)
+// Trim category filter pills
 $trimCatOrder = ['Button', 'Zipper', 'Thread', 'Labels', 'Packing', 'Lining', 'Consumables', 'Other'];
 $trimCatIcons = ['Button' => 'radio_button_checked', 'Zipper' => 'linear_scale', 'Thread' => 'straighten', 'Labels' => 'label', 'Packing' => 'inventory_2', 'Lining' => 'layers', 'Consumables' => 'build_circle', 'Other' => 'more_horiz'];
 $trimCatColors = ['Button' => 'cat-button', 'Zipper' => 'cat-zipper', 'Thread' => 'cat-thread', 'Labels' => 'cat-labels', 'Packing' => 'cat-packing', 'Lining' => 'cat-lining', 'Consumables' => 'cat-consumables', 'Other' => 'cat-other'];
