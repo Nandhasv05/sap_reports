@@ -67,10 +67,12 @@ class SapUtilizationService
         if ($search !== '') {
             $rows = array_values(array_filter($rows, static function (array $row) use ($search): bool {
                 $hay = strtolower(implode(' ', [
+                    $row['sales_order'] ?? '',
                     $row['material'] ?? '',
                     $row['purchase_order'] ?? '',
                     $row['po_item'] ?? '',
                     $row['grn_sales_orders'] ?? '',
+                    implode(' ', $row['grn_so_list'] ?? []),
                 ]));
                 return str_contains($hay, $search);
             }));
@@ -98,15 +100,6 @@ class SapUtilizationService
      */
     private function loadRows(string $kind, string $so): array
     {
-        $cacheFile = base_path('storage/cache/util_' . $kind . '_' . $so . '.json');
-        $ttl = max(0, (int) ($this->cfg['cache_ttl'] ?? 300));
-        if ($ttl > 0 && is_file($cacheFile) && filemtime($cacheFile) > time() - $ttl) {
-            $cached = json_decode((string) file_get_contents($cacheFile), true);
-            if (is_array($cached) && isset($cached['rows']) && is_array($cached['rows'])) {
-                return ['rows' => $cached['rows'], 'error' => null];
-            }
-        }
-
         $service = $kind === 'trims'
             ? (string) ($this->cfg['trims_service'] ?? '')
             : (string) ($this->cfg['fabric_service'] ?? '');
@@ -129,12 +122,6 @@ class SapUtilizationService
             }
         }
 
-        $dir = dirname($cacheFile);
-        if (!is_dir($dir)) {
-            @mkdir($dir, 0777, true);
-        }
-        @file_put_contents($cacheFile, json_encode(['rows' => $rows], JSON_UNESCAPED_UNICODE));
-
         return ['rows' => $rows, 'error' => null];
     }
 
@@ -143,6 +130,7 @@ class SapUtilizationService
      */
     private function mapRow(array $row): array
     {
+        $soList = $this->parseSoList((string) ($row['GRN_SalesOrders'] ?? ''));
         return [
             'sales_order'      => $this->displaySo((string) ($row['SalesOrder'] ?? '')),
             'material'         => (string) ($row['Material'] ?? ''),
@@ -155,16 +143,17 @@ class SapUtilizationService
             'po_qty'           => (float) ($row['PO_QTY'] ?? 0),
             'grn_qty'          => (float) ($row['GRN_QTY'] ?? 0),
             'issue_qty'        => (float) ($row['Issue_QTY'] ?? 0),
-            'grn_sales_orders' => $this->formatSoList((string) ($row['GRN_SalesOrders'] ?? '')),
+            'grn_sales_orders' => implode(', ', $soList),
+            'grn_so_list'      => $soList,
         ];
     }
 
     /*
      * Display sales order method
      */
-    private function displaySo(string $raw): string
+    public function displaySo(string $raw): string
     {
-        $raw = trim($raw);
+        $raw = str_replace(',', '', trim($raw));
         if ($raw === '') {
             return '';
         }
@@ -173,23 +162,31 @@ class SapUtilizationService
     }
 
     /*
-     * Format sales order list method
+     * Parse sales order list method
      */
-    private function formatSoList(string $raw): string
+    public function parseSoList(string $raw): array
     {
         $raw = trim($raw);
         if ($raw === '') {
-            return '';
+            return [];
         }
-        $parts = preg_split('/\s*,\s*/', $raw) ?: [];
+        $parts = preg_split('/[\s,]+/', $raw) ?: [];
         $out = [];
         foreach ($parts as $part) {
-            if ($part === '') {
-                continue;
+            $cleaned = $this->displaySo($part);
+            if ($cleaned !== '' && !in_array($cleaned, $out, true)) {
+                $out[] = $cleaned;
             }
-            $out[] = $this->displaySo($part);
         }
-        return implode(', ', $out);
+        return $out;
+    }
+
+    /*
+     * Format sales order list method
+     */
+    public function formatSoList(string $raw): string
+    {
+        return implode(', ', $this->parseSoList($raw));
     }
 
     /*

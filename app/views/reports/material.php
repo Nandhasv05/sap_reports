@@ -204,74 +204,62 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                             <th class="num sno is-sortable" data-col="0" data-type="num" title="Click to sort by S.No">
                                 <div class="th-content">
                                     <span>S.No</span>
-                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
                                 </div>
                             </th>
                             <th class="is-sortable" data-col="1" data-type="text" title="Click to sort by Sales Order">
                                 <div class="th-content">
                                     <span>Sales Order</span>
-                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
                                 </div>
                             </th>
                             <th class="is-sortable" data-col="2" data-type="text" title="Click to sort by Material">
                                 <div class="th-content">
                                     <span>Material</span>
-                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
                                 </div>
                             </th>
                             <th class="is-sortable" data-col="3" data-type="text" title="Click to sort by Purchase Order">
                                 <div class="th-content">
                                     <span>Purchase Order</span>
-                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
                                 </div>
                             </th>
                             <th class="is-sortable" data-col="4" data-type="num" title="Click to sort by PO Line">
                                 <div class="th-content">
                                     <span>PO Line</span>
-                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
                                 </div>
                             </th>
                             <!-- <th class="num">SO Qty</th> -->
                             <th class="num is-sortable" data-col="5" data-type="num" title="Click to sort by BOM Qty">
                                 <div class="th-content num">
                                     <span>BOM Qty</span>
-                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
                                 </div>
                             </th>
                             <th class="num is-sortable" data-col="6" data-type="num" title="Click to sort by Planned Qty">
                                 <div class="th-content num">
                                     <span>Planned</span>
-                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
                                 </div>
                             </th>
                             <th class="num is-sortable" data-col="7" data-type="num" title="Click to sort by Production Qty">
                                 <div class="th-content num">
                                     <span>Production</span>
-                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
                                 </div>
                             </th>
                             <th class="num is-sortable" data-col="8" data-type="num" title="Click to sort by PO Qty">
                                 <div class="th-content num">
                                     <span>PO Qty</span>
-                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
                                 </div>
                             </th>
                             <th class="num is-sortable" data-col="9" data-type="num" title="Click to sort by GRN Qty">
                                 <div class="th-content num">
                                     <span>GRN Qty</span>
-                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
                                 </div>
                             </th>
                             <th class="num is-sortable" data-col="10" data-type="num" title="Click to sort by Issue Qty">
                                 <div class="th-content num">
                                     <span>Issue Qty</span>
-                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
                                 </div>
                             </th>
                             <th class="is-sortable" data-col="11" data-type="text" title="Click to sort by Additional Sale Orders">
                                 <div class="th-content">
                                     <span>Additional Sale Orders</span>
-                                    <span class="sort-icon"><i class="fas fa-sort"></i></span>
                                 </div>
                             </th>
                         </tr>
@@ -359,7 +347,14 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                                 <tr data-orig-sno="<?= (int) $i + 1 ?>">
                                     <td class="num sno"><?= (int) $i + 1 ?></td>
                                     <td>
-                                        <?= e(str_replace(',', '', $model->dash($row['sales_order'] ?? ''))) ?>
+                                        <?php $soNum = str_replace(',', '', trim((string) ($row['sales_order'] ?? ''))); ?>
+                                        <?php if ($soNum !== '' && $soNum !== '-'): ?>
+                                            <a href="<?= e(url($report) . '?so=' . rawurlencode($soNum)) ?>" class="so-main-link" title="Direct API call for Sales Order <?= e($soNum) ?>">
+                                                <?= e($soNum) ?>
+                                            </a>
+                                        <?php else: ?>
+                                            -
+                                        <?php endif; ?>
                                     </td>
                                     <td class="rpt-mat"><?= e($model->dash($row['material'] ?? '')) ?></td>
                                     <td>
@@ -386,7 +381,29 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                                     <td class="num">
                                         <?= e(str_replace(',', '', $model->dash($row['issue_qty'] ?? ''))) ?>
                                     </td>
-                                    <td class="grn-sos"><?= e($model->dash($row['grn_sales_orders'] ?? '')) ?></td>
+                                    <td class="grn-sos">
+                                        <?php
+                                        $soList = $row['grn_so_list'] ?? [];
+                                        if ($soList === [] && !empty($row['grn_sales_orders'])) {
+                                            $soList = array_values(array_filter(array_map('trim', explode(',', str_replace(' ', '', (string) $row['grn_sales_orders'])))));
+                                        }
+                                        ?>
+                                        <?php if ($soList === []): ?>
+                                            <span class="grn-so-empty">-</span>
+                                        <?php else: ?>
+                                            <div class="grn-so-tags">
+                                                <?php foreach ($soList as $soItem): ?>
+                                                    <?php $soClean = str_replace(',', '', trim((string) $soItem)); ?>
+                                                    <?php if ($soClean === '') continue; ?>
+                                                    <a href="<?= e(url($report) . '?so=' . rawurlencode($soClean)) ?>"
+                                                       class="so-chip"
+                                                       title="Direct API call for Sales Order <?= e($soClean) ?>">
+                                                        <?= e($soClean) ?>
+                                                    </a>
+                                                <?php endforeach; ?>
+                                            </div>
+                                        <?php endif; ?>
+                                    </td>
                                 </tr>
                             <?php endforeach; ?>
                             <tr id="rptNoMatchRow" class="rpt-table-no-match" style="display: none;">

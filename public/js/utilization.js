@@ -45,6 +45,13 @@
         });
     });
 
+    document.addEventListener('click', function (e) {
+        const soTarget = e.target.closest('.so-chip, .so-main-link');
+        if (soTarget) {
+            showSpinner();
+        }
+    });
+
     let chartsDrawn = false;
     function drawCharts() {
         if (chartsDrawn || !dataNode || typeof Chart === 'undefined') {
@@ -232,19 +239,14 @@
         function updateSortUI() {
             sortableHeaders.forEach(th => {
                 const col = parseInt(th.getAttribute('data-col'), 10);
-                const icon = th.querySelector('.sort-icon');
                 th.classList.remove('is-sorted-asc', 'is-sorted-desc');
 
                 if (currentSort.col === col) {
                     if (currentSort.dir === 'asc') {
                         th.classList.add('is-sorted-asc');
-                        if (icon) icon.innerHTML = '<i class="fas fa-sort-up"></i>';
                     } else if (currentSort.dir === 'desc') {
                         th.classList.add('is-sorted-desc');
-                        if (icon) icon.innerHTML = '<i class="fas fa-sort-down"></i>';
                     }
-                } else {
-                    if (icon) icon.innerHTML = '<i class="fas fa-sort"></i>';
                 }
             });
         }
