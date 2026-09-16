@@ -1942,9 +1942,98 @@ body.rpt-loading { cursor: wait; }
 }
 .rpt-group-header-row.is-collapsed .rpt-group-chevron { transform: rotate(180deg); }
 
-/* ── BOM Qty Trend Indicators ─────────────────────────── */
+/* ── BOM Qty Trend Indicators (Cards & Table Row-by-Row) ── */
 
-/* Stat card: compact strip of 5 mini trend badges */
+.stat-value-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.stat-value-wrap b {
+    display: inline-block;
+    font-family: Outfit, sans-serif;
+    font-size: 18px;
+    line-height: 1.2;
+}
+
+/* Card Trend Icon - nearest number */
+.card-trend-ico {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    font-size: 10px;
+    flex-shrink: 0;
+    cursor: default;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.card-trend-ico:hover {
+    transform: scale(1.25);
+    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.18);
+}
+.card-trend-ico.is-up {
+    background: #dcfce7;
+    color: #15803d;
+    box-shadow: 0 0 0 1.5px #bbf7d0;
+}
+.card-trend-ico.is-down {
+    background: #fee2e2;
+    color: #dc2626;
+    box-shadow: 0 0 0 1.5px #fecaca;
+}
+.card-trend-ico.is-neutral {
+    background: #f1f5f9;
+    color: #94a3b8;
+    box-shadow: 0 0 0 1.5px #e2e8f0;
+}
+.card-trend-ico.is-bom {
+    background: #e0f2fe;
+    color: #0284c7;
+    box-shadow: 0 0 0 1.5px #bae6fd;
+}
+
+/* Individual Stat Card Trend Chips */
+.stat-trend-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 999px;
+    line-height: 1.2;
+    white-space: nowrap;
+    border: 1px solid transparent;
+    transition: all 0.15s ease;
+}
+.stat-trend-chip.is-up {
+    background: #dcfce7;
+    color: #15803d;
+    border-color: #bbf7d0;
+}
+.stat-trend-chip.is-down {
+    background: #fee2e2;
+    color: #dc2626;
+    border-color: #fecaca;
+}
+.stat-trend-chip.is-zero {
+    background: #f1f5f9;
+    color: #94a3b8;
+    border-color: #e2e8f0;
+}
+.stat-trend-chip.is-equal {
+    background: #fef9c3;
+    color: #a16207;
+    border-color: #fef08a;
+}
+.stat-trend-chip i {
+    font-size: 9px;
+}
+
+/* BOM Stat Card: 5-Stage Mini Trend Strip */
 .bom-trend-strip {
     display: flex;
     gap: 4px;
@@ -1954,80 +2043,346 @@ body.rpt-loading { cursor: wait; }
 .bom-trend-item {
     display: inline-flex;
     align-items: center;
-    gap: 2px;
-    padding: 2px 5px;
+    gap: 3px;
+    padding: 2px 6px;
     border-radius: 999px;
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.02em;
     white-space: nowrap;
     cursor: default;
-    transition: opacity 0.15s;
+    transition: all 0.15s ease;
+    border: 1px solid transparent;
     background: #f1f5f9;
     color: #64748b;
 }
 .bom-trend-item.is-up {
     background: #dcfce7;
     color: #15803d;
+    border-color: #bbf7d0;
 }
 .bom-trend-item.is-down {
     background: #fee2e2;
     color: #dc2626;
+    border-color: #fecaca;
+}
+.bom-trend-item.is-zero {
+    background: #f1f5f9;
+    color: #94a3b8;
+    border-color: #e2e8f0;
 }
 .bom-trend-item.is-equal {
     background: #fef9c3;
     color: #a16207;
+    border-color: #fef08a;
 }
-.bom-trend-arrow {
-    font-size: 11px;
+.bom-trend-ico {
+    font-size: 9px;
     line-height: 1;
 }
-.bom-trend-item.is-up   .bom-trend-arrow::before { content: '↑'; }
-.bom-trend-item.is-down .bom-trend-arrow::before { content: '↓'; }
-.bom-trend-item.is-equal .bom-trend-arrow::before { content: '='; }
 .bom-trend-label {
     font-size: 9.5px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+}
+.bom-trend-pct {
+    font-size: 9px;
+    font-weight: 600;
+    opacity: 0.85;
 }
 
-/* Table rows: small inline dot strip next to the BOM value */
+/* Table rows: Qty & Grow Up/Down icon */
+.qty-cell-content {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    width: 100%;
+}
+.row-trend-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    font-size: 9.5px;
+    flex-shrink: 0;
+    cursor: default;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.row-trend-icon:hover {
+    transform: scale(1.25);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+}
+.row-trend-icon.is-up {
+    background: #dcfce7;
+    color: #15803d;
+    box-shadow: 0 0 0 1px #bbf7d0;
+}
+.row-trend-icon.is-down {
+    background: #fee2e2;
+    color: #dc2626;
+    box-shadow: 0 0 0 1px #fecaca;
+}
+.row-trend-icon.is-neutral {
+    background: #f1f5f9;
+    color: #94a3b8;
+    box-shadow: 0 0 0 1px #e2e8f0;
+}
+.row-trend-icon.is-zero {
+    background: #f1f5f9;
+    color: #94a3b8;
+    box-shadow: 0 0 0 1px #e2e8f0;
+}
+.row-trend-icon.is-equal {
+    background: #fef9c3;
+    color: #a16207;
+    box-shadow: 0 0 0 1px #fef08a;
+}
+
+/* Table rows: BOM cell multi-trend badges */
 .bom-qty-cell {
     position: relative;
+    white-space: nowrap;
 }
 .bom-row-trend {
     display: inline-flex;
     align-items: center;
     gap: 2px;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+.brt-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 1px 4px;
+    border-radius: 4px;
+    font-size: 8.5px;
+    font-weight: 700;
+    line-height: 1.2;
+    cursor: default;
+    transition: transform 0.15s ease;
+}
+.brt-badge:hover {
+    transform: scale(1.18);
+    z-index: 1;
+}
+.brt-badge i {
+    font-size: 7.5px;
+}
+.brt-badge.is-up {
+    background: #dcfce7;
+    color: #15803d;
+}
+.brt-badge.is-down {
+    background: #fee2e2;
+    color: #dc2626;
+}
+.brt-badge.is-zero {
+    background: #f1f5f9;
+    color: #94a3b8;
+}
+
+/* Table footer: Totals Trend icons */
+.foot-qty-cell {
+    white-space: nowrap;
+}
+.foot-trend {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    font-size: 8.5px;
     margin-left: 5px;
     vertical-align: middle;
 }
-.brt-dot {
-    display: inline-block;
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    cursor: default;
-    position: relative;
-    flex-shrink: 0;
-    transition: transform 0.15s;
+.foot-trend.is-up {
+    background: #dcfce7;
+    color: #15803d;
 }
-.brt-dot:hover { transform: scale(1.5); z-index: 2; }
-.brt-dot.up {
-    background: #22c55e;
-    box-shadow: 0 0 0 1.5px #dcfce7;
+.foot-trend.is-down {
+    background: #fee2e2;
+    color: #dc2626;
 }
-.brt-dot.dn {
-    background: #ef4444;
-    box-shadow: 0 0 0 1.5px #fee2e2;
+.foot-trend.is-zero {
+    background: #f1f5f9;
+    color: #94a3b8;
 }
 
-/* Tooltip on hover (CSS-only via title attribute shows natively; style the dot group) */
-.bom-row-trend:hover .brt-dot { opacity: 0.85; }
+/* Toolbar Trend Legend */
+.rpt-tb-legend {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    padding: 4px 9px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748b;
+}
+.tb-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+}
+.tb-legend-item.is-up {
+    background: #dcfce7;
+    color: #15803d;
+}
+.tb-legend-item.is-down {
+    background: #fee2e2;
+    color: #dc2626;
+}
 
-/* Responsive: hide trend strip on narrow screens */
+/* Responsive: hide multi-badge on very narrow screens */
 @media (max-width: 1100px) {
     .bom-trend-strip { display: none; }
     .bom-row-trend   { display: none; }
+    .rpt-tb-legend   { display: none; }
+}
+
+/* ── Mobile Responsive ─────────────────────────────────── */
+
+/* Tablet – up to 900px */
+@media (max-width: 900px) {
+    .rpt-stats {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+    }
+    .rpt-bar {
+        padding: 8px 12px;
+        gap: 8px;
+    }
+    .rpt-charts {
+        grid-template-columns: 1fr !important;
+    }
+    .rpt-tb-actions {
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+    .rpt-table-toolbar {
+        flex-direction: column;
+        gap: 8px;
+        align-items: stretch;
+    }
+    .rpt-tb-search {
+        width: 100%;
+    }
+}
+
+/* Mobile – up to 600px */
+@media (max-width: 600px) {
+    .rpt-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        padding: 0 4px;
+    }
+    .rpt-stat {
+        padding: 10px;
+        gap: 8px;
+        border-radius: 12px;
+    }
+    .rpt-stat b {
+        font-size: 15px;
+    }
+    .rpt-stat small {
+        font-size: 10px;
+    }
+    .rpt-stat .material-icons-round {
+        width: 28px;
+        height: 28px;
+        font-size: 15px;
+    }
+    .stat-value-wrap {
+        gap: 4px;
+    }
+    .rpt-main {
+        padding: 10px 8px;
+        gap: 12px;
+    }
+    .rpt-bar {
+        padding: 8px 10px;
+        gap: 6px;
+    }
+    .rpt-bar-brand {
+        gap: 6px;
+    }
+    .rpt-bar-brand img {
+        height: 24px;
+    }
+    .rpt-bar-title {
+        font-size: 13px;
+    }
+    .rpt-bar-so {
+        font-size: 11px;
+        padding: 2px 8px;
+    }
+    .rpt-table-toolbar {
+        padding: 8px;
+        gap: 8px;
+    }
+    .rpt-tb-btn span:not(.material-icons-round):not(.rpt-tb-badge) {
+        display: none;
+    }
+    .rpt-tb-btn {
+        padding: 6px 10px;
+        min-width: unset;
+    }
+    .rpt-tb-count {
+        font-size: 11px;
+    }
+    .rpt-tb-actions {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        gap: 4px;
+        -webkit-overflow-scrolling: touch;
+    }
+    .row-trend-icon {
+        width: 14px;
+        height: 14px;
+        font-size: 8px;
+    }
+    .qty-cell-content {
+        gap: 3px;
+    }
+    .card-trend-ico {
+        width: 16px;
+        height: 16px;
+        font-size: 8px;
+    }
+    .rpt-chart-card {
+        border-radius: 12px;
+    }
+}
+
+/* Very small – up to 400px */
+@media (max-width: 400px) {
+    .rpt-stats {
+        grid-template-columns: 1fr 1fr;
+    }
+    .rpt-stat b {
+        font-size: 13px;
+    }
+    .rpt-stat small {
+        font-size: 9px;
+    }
+    .rpt-stat .material-icons-round {
+        width: 24px;
+        height: 24px;
+        font-size: 13px;
+        border-radius: 8px;
+    }
+    .rpt-bar-brand img {
+        display: none;
+    }
 }

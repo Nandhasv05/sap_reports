@@ -14,7 +14,7 @@ $summary = is_array($summary ?? null) ? $summary : [];
 $chart = is_array($chart ?? null) ? $chart : [];
 $hasData = $records !== [] || (int) $total > 0;
 $isLookup = $salesOrder === '' && !$hasData;
-$kindLabel = $isFabric ? 'Fabric Utilization Report' : 'Trims Utilization Report';
+$kindLabel = $isFabric ? 'Fabric' : 'Trims';
 $catalogHome = url('/');
 $qs = static function (array $extra = []) use ($search, $salesOrder, $page, $perPage, $mode): string {
     return http_build_query(array_merge([
@@ -35,24 +35,46 @@ $productionRaw  = (float) ($summary['production_qty']  ?? 0);
 $poQtyRaw       = (float) ($summary['po_qty']          ?? 0);
 $grnQtyRaw      = (float) ($summary['grn_qty']         ?? 0);
 $issueQtyRaw    = (float) ($summary['issue_qty']       ?? 0);
+
+$calcTrend = static function (float $val, float $bom): array {
+    if ($bom <= 0) {
+        if ($val > 0) {
+            return ['status' => 'up',      'icon' => 'fa-arrow-trend-up',   'symbol' => '↑', 'pct' => 100.0, 'label' => 'Exceeds (BOM 0)'];
+        }
+        // Both zero — neutral, show minus/dash icon
+        return ['status' => 'neutral', 'icon' => 'fa-minus', 'symbol' => '—', 'pct' => 0.0, 'label' => 'No data vs BOM'];
+    }
+    $pct = round(($val / $bom) * 100, 1);
+    if ($val <= 0) {
+        // val is zero but BOM has a value — neutral/empty
+        return ['status' => 'neutral', 'icon' => 'fa-minus', 'symbol' => '—', 'pct' => 0.0, 'label' => '0% vs BOM (No data)'];
+    }
+    if ($val >= $bom) {
+        return ['status' => 'up',   'icon' => 'fa-arrow-trend-up',   'symbol' => '↑', 'pct' => $pct, 'label' => $pct . '% vs BOM (Meets/Exceeds BOM)'];
+    }
+    return ['status' => 'down', 'icon' => 'fa-arrow-trend-down', 'symbol' => '↓', 'pct' => $pct, 'label' => $pct . '% vs BOM (Below BOM)'];
+};
+
+$plnTrend = $calcTrend($plannedQtyRaw, $bomQtyRaw);
+$prdTrend = $calcTrend($productionRaw, $bomQtyRaw);
+$poTrend  = $calcTrend($poQtyRaw, $bomQtyRaw);
+$grnTrend = $calcTrend($grnQtyRaw, $bomQtyRaw);
+$issTrend = $calcTrend($issueQtyRaw, $bomQtyRaw);
+
 $cards = [
     ['label' => 'Materials',  'note' => 'Lines',       'icon' => 'layers',                 'tone' => 'teal',   'value' => $model->dash($summary['lines'] ?? $total)],
     ['label' => 'BOM Qty',    'note' => 'Required',    'icon' => 'schema',                 'tone' => 'sky',    'value' => $model->dash($summary['bom_qty'] ?? null),
-        'data' => [
-            'data-bom-card'      => '1',
-            'data-bom'           => $bomQtyRaw,
-            'data-planned'       => $plannedQtyRaw,
-            'data-production'    => $productionRaw,
-            'data-po'            => $poQtyRaw,
-            'data-grn'           => $grnQtyRaw,
-            'data-issue'         => $issueQtyRaw,
-        ],
-    ],
-    ['label' => 'Planned',    'note' => 'Planned qty', 'icon' => 'event_note',             'tone' => 'indigo', 'value' => $model->dash($summary['planned_qty'] ?? null)],
-    ['label' => 'Production', 'note' => 'Produced',    'icon' => 'precision_manufacturing','tone' => 'mint',   'value' => $model->dash($summary['production_qty'] ?? null)],
-    ['label' => 'PO Qty',     'note' => 'Ordered',     'icon' => 'shopping_bag',           'tone' => 'amber',  'value' => $model->dash($summary['po_qty'] ?? null)],
-    ['label' => 'GRN Qty',    'note' => 'Received',    'icon' => 'inventory_2',            'tone' => 'violet', 'value' => $model->dash($summary['grn_qty'] ?? null)],
-    ['label' => 'Issue Qty',  'note' => 'Issued',      'icon' => 'output',                 'tone' => 'rose',   'value' => $model->dash($summary['issue_qty'] ?? null)],
+        'trend' => ['status' => 'bom', 'icon' => 'fa-bullseye', 'label' => 'Baseline target — all quantities compared against BOM'], 'trend_id' => 'statTrendIco-bom'],
+    ['label' => 'Planned',    'note' => 'Planned qty', 'icon' => 'event_note',             'tone' => 'indigo', 'value' => $model->dash($summary['planned_qty'] ?? null),
+        'trend' => $plnTrend, 'trend_id' => 'statTrendIco-planned'],
+    ['label' => 'Production', 'note' => 'Produced',    'icon' => 'precision_manufacturing','tone' => 'mint',   'value' => $model->dash($summary['production_qty'] ?? null),
+        'trend' => $prdTrend, 'trend_id' => 'statTrendIco-production'],
+    ['label' => 'PO Qty',     'note' => 'Ordered',     'icon' => 'shopping_bag',           'tone' => 'amber',  'value' => $model->dash($summary['po_qty'] ?? null),
+        'trend' => $poTrend,  'trend_id' => 'statTrendIco-po'],
+    ['label' => 'GRN Qty',    'note' => 'Received',    'icon' => 'inventory_2',            'tone' => 'violet', 'value' => $model->dash($summary['grn_qty'] ?? null),
+        'trend' => $grnTrend, 'trend_id' => 'statTrendIco-grn'],
+    ['label' => 'Issue Qty',  'note' => 'Issued',      'icon' => 'output',                 'tone' => 'rose',   'value' => $model->dash($summary['issue_qty'] ?? null),
+        'trend' => $issTrend, 'trend_id' => 'statTrendIco-issue'],
 ];
 $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
 // Trim category filter pills
@@ -100,13 +122,6 @@ if (!$isFabric && $hasData) {
             </a>
             <div class="rpt-name">
                 <?= e($item['title']) ?>
-                <span class="unit-scope-pill <?= $isFabric ? 'fabric-pill' : 'trims-pill' ?>" style="margin-left: 8px; vertical-align: middle;">
-                    <i class="fas <?= $isFabric ? 'fa-scroll' : 'fa-tags' ?>" style="font-size:11px; margin-right:4px;"></i>
-                    <?= $isFabric ? 'Fabric Unit' : 'Trims Unit' ?>
-                </span>
-                <?php if (!$isLookup): ?>
-                    <span class="rpt-count"><?= e($model->num($total)) ?></span>
-                <?php endif; ?>
             </div>
         </div>
 
@@ -117,10 +132,10 @@ if (!$isFabric && $hasData) {
                     <a class="rpt-tab <?= !$isFabric ? 'active' : '' ?>" href="<?= e(url('trims') . '?mode=all' . ($salesOrder !== '' ? '&so=' . rawurlencode($salesOrder) : '')) ?>">Trims</a>
                 </nav>
             <?php else: ?>
-                <div class="rpt-header-unit-badge <?= $isFabric ? 'is-fabric' : 'is-trims' ?>">
+                <!-- <div class="rpt-header-unit-badge <?= $isFabric ? 'is-fabric' : 'is-trims' ?>">
                     <i class="fas <?= $isFabric ? 'fa-scroll' : 'fa-tags' ?>"></i>
-                    <span><?= $isFabric ? 'Fabric Unit Only' : 'Trims Unit Only' ?></span>
-                </div>
+                    <span><?= $isFabric ? 'Fabric' : 'Trims' ?></span>
+                </div> -->
             <?php endif; ?>
 
             <?php if (!$isFabric && $trimPills !== []): ?>
@@ -156,14 +171,10 @@ if (!$isFabric && $hasData) {
                     <span class="material-icons-round">receipt_long</span>
                     <input id="so" name="so" value="<?= e($salesOrder) ?>" placeholder="Sales order" inputmode="numeric">
                 </label>
-                <label class="rpt-field rpt-field-filter">
+                <!-- <label class="rpt-field rpt-field-filter">
                     <span class="material-icons-round">search</span>
                     <input id="q" name="q" value="<?= e($search) ?>" placeholder="Material / PO">
-                </label>
-                <button class="rpt-btn" type="submit">
-                    <span class="material-icons-round">sync</span>
-                    <!-- Load report -->
-                </button>
+                </label> -->
                 <?php if ($hasData): ?>
                     <a class="rpt-btn rpt-btn-ghost" href="<?= e(url($report) . '?' . $qs(['export' => 'csv', 'page' => 1])) ?>">
                         <span class="material-icons-round">file_download</span>
@@ -191,10 +202,10 @@ if (!$isFabric && $hasData) {
                         <a class="<?= !$isFabric ? 'on' : '' ?>" href="<?= e(url('trims') . '?mode=all') ?>">Trims</a>
                     </div>
                 <?php else: ?>
-                    <div class="lookup-unit-badge <?= $isFabric ? 'is-fabric' : 'is-trims' ?>">
+                    <!-- <div class="lookup-unit-badge <?= $isFabric ? 'is-fabric' : 'is-trims' ?>">
                         <i class="fas <?= $isFabric ? 'fa-scroll' : 'fa-tags' ?>"></i>
                         <span><?= $isFabric ? 'Fabric Unit Only' : 'Trims Unit Only' ?></span>
-                    </div>
+                    </div> -->
                 <?php endif; ?>
                 <form method="get" action="<?= e(url($report)) ?>" id="rptFilterForm" class="lookup-form">
                     <input type="hidden" name="mode" value="<?= e($mode) ?>">
@@ -224,16 +235,14 @@ if (!$isFabric && $hasData) {
                     <article class="rpt-stat tone-<?= e($card['tone']) ?>"<?= $extraAttrs ?>>
                         <span class="material-icons-round"><?= e($card['icon']) ?></span>
                         <div>
-                            <b><?= e($card['value']) ?></b>
-                            <?php if (!empty($card['data']['data-bom-card'])): ?>
-                                <div class="bom-trend-strip" id="bomTrendStrip">
-                                    <span class="bom-trend-item" id="bomTrend-planned"  title="vs Planned">  <span class="bom-trend-arrow"></span><span class="bom-trend-label">Pln</span></span>
-                                    <span class="bom-trend-item" id="bomTrend-production" title="vs Production"><span class="bom-trend-arrow"></span><span class="bom-trend-label">Prd</span></span>
-                                    <span class="bom-trend-item" id="bomTrend-po"        title="vs PO Qty">   <span class="bom-trend-arrow"></span><span class="bom-trend-label">PO</span></span>
-                                    <span class="bom-trend-item" id="bomTrend-grn"       title="vs GRN Qty">  <span class="bom-trend-arrow"></span><span class="bom-trend-label">GRN</span></span>
-                                    <span class="bom-trend-item" id="bomTrend-issue"     title="vs Issue Qty"><span class="bom-trend-arrow"></span><span class="bom-trend-label">Iss</span></span>
-                                </div>
-                            <?php endif; ?>
+                            <div class="stat-value-wrap">
+                                <b><?= e($card['value']) ?></b>
+                                <?php if (!empty($card['trend'])): ?>
+                                    <span class="card-trend-ico is-<?= e($card['trend']['status']) ?>" id="<?= e($card['trend_id'] ?? '') ?>" title="<?= e($card['label']) ?>: <?= e($card['trend']['label']) ?>">
+                                        <i class="fas <?= e($card['trend']['icon']) ?>"></i>
+                                    </span>
+                                <?php endif; ?>
+                            </div>
                             <small><?= e($card['label']) ?></small>
                         </div>
                     </article>
@@ -280,6 +289,11 @@ if (!$isFabric && $hasData) {
 
                     <div class="rpt-tb-actions">
                         <span class="rpt-tb-count" id="rptTableCount">Showing <?= count($records) ?> of <?= count($records) ?> lines</span>
+
+                        <div class="rpt-tb-legend" title="Compare column quantity against row BOM Qty">
+                            <span class="tb-legend-item is-up" title="Met or exceeded BOM (≥ BOM)"><i class="fas fa-arrow-trend-up"></i> ≥ BOM</span>
+                            <span class="tb-legend-item is-down" title="Below BOM (< BOM)"><i class="fas fa-arrow-trend-down"></i> &lt; BOM</span>
+                        </div>
 
                         <?php if (!$isFabric && $trimPills !== []): ?>
                             <button type="button" class="rpt-tb-btn" id="rptGroupByCategory" title="Group rows by trim category">
@@ -512,30 +526,51 @@ if (!$isFabric && $hasData) {
                                     </td>
                                     <td class="num bom-qty-cell">
                                         <span class="bom-val"><?= e(str_replace(',', '', $model->dash($row['bom_qty'] ?? ''))) ?></span>
-                                        <?php if ($rBom > 0): ?>
-                                        <span class="bom-row-trend" title="BOM vs Planned / Production / PO / GRN / Issue">
-                                            <span class="brt-dot <?= $rPlan  >= $rBom ? 'up' : 'dn' ?>" title="Planned:  <?= number_format($rPlan,  0) ?>">  </span>
-                                            <span class="brt-dot <?= $rProd  >= $rBom ? 'up' : 'dn' ?>" title="Production: <?= number_format($rProd, 0) ?>">  </span>
-                                            <span class="brt-dot <?= $rPo    >= $rBom ? 'up' : 'dn' ?>" title="PO Qty: <?= number_format($rPo,   0) ?>">  </span>
-                                            <span class="brt-dot <?= $rGrn   >= $rBom ? 'up' : 'dn' ?>" title="GRN Qty: <?= number_format($rGrn,  0) ?>">  </span>
-                                            <span class="brt-dot <?= $rIss   >= $rBom ? 'up' : 'dn' ?>" title="Issue Qty: <?= number_format($rIss, 0) ?>">  </span>
-                                        </span>
-                                        <?php endif; ?>
                                     </td>
-                                    <td class="num">
-                                        <?= e(str_replace(',', '', $model->dash($row['planned_qty'] ?? ''))) ?>
+                                    <td class="num qty-cell" data-qty-type="plan">
+                                        <div class="qty-cell-content">
+                                            <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['planned_qty'] ?? ''))) ?></span>
+                                            <?php $tr = $calcTrend($rPlan, $rBom); ?>
+                                            <span class="row-trend-icon is-<?= e($tr['status']) ?>" title="Planned: <?= number_format($rPlan, 0) ?> vs BOM: <?= number_format($rBom, 0) ?> (<?= e($tr['label']) ?>)">
+                                                <i class="fas <?= e($tr['icon']) ?>"></i>
+                                            </span>
+                                        </div>
                                     </td>
-                                    <td class="num">
-                                        <?= e(str_replace(',', '', $model->dash($row['production_qty'] ?? ''))) ?>
+                                    <td class="num qty-cell" data-qty-type="prod">
+                                        <div class="qty-cell-content">
+                                            <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['production_qty'] ?? ''))) ?></span>
+                                            <?php $tr = $calcTrend($rProd, $rBom); ?>
+                                            <span class="row-trend-icon is-<?= e($tr['status']) ?>" title="Production: <?= number_format($rProd, 0) ?> vs BOM: <?= number_format($rBom, 0) ?> (<?= e($tr['label']) ?>)">
+                                                <i class="fas <?= e($tr['icon']) ?>"></i>
+                                            </span>
+                                        </div>
                                     </td>
-                                    <td class="num">
-                                        <?= e(str_replace(',', '', $model->dash($row['po_qty'] ?? ''))) ?>
+                                    <td class="num qty-cell" data-qty-type="po">
+                                        <div class="qty-cell-content">
+                                            <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['po_qty'] ?? ''))) ?></span>
+                                            <?php $tr = $calcTrend($rPo, $rBom); ?>
+                                            <span class="row-trend-icon is-<?= e($tr['status']) ?>" title="PO Qty: <?= number_format($rPo, 0) ?> vs BOM: <?= number_format($rBom, 0) ?> (<?= e($tr['label']) ?>)">
+                                                <i class="fas <?= e($tr['icon']) ?>"></i>
+                                            </span>
+                                        </div>
                                     </td>
-                                    <td class="num">
-                                        <?= e(str_replace(',', '', $model->dash($row['grn_qty'] ?? ''))) ?>
+                                    <td class="num qty-cell" data-qty-type="grn">
+                                        <div class="qty-cell-content">
+                                            <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['grn_qty'] ?? ''))) ?></span>
+                                            <?php $tr = $calcTrend($rGrn, $rBom); ?>
+                                            <span class="row-trend-icon is-<?= e($tr['status']) ?>" title="GRN Qty: <?= number_format($rGrn, 0) ?> vs BOM: <?= number_format($rBom, 0) ?> (<?= e($tr['label']) ?>)">
+                                                <i class="fas <?= e($tr['icon']) ?>"></i>
+                                            </span>
+                                        </div>
                                     </td>
-                                    <td class="num">
-                                        <?= e(str_replace(',', '', $model->dash($row['issue_qty'] ?? ''))) ?>
+                                    <td class="num qty-cell" data-qty-type="issue">
+                                        <div class="qty-cell-content">
+                                            <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['issue_qty'] ?? ''))) ?></span>
+                                            <?php $tr = $calcTrend($rIss, $rBom); ?>
+                                            <span class="row-trend-icon is-<?= e($tr['status']) ?>" title="Issue Qty: <?= number_format($rIss, 0) ?> vs BOM: <?= number_format($rBom, 0) ?> (<?= e($tr['label']) ?>)">
+                                                <i class="fas <?= e($tr['icon']) ?>"></i>
+                                            </span>
+                                        </div>
                                     </td>
                                     <td class="grn-sos">
                                         <?php
@@ -577,12 +612,27 @@ if (!$isFabric && $hasData) {
                         <tfoot>
                             <tr id="rptTableFoot">
                                 <th colspan="<?= $isFabric ? '5' : '6' ?>" id="footTotalLabel">Total (<?= e($model->num($total)) ?> lines)</th>
-                                <th class="num" id="footBomQty"><?= e(str_replace(',', '', $model->dash($summary['bom_qty'] ?? null))) ?></th>
-                                <th class="num" id="footPlannedQty"><?= e(str_replace(',', '', $model->dash($summary['planned_qty'] ?? null))) ?></th>
-                                <th class="num" id="footProductionQty"><?= e(str_replace(',', '', $model->dash($summary['production_qty'] ?? null))) ?></th>
-                                <th class="num" id="footPoQty"><?= e(str_replace(',', '', $model->dash($summary['po_qty'] ?? null))) ?></th>
-                                <th class="num" id="footGrnQty"><?= e(str_replace(',', '', $model->dash($summary['grn_qty'] ?? null))) ?></th>
-                                <th class="num" id="footIssueQty"><?= e(str_replace(',', '', $model->dash($summary['issue_qty'] ?? null))) ?></th>
+                                <th class="num" id="footBomQty"><span class="foot-val"><?= e(str_replace(',', '', $model->dash($summary['bom_qty'] ?? null))) ?></span></th>
+                                <th class="num foot-qty-cell" id="footPlannedQty">
+                                    <span class="foot-val"><?= e(str_replace(',', '', $model->dash($summary['planned_qty'] ?? null))) ?></span>
+                                    <?php if ($bomQtyRaw > 0): ?><span class="foot-trend is-<?= $plnTrend['status'] ?>" title="Total Planned vs BOM (<?= $plnTrend['label'] ?>)"><i class="fas <?= $plnTrend['icon'] ?>"></i></span><?php endif; ?>
+                                </th>
+                                <th class="num foot-qty-cell" id="footProductionQty">
+                                    <span class="foot-val"><?= e(str_replace(',', '', $model->dash($summary['production_qty'] ?? null))) ?></span>
+                                    <?php if ($bomQtyRaw > 0): ?><span class="foot-trend is-<?= $prdTrend['status'] ?>" title="Total Production vs BOM (<?= $prdTrend['label'] ?>)"><i class="fas <?= $prdTrend['icon'] ?>"></i></span><?php endif; ?>
+                                </th>
+                                <th class="num foot-qty-cell" id="footPoQty">
+                                    <span class="foot-val"><?= e(str_replace(',', '', $model->dash($summary['po_qty'] ?? null))) ?></span>
+                                    <?php if ($bomQtyRaw > 0): ?><span class="foot-trend is-<?= $poTrend['status'] ?>" title="Total PO Qty vs BOM (<?= $poTrend['label'] ?>)"><i class="fas <?= $poTrend['icon'] ?>"></i></span><?php endif; ?>
+                                </th>
+                                <th class="num foot-qty-cell" id="footGrnQty">
+                                    <span class="foot-val"><?= e(str_replace(',', '', $model->dash($summary['grn_qty'] ?? null))) ?></span>
+                                    <?php if ($bomQtyRaw > 0): ?><span class="foot-trend is-<?= $grnTrend['status'] ?>" title="Total GRN Qty vs BOM (<?= $grnTrend['label'] ?>)"><i class="fas <?= $grnTrend['icon'] ?>"></i></span><?php endif; ?>
+                                </th>
+                                <th class="num foot-qty-cell" id="footIssueQty">
+                                    <span class="foot-val"><?= e(str_replace(',', '', $model->dash($summary['issue_qty'] ?? null))) ?></span>
+                                    <?php if ($bomQtyRaw > 0): ?><span class="foot-trend is-<?= $issTrend['status'] ?>" title="Total Issue Qty vs BOM (<?= $issTrend['label'] ?>)"><i class="fas <?= $issTrend['icon'] ?>"></i></span><?php endif; ?>
+                                </th>
                                 <th></th>
                             </tr>
                         </tfoot>

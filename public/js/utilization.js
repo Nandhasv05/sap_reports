@@ -44,6 +44,21 @@
         }
     }
 
+    function getTrend(val, bom) {
+        if (!bom || bom <= 0) {
+            if (val > 0) return { status: 'up', icon: 'fa-arrow-trend-up', pct: 100, label: 'Exceeds (BOM 0)' };
+            return { status: 'neutral', icon: 'fa-minus', pct: 0, label: 'No data' };
+        }
+        if (!val || val <= 0) {
+            return { status: 'neutral', icon: 'fa-minus', pct: 0, label: '0% vs BOM (No data)' };
+        }
+        const pct = Math.round((val / bom) * 1000) / 10;
+        if (val >= bom) {
+            return { status: 'up', icon: 'fa-arrow-trend-up', pct: pct, label: pct + '% vs BOM (Meets/Exceeds BOM)' };
+        }
+        return { status: 'down', icon: 'fa-arrow-trend-down', pct: pct, label: pct + '% vs BOM (Below BOM)' };
+    }
+
     function updateStatCards(vc, sb, sp, spd, spo, sg, si) {
         const cards = document.querySelectorAll('.rpt-stat b');
         if (cards.length < 7) return;
@@ -58,6 +73,28 @@
         if (cards[4]) cards[4].textContent = fmt(spo);
         if (cards[5]) cards[5].textContent = fmt(sg);
         if (cards[6]) cards[6].textContent = fmt(si);
+
+        const plnTr = getTrend(sp, sb);
+        const prdTr = getTrend(spd, sb);
+        const poTr  = getTrend(spo, sb);
+        const grnTr = getTrend(sg, sb);
+        const issTr = getTrend(si, sb);
+
+        function updateCardIco(id, tr, name, val) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            // Preserve bom class for BOM card; else set status class
+            const cls = el.classList.contains('is-bom') ? 'is-bom' : `is-${tr.status}`;
+            el.className = `card-trend-ico ${cls}`;
+            el.title = `${name}: ${fmt(val)} vs BOM: ${fmt(sb)} (${tr.label})`;
+            el.innerHTML = `<i class="fas ${tr.icon}"></i>`;
+        }
+
+        updateCardIco('statTrendIco-planned',    plnTr, 'Planned', sp);
+        updateCardIco('statTrendIco-production', prdTr, 'Production', spd);
+        updateCardIco('statTrendIco-po',         poTr,  'PO Qty', spo);
+        updateCardIco('statTrendIco-grn',        grnTr, 'GRN Qty', sg);
+        updateCardIco('statTrendIco-issue',      issTr, 'Issue Qty', si);
     }
 
     function updateCharts(visibleRows, activeCat) {
@@ -148,12 +185,22 @@
         const footGrnQty = document.getElementById('footGrnQty');
         const footIssueQty = document.getElementById('footIssueQty');
 
-        function parseNum(v) { if (!v || v === '\u2014' || v === '-' || v.trim() === '') return 0; const n = parseFloat(v.replace(/,/g, '').trim()); return isNaN(n) ? 0 : n; }
+        function parseNum(v) {
+            if (!v || v === '\u2014' || v === '-' || v.trim() === '') return 0;
+            const clean = v.replace(/,/g, '').trim();
+            const match = clean.match(/-?\d+(?:\.\d+)?/);
+            if (!match) return 0;
+            const n = parseFloat(match[0]);
+            return isNaN(n) ? 0 : n;
+        }
         function formatQty(n) { if (n === 0) return '\u2014'; if (Math.abs(n - Math.round(n)) < 0.001) return Math.round(n).toLocaleString('en-US'); return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
         const rowData = rows.map((tr, index) => {
             const cells = Array.from(tr.children);
-            const colTexts = cells.map(td => td.textContent.trim());
+            const colTexts = cells.map(td => {
+                const valSpan = td.querySelector('.qty-val, .bom-val, .foot-val');
+                return valSpan ? valSpan.textContent.trim() : td.textContent.trim();
+            });
             const colNums = colTexts.map(val => parseNum(val));
             return { tr, origIndex: index, origSno: parseInt(tr.getAttribute('data-orig-sno') || (index + 1), 10), category: tr.getAttribute('data-category') || '', colTexts, colNums, fullSearchText: colTexts.slice(1).join(' ').toLowerCase(), visible: true };
         });
@@ -239,13 +286,28 @@
  if (countBadge) { countBadge.textContent = isFiltered ? `Showing ${vc.toLocaleString()} of ${rowData.length.toLocaleString()} lines` : `Showing ${rowData.length.toLocaleString()} of ${rowData.length.toLocaleString()} lines`; countBadge.classList.toggle('is-filtered', isFiltered); }
  if (activeFilterBadge) { activeFilterBadge.style.display = colFilters.length > 0 ? 'inline-flex' : 'none'; activeFilterBadge.textContent = colFilters.length; }
  if (clearAllBtn) clearAllBtn.style.display = (isFiltered || currentSort.col !== null) ? 'inline-flex' : 'none';
- if (footTotalLabel) footTotalLabel.textContent = isFiltered ? `Total (${vc.toLocaleString()} of ${rowData.length.toLocaleString()} lines)` : `Total (${rowData.length.toLocaleString()} lines)`;
- if (footBomQty) footBomQty.textContent = formatQty(sb);
- if (footPlannedQty) footPlannedQty.textContent = formatQty(sp);
- if (footProductionQty) footProductionQty.textContent = formatQty(spd);
- if (footPoQty) footPoQty.textContent = formatQty(spo);
- if (footGrnQty) footGrnQty.textContent = formatQty(sg);
- if (footIssueQty) footIssueQty.textContent = formatQty(si);
+        if (footTotalLabel) footTotalLabel.textContent = isFiltered ? `Total (${vc.toLocaleString()} of ${rowData.length.toLocaleString()} lines)` : `Total (${rowData.length.toLocaleString()} lines)`;
+        if (footBomQty) footBomQty.innerHTML = `<span class="foot-val">${formatQty(sb)}</span>`;
+        if (footPlannedQty) {
+            const tr = getTrend(sp, sb);
+            footPlannedQty.innerHTML = `<span class="foot-val">${formatQty(sp)}</span>` + (sb > 0 ? `<span class="foot-trend is-${tr.status}" title="Total Planned vs BOM (${tr.label})"><i class="fas ${tr.icon}"></i></span>` : '');
+        }
+        if (footProductionQty) {
+            const tr = getTrend(spd, sb);
+            footProductionQty.innerHTML = `<span class="foot-val">${formatQty(spd)}</span>` + (sb > 0 ? `<span class="foot-trend is-${tr.status}" title="Total Production vs BOM (${tr.label})"><i class="fas ${tr.icon}"></i></span>` : '');
+        }
+        if (footPoQty) {
+            const tr = getTrend(spo, sb);
+            footPoQty.innerHTML = `<span class="foot-val">${formatQty(spo)}</span>` + (sb > 0 ? `<span class="foot-trend is-${tr.status}" title="Total PO Qty vs BOM (${tr.label})"><i class="fas ${tr.icon}"></i></span>` : '');
+        }
+        if (footGrnQty) {
+            const tr = getTrend(sg, sb);
+            footGrnQty.innerHTML = `<span class="foot-val">${formatQty(sg)}</span>` + (sb > 0 ? `<span class="foot-trend is-${tr.status}" title="Total GRN Qty vs BOM (${tr.label})"><i class="fas ${tr.icon}"></i></span>` : '');
+        }
+        if (footIssueQty) {
+            const tr = getTrend(si, sb);
+            footIssueQty.innerHTML = `<span class="foot-val">${formatQty(si)}</span>` + (sb > 0 ? `<span class="foot-trend is-${tr.status}" title="Total Issue Qty vs BOM (${tr.label})"><i class="fas ${tr.icon}"></i></span>` : '');
+        }
  // Update stat cards and charts
  updateStatCards(vc, sb, sp, spd, spo, sg, si);
  updateCharts(rowData.filter(item => item.visible), activeCatFilter);

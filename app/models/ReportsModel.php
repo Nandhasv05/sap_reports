@@ -40,7 +40,7 @@ class ReportsModel
                 'group' => 'Sales',
             ],
             'fabric' => [
-                'title' => 'Fabric Utilization',
+                'title' => 'Fabric',
                 'blurb' => 'SAP fabric utilization by sales order.',
                 'icon'  => 'fa-scroll',
                 'color' => '#0f766e',
@@ -48,7 +48,7 @@ class ReportsModel
                 'group' => 'Utilization Reports',
             ],
             'trims' => [
-                'title' => 'Trims Utilization',
+                'title' => 'Trims',
                 'blurb' => 'SAP trims utilization by sales order.',
                 'icon'  => 'fa-tags',
                 'color' => '#c2410c',
