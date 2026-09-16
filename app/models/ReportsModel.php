@@ -74,6 +74,9 @@ class ReportsModel
         return number_format((float) $n, 0);
     }
 
+    /*
+     * Format the quantity
+     */
     public function qty($n): string
     {
         $f = (float) $n;
@@ -83,6 +86,9 @@ class ReportsModel
         return rtrim(rtrim(number_format($f, 3, '.', ','), '0'), '.');
     }
 
+    /*
+     * Format the dash
+     */
     public function dash($n): string
     {
         if ($n === null || $n === '') {

@@ -10,11 +10,19 @@
     const dataNode = document.getElementById('rptChartData');
     const isTrims = app ? app.classList.contains('is-trims') : false;
 
+    /*
+    *  COLOR PLAN - GET THE COLUMN INDEX BASED ON THE MATERIAL TYPE
+    */
     const COL = isTrims
         ? { bom: 6, plan: 7, prod: 8, po: 9, grn: 10, issue: 11 }
         : { bom: 5, plan: 6, prod: 7, po: 8, grn: 9, issue: 10 };
 
+    /*
+    *  SHOW SPINNER 
+    */
     function showSpinner() { if (!spinner) return; spinner.hidden = false; document.body.classList.add('rpt-loading'); }
+
+    
     function hideBoot() { if (app) app.classList.remove('is-first'); if (boot) boot.hidden = true; drawCharts(); }
 
     const form = document.getElementById('rptFilterForm');
@@ -64,7 +72,7 @@
         if (cards.length < 7) return;
         const fmt = n => (n === 0 || n === null || n === undefined)
             ? '—'
-            : (Math.abs(n - Math.round(n)) < 0.001 ? Math.round(n).toLocaleString('en-US') : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+            : Math.round(n).toLocaleString('en-US');
 
         if (cards[0]) cards[0].textContent = vc === 0 ? '0' : vc.toLocaleString('en-US');
         if (cards[1]) cards[1].textContent = fmt(sb);
@@ -114,9 +122,14 @@
         const useCategory = isTrims && (activeCat === '' || activeCat === undefined);
         const matColIndex = isTrims ? 3 : 2;
 
+        const seenKeys = new Set();
         visibleRows.forEach(r => {
-            const key = useCategory ? (r.category || 'Other') : (r.colTexts[matColIndex] || 'Unknown');
-            byKey[key] = (byKey[key] || 0) + r.colNums[COL.bom];
+            const mat = r.colTexts[matColIndex] || 'Unknown';
+            if (!seenKeys.has(mat)) {
+                seenKeys.add(mat);
+                const key = useCategory ? (r.category || 'Other') : mat;
+                byKey[key] = (byKey[key] || 0) + r.colNums[COL.bom];
+            }
         });
 
         const sorted = Object.entries(byKey).sort((a, b) => b[1] - a[1]);
@@ -235,10 +248,19 @@
                 if (cat !== lastCat) {
                     lastCat = cat;
                     const catItems = vis.filter(r => (r.category || 'Other') === cat);
-                    const bs = catItems.reduce((s, r) => s + r.colNums[COL.bom], 0);
-                    const ps = catItems.reduce((s, r) => s + r.colNums[COL.plan], 0);
-                    const pos = catItems.reduce((s, r) => s + r.colNums[COL.po], 0);
-                    const gs = catItems.reduce((s, r) => s + r.colNums[COL.grn], 0);
+                    let bs = 0, ps = 0, pos = 0, gs = 0;
+                    const catSeenMats = new Set();
+                    const matColIndex = isTrims ? 3 : 2;
+                    catItems.forEach(r => {
+                        pos += r.colNums[COL.po];
+                        gs += r.colNums[COL.grn];
+                        const mat = r.colTexts[matColIndex] || '';
+                        if (mat !== '' && !catSeenMats.has(mat)) {
+                            catSeenMats.add(mat);
+                            bs += r.colNums[COL.bom];
+                            ps += r.colNums[COL.plan];
+                        }
+                    });
                     const htr = document.createElement('tr');
                     htr.className = 'rpt-group-header-row';
                     htr.setAttribute('data-group-cat', cat);
@@ -262,22 +284,43 @@
  });
  if (searchClear) searchClear.style.display = query !== '' ? 'flex' : 'none';
 
- let vc = 0, sb = 0, sp = 0, spd = 0, spo = 0, sg = 0, si = 0;
- rowData.forEach(item => {
- let match = true;
- if (activeCatFilter !== '' && item.category !== activeCatFilter) match = false;
- if (match && query !== '' && !item.fullSearchText.includes(query)) match = false;
- if (match && colFilters.length > 0) {
- for (const f of colFilters) {
- const ct = item.colTexts[f.col] || ''; const cn = item.colNums[f.col];
- if (f.cond) { const {op, val} = f.cond; if (op === '>' && !(cn > val)) { match=false; break; } if (op === '>=' && !(cn >= val)) { match=false; break; } if (op === '<' && !(cn < val)) { match=false; break; } if (op === '<=' && !(cn <= val)) { match=false; break; } if (op === '=' && cn !== val) { match=false; break; } }
- else { if (!ct.toLowerCase().includes(f.lower)) { match=false; break; } }
- }
- }
- item.visible = match;
- if (match) { vc++; item.tr.style.display = ''; const sno = item.tr.firstElementChild; if (sno) sno.textContent = vc; sb += item.colNums[COL.bom]; sp += item.colNums[COL.plan]; spd += item.colNums[COL.prod]; spo += item.colNums[COL.po]; sg += item.colNums[COL.grn]; si += item.colNums[COL.issue]; }
- else { item.tr.style.display = 'none'; }
- });
+        let vc = 0, sb = 0, sp = 0, spd = 0, spo = 0, sg = 0, si = 0;
+        const seenMats = new Set();
+        const matColIndex = isTrims ? 3 : 2;
+
+        rowData.forEach(item => {
+            let match = true;
+            if (activeCatFilter !== '' && item.category !== activeCatFilter) match = false;
+            if (match && query !== '' && !item.fullSearchText.includes(query)) match = false;
+            if (match && colFilters.length > 0) {
+                for (const f of colFilters) {
+                    const ct = item.colTexts[f.col] || ''; const cn = item.colNums[f.col];
+                    if (f.cond) { const {op, val} = f.cond; if (op === '>' && !(cn > val)) { match=false; break; } if (op === '>=' && !(cn >= val)) { match=false; break; } if (op === '<' && !(cn < val)) { match=false; break; } if (op === '<=' && !(cn <= val)) { match=false; break; } if (op === '=' && cn !== val) { match=false; break; } }
+                    else { if (!ct.toLowerCase().includes(f.lower)) { match=false; break; } }
+                }
+            }
+            item.visible = match;
+            if (match) { 
+                vc++; 
+                item.tr.style.display = ''; 
+                const sno = item.tr.firstElementChild; 
+                if (sno) sno.textContent = vc; 
+                
+                spo += item.colNums[COL.po]; 
+                sg += item.colNums[COL.grn]; 
+                
+                const mat = item.colTexts[matColIndex] || '';
+                if (mat !== '' && !seenMats.has(mat)) {
+                    seenMats.add(mat);
+                    sb += item.colNums[COL.bom]; 
+                    sp += item.colNums[COL.plan]; 
+                    spd += item.colNums[COL.prod]; 
+                    si += item.colNums[COL.issue]; 
+                }
+            } else { 
+                item.tr.style.display = 'none'; 
+            }
+        });
 
  if (groupByActive) insertGroupHeaders(); else removeGroupHeaders();
  if (noMatchRow) noMatchRow.style.display = vc === 0 ? '' : 'none';

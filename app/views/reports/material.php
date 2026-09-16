@@ -61,19 +61,27 @@ $poTrend  = $calcTrend($poQtyRaw, $bomQtyRaw);
 $grnTrend = $calcTrend($grnQtyRaw, $bomQtyRaw);
 $issTrend = $calcTrend($issueQtyRaw, $bomQtyRaw);
 
+// Helper: round a raw qty to a whole number for card display
+$fmtCardQty = static function ($raw): string {
+    if ($raw === null || $raw === '' || $raw === '-') return '—';
+    $n = (float) str_replace(',', '', (string) $raw);
+    if ($n == 0) return '—';
+    return number_format((int) round($n));
+};
+
 $cards = [
     ['label' => 'Materials',  'note' => 'Lines',       'icon' => 'layers',                 'tone' => 'teal',   'value' => $model->dash($summary['lines'] ?? $total)],
-    ['label' => 'BOM Qty',    'note' => 'Required',    'icon' => 'schema',                 'tone' => 'sky',    'value' => $model->dash($summary['bom_qty'] ?? null),
+    ['label' => 'BOM Qty',    'note' => 'Required',    'icon' => 'schema',                 'tone' => 'sky',    'value' => $fmtCardQty($summary['bom_qty'] ?? null),
         'trend' => ['status' => 'bom', 'icon' => 'fa-bullseye', 'label' => 'Baseline target — all quantities compared against BOM'], 'trend_id' => 'statTrendIco-bom'],
-    ['label' => 'Planned',    'note' => 'Planned qty', 'icon' => 'event_note',             'tone' => 'indigo', 'value' => $model->dash($summary['planned_qty'] ?? null),
+    ['label' => 'Planned',    'note' => 'Planned qty', 'icon' => 'event_note',             'tone' => 'indigo', 'value' => $fmtCardQty($summary['planned_qty'] ?? null),
         'trend' => $plnTrend, 'trend_id' => 'statTrendIco-planned'],
-    ['label' => 'Production', 'note' => 'Produced',    'icon' => 'precision_manufacturing','tone' => 'mint',   'value' => $model->dash($summary['production_qty'] ?? null),
+    ['label' => 'Production', 'note' => 'Produced',    'icon' => 'precision_manufacturing','tone' => 'mint',   'value' => $fmtCardQty($summary['production_qty'] ?? null),
         'trend' => $prdTrend, 'trend_id' => 'statTrendIco-production'],
-    ['label' => 'PO Qty',     'note' => 'Ordered',     'icon' => 'shopping_bag',           'tone' => 'amber',  'value' => $model->dash($summary['po_qty'] ?? null),
+    ['label' => 'PO Qty',     'note' => 'Ordered',     'icon' => 'shopping_bag',           'tone' => 'amber',  'value' => $fmtCardQty($summary['po_qty'] ?? null),
         'trend' => $poTrend,  'trend_id' => 'statTrendIco-po'],
-    ['label' => 'GRN Qty',    'note' => 'Received',    'icon' => 'inventory_2',            'tone' => 'violet', 'value' => $model->dash($summary['grn_qty'] ?? null),
+    ['label' => 'GRN Qty',    'note' => 'Received',    'icon' => 'inventory_2',            'tone' => 'violet', 'value' => $fmtCardQty($summary['grn_qty'] ?? null),
         'trend' => $grnTrend, 'trend_id' => 'statTrendIco-grn'],
-    ['label' => 'Issue Qty',  'note' => 'Issued',      'icon' => 'output',                 'tone' => 'rose',   'value' => $model->dash($summary['issue_qty'] ?? null),
+    ['label' => 'Issue Qty',  'note' => 'Issued',      'icon' => 'output',                 'tone' => 'rose',   'value' => $fmtCardQty($summary['issue_qty'] ?? null),
         'trend' => $issTrend, 'trend_id' => 'statTrendIco-issue'],
 ];
 $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
@@ -528,49 +536,19 @@ if (!$isFabric && $hasData) {
                                         <span class="bom-val"><?= e(str_replace(',', '', $model->dash($row['bom_qty'] ?? ''))) ?></span>
                                     </td>
                                     <td class="num qty-cell" data-qty-type="plan">
-                                        <div class="qty-cell-content">
-                                            <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['planned_qty'] ?? ''))) ?></span>
-                                            <?php $tr = $calcTrend($rPlan, $rBom); ?>
-                                            <span class="row-trend-icon is-<?= e($tr['status']) ?>" title="Planned: <?= number_format($rPlan, 0) ?> vs BOM: <?= number_format($rBom, 0) ?> (<?= e($tr['label']) ?>)">
-                                                <i class="fas <?= e($tr['icon']) ?>"></i>
-                                            </span>
-                                        </div>
+                                        <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['planned_qty'] ?? ''))) ?></span>
                                     </td>
                                     <td class="num qty-cell" data-qty-type="prod">
-                                        <div class="qty-cell-content">
-                                            <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['production_qty'] ?? ''))) ?></span>
-                                            <?php $tr = $calcTrend($rProd, $rBom); ?>
-                                            <span class="row-trend-icon is-<?= e($tr['status']) ?>" title="Production: <?= number_format($rProd, 0) ?> vs BOM: <?= number_format($rBom, 0) ?> (<?= e($tr['label']) ?>)">
-                                                <i class="fas <?= e($tr['icon']) ?>"></i>
-                                            </span>
-                                        </div>
+                                        <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['production_qty'] ?? ''))) ?></span>
                                     </td>
                                     <td class="num qty-cell" data-qty-type="po">
-                                        <div class="qty-cell-content">
-                                            <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['po_qty'] ?? ''))) ?></span>
-                                            <?php $tr = $calcTrend($rPo, $rBom); ?>
-                                            <span class="row-trend-icon is-<?= e($tr['status']) ?>" title="PO Qty: <?= number_format($rPo, 0) ?> vs BOM: <?= number_format($rBom, 0) ?> (<?= e($tr['label']) ?>)">
-                                                <i class="fas <?= e($tr['icon']) ?>"></i>
-                                            </span>
-                                        </div>
+                                        <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['po_qty'] ?? ''))) ?></span>
                                     </td>
                                     <td class="num qty-cell" data-qty-type="grn">
-                                        <div class="qty-cell-content">
-                                            <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['grn_qty'] ?? ''))) ?></span>
-                                            <?php $tr = $calcTrend($rGrn, $rBom); ?>
-                                            <span class="row-trend-icon is-<?= e($tr['status']) ?>" title="GRN Qty: <?= number_format($rGrn, 0) ?> vs BOM: <?= number_format($rBom, 0) ?> (<?= e($tr['label']) ?>)">
-                                                <i class="fas <?= e($tr['icon']) ?>"></i>
-                                            </span>
-                                        </div>
+                                        <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['grn_qty'] ?? ''))) ?></span>
                                     </td>
                                     <td class="num qty-cell" data-qty-type="issue">
-                                        <div class="qty-cell-content">
-                                            <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['issue_qty'] ?? ''))) ?></span>
-                                            <?php $tr = $calcTrend($rIss, $rBom); ?>
-                                            <span class="row-trend-icon is-<?= e($tr['status']) ?>" title="Issue Qty: <?= number_format($rIss, 0) ?> vs BOM: <?= number_format($rBom, 0) ?> (<?= e($tr['label']) ?>)">
-                                                <i class="fas <?= e($tr['icon']) ?>"></i>
-                                            </span>
-                                        </div>
+                                        <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['issue_qty'] ?? ''))) ?></span>
                                     </td>
                                     <td class="grn-sos">
                                         <?php

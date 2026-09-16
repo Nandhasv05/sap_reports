@@ -265,17 +265,24 @@ class SapUtilizationService
     {
         $sum = $this->emptySummary();
         $sum['lines'] = count($rows);
+        $seen = [];
         foreach ($rows as $row) {
-            $sum['so_qty'] += (float) ($row['so_qty'] ?? 0);
-            $sum['bom_qty'] += (float) ($row['bom_qty'] ?? 0);
-            $sum['planned_qty'] += (float) ($row['planned_qty'] ?? 0);
-            $sum['production_qty'] += (float) ($row['production_qty'] ?? 0);
             $sum['po_qty'] += (float) ($row['po_qty'] ?? 0);
             $sum['grn_qty'] += (float) ($row['grn_qty'] ?? 0);
-            $sum['issue_qty'] += (float) ($row['issue_qty'] ?? 0);
-            $cat = (string) ($row['category'] ?? '');
-            if ($cat !== '') {
-                $sum['category_counts'][$cat] = ($sum['category_counts'][$cat] ?? 0) + 1;
+
+            $mat = (string) ($row['material'] ?? '');
+            if ($mat !== '' && !isset($seen[$mat])) {
+                $seen[$mat] = true;
+                $sum['so_qty'] += (float) ($row['so_qty'] ?? 0);
+                $sum['bom_qty'] += (float) ($row['bom_qty'] ?? 0);
+                $sum['planned_qty'] += (float) ($row['planned_qty'] ?? 0);
+                $sum['production_qty'] += (float) ($row['production_qty'] ?? 0);
+                $sum['issue_qty'] += (float) ($row['issue_qty'] ?? 0);
+                
+                $cat = (string) ($row['category'] ?? '');
+                if ($cat !== '') {
+                    $sum['category_counts'][$cat] = ($sum['category_counts'][$cat] ?? 0) + 1;
+                }
             }
         }
         return $sum;
@@ -293,9 +300,8 @@ class SapUtilizationService
         foreach ($rows as $row) {
             $key = (string) ($row['material'] ?? '—');
             if (!isset($byMaterial[$key])) {
-                $byMaterial[$key] = 0.0;
+                $byMaterial[$key] = (float) ($row['bom_qty'] ?? 0);
             }
-            $byMaterial[$key] += (float) ($row['bom_qty'] ?? 0);
         }
         arsort($byMaterial);
         $mixLabels = [];
@@ -318,15 +324,20 @@ class SapUtilizationService
 
         // By-category BOM breakdown (trims only)
         $byCategory = [];
+        $seenForCat = [];
         foreach ($rows as $row) {
+            $mat = (string) ($row['material'] ?? '');
             $cat = (string) ($row['category'] ?? '');
-            if ($cat === '') {
+            if ($cat === '' || $mat === '') {
                 continue;
             }
-            if (!isset($byCategory[$cat])) {
-                $byCategory[$cat] = 0.0;
+            if (!isset($seenForCat[$mat])) {
+                $seenForCat[$mat] = true;
+                if (!isset($byCategory[$cat])) {
+                    $byCategory[$cat] = 0.0;
+                }
+                $byCategory[$cat] += (float) ($row['bom_qty'] ?? 0);
             }
-            $byCategory[$cat] += (float) ($row['bom_qty'] ?? 0);
         }
         arsort($byCategory);
         $catLabels = array_keys($byCategory);
