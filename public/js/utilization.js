@@ -153,7 +153,223 @@
 
     if (app && app.classList.contains('is-first')) { window.setTimeout(hideBoot, 1400); } else { drawCharts(); }
 
-    initDataTable();
+    const pageCfg = readPageConfig();
+    if (pageCfg.live && pageCfg.dataUrl && pageCfg.so) {
+        loadLiveSapData(pageCfg);
+    } else {
+        initDataTable();
+    }
+
+    function readPageConfig() {
+        const node = document.getElementById('rptPageConfig');
+        if (!node) return {};
+        try { return JSON.parse(node.textContent || '{}'); } catch (e) { return {}; }
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function dashCell(n) {
+        if (n === null || n === undefined || n === '' || n === '-') return '—';
+        const num = typeof n === 'number' ? n : parseFloat(String(n).replace(/,/g, ''));
+        if (!isNaN(num) && Math.abs(num) < 0.0000001) return '—';
+        if (!isNaN(num)) {
+            if (Math.abs(num - Math.round(num)) < 0.0005) return String(Math.round(num));
+            return String(num);
+        }
+        const text = String(n).trim();
+        return text === '' ? '—' : text.replace(/,/g, '');
+    }
+
+    function soListFromRow(row) {
+        if (Array.isArray(row.grn_so_list) && row.grn_so_list.length) return row.grn_so_list;
+        if (row.grn_sales_orders) {
+            return String(row.grn_sales_orders).replace(/ /g, '').split(',').map(s => s.trim()).filter(Boolean);
+        }
+        return [];
+    }
+
+    function renderLiveRows(cfg, records) {
+        const tbody = document.getElementById('rptTableBody');
+        if (!tbody) return;
+        const isFabric = !!cfg.isFabric;
+        const colSpan = isFabric ? 12 : 13;
+        const pageUrl = cfg.pageUrl || '';
+        const icons = cfg.catIcons || {};
+        const colors = cfg.catColors || {};
+        const noMatch = document.getElementById('rptNoMatchRow');
+        tbody.querySelectorAll('tr.rpt-table-loading, tr[data-orig-sno]').forEach(tr => tr.remove());
+
+        if (!records.length) {
+            const empty = document.createElement('tr');
+            empty.innerHTML = `<td colspan="${colSpan}" class="rpt-table-empty">No ${isFabric ? 'fabric' : 'trims'} utilization for sales order ${escapeHtml(cfg.so)}.</td>`;
+            tbody.prepend(empty);
+            return;
+        }
+
+        const frag = document.createDocumentFragment();
+        records.forEach((row, i) => {
+            const cat = isFabric ? '' : String(row.category || '');
+            const bom = parseFloat(String(row.bom_qty ?? 0).replace(/,/g, '')) || 0;
+            const plan = parseFloat(String(row.planned_qty ?? 0).replace(/,/g, '')) || 0;
+            const prod = parseFloat(String(row.production_qty ?? 0).replace(/,/g, '')) || 0;
+            const po = parseFloat(String(row.po_qty ?? 0).replace(/,/g, '')) || 0;
+            const grn = parseFloat(String(row.grn_qty ?? 0).replace(/,/g, '')) || 0;
+            const iss = parseFloat(String(row.issue_qty ?? 0).replace(/,/g, '')) || 0;
+            const soNum = String(row.sales_order || '').replace(/,/g, '').trim();
+            const soHtml = soNum && soNum !== '-'
+                ? `<a href="${escapeHtml(pageUrl)}?so=${encodeURIComponent(soNum)}" class="so-main-link" title="Direct API call for Sales Order ${escapeHtml(soNum)}">${escapeHtml(soNum)}</a>`
+                : '-';
+            let catHtml = '';
+            if (!isFabric) {
+                catHtml = cat
+                    ? `<td class="rpt-cat-cell"><span class="rpt-cat-badge ${escapeHtml(colors[cat] || 'cat-other')}"><span class="material-icons-round">${escapeHtml(icons[cat] || 'label')}</span> ${escapeHtml(cat)}</span></td>`
+                    : `<td class="rpt-cat-cell"><span class="grn-so-empty">—</span></td>`;
+            }
+            const sos = soListFromRow(row);
+            let extraSo = '<span class="grn-so-empty">-</span>';
+            if (sos.length) {
+                extraSo = '<div class="grn-so-tags">' + sos.map(item => {
+                    const clean = String(item).replace(/,/g, '').trim();
+                    if (!clean) return '';
+                    return `<a href="${escapeHtml(pageUrl)}?so=${encodeURIComponent(clean)}" class="so-chip" title="Direct API call for Sales Order ${escapeHtml(clean)}">${escapeHtml(clean)}</a>`;
+                }).join('') + '</div>';
+            }
+            const tr = document.createElement('tr');
+            tr.setAttribute('data-orig-sno', String(i + 1));
+            if (cat) tr.setAttribute('data-category', cat);
+            tr.setAttribute('data-r-bom', String(bom));
+            tr.setAttribute('data-r-plan', String(plan));
+            tr.setAttribute('data-r-prod', String(prod));
+            tr.setAttribute('data-r-po', String(po));
+            tr.setAttribute('data-r-grn', String(grn));
+            tr.setAttribute('data-r-iss', String(iss));
+            tr.innerHTML = `
+                <td class="num sno">${i + 1}</td>
+                ${catHtml}
+                <td>${soHtml}</td>
+                <td class="rpt-mat">${escapeHtml(dashCell(row.material))}</td>
+                <td>${escapeHtml(String(dashCell(row.purchase_order)).replace(/,/g, ''))}</td>
+                <td>${escapeHtml(String(dashCell(row.po_item)).replace(/,/g, ''))}</td>
+                <td class="num bom-qty-cell"><span class="bom-val">${escapeHtml(dashCell(row.bom_qty))}</span></td>
+                <td class="num qty-cell" data-qty-type="plan"><span class="qty-val">${escapeHtml(dashCell(row.planned_qty))}</span></td>
+                <td class="num qty-cell" data-qty-type="prod"><span class="qty-val">${escapeHtml(dashCell(row.production_qty))}</span></td>
+                <td class="num qty-cell" data-qty-type="po"><span class="qty-val">${escapeHtml(dashCell(row.po_qty))}</span></td>
+                <td class="num qty-cell" data-qty-type="grn"><span class="qty-val">${escapeHtml(dashCell(row.grn_qty))}</span></td>
+                <td class="num qty-cell" data-qty-type="issue"><span class="qty-val">${escapeHtml(dashCell(row.issue_qty))}</span></td>
+                <td class="grn-sos">${extraSo}</td>
+            `;
+            frag.appendChild(tr);
+        });
+        if (noMatch) tbody.insertBefore(frag, noMatch);
+        else tbody.appendChild(frag);
+    }
+
+    function applyLiveSummary(summary) {
+        const s = summary || {};
+        const lines = Number(s.lines || 0);
+        const bom = Number(s.bom_qty || 0);
+        const plan = Number(s.planned_qty || 0);
+        const prod = Number(s.production_qty || 0);
+        const po = Number(s.po_qty || 0);
+        const grn = Number(s.grn_qty || 0);
+        const issue = Number(s.issue_qty || 0);
+        updateStatCards(lines, bom, plan, prod, po, grn, issue);
+        const setFoot = (id, val) => {
+            const el = document.getElementById(id);
+            const span = el?.querySelector('.foot-val') || el;
+            if (span) span.textContent = dashCell(val);
+        };
+        const label = document.getElementById('footTotalLabel');
+        if (label) label.textContent = `Total (${lines.toLocaleString('en-US')} lines)`;
+        setFoot('footBomQty', bom);
+        setFoot('footPlannedQty', plan);
+        setFoot('footProductionQty', prod);
+        setFoot('footPoQty', po);
+        setFoot('footGrnQty', grn);
+        setFoot('footIssueQty', issue);
+        const count = document.getElementById('rptTableCount');
+        if (count) count.textContent = `Showing ${lines} of ${lines} lines`;
+        const allCount = document.querySelector('.rpt-trim-pill-all .rpt-cat-dd-item-count');
+        if (allCount) allCount.textContent = String(lines);
+        const selectedCount = document.getElementById('rptCatSelectedCount');
+        if (selectedCount) selectedCount.textContent = String(lines);
+        fillTrimPills(s.category_counts || {});
+    }
+
+    function fillTrimPills(counts) {
+        const menu = document.getElementById('rptCatDropdownMenu');
+        if (!menu || isTrims === false) return;
+        const cfg = pageCfg;
+        const order = ['Button', 'Zipper', 'Thread', 'Labels', 'Packing', 'Lining', 'Consumables', 'Other'];
+        menu.querySelectorAll('.rpt-cat-dd-item:not(.rpt-trim-pill-all)').forEach(el => el.remove());
+        order.forEach(cat => {
+            const cnt = Number(counts[cat] || 0);
+            if (!cnt) return;
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = `rpt-cat-dd-item rpt-trim-pill ${cfg.catColors?.[cat] || 'cat-other'}`;
+            btn.setAttribute('data-cat', cat);
+            btn.setAttribute('role', 'menuitem');
+            btn.innerHTML = `<span class="material-icons-round">${escapeHtml(cfg.catIcons?.[cat] || 'label')}</span><span class="rpt-cat-dd-item-text">${escapeHtml(cat)}</span><span class="rpt-cat-dd-item-count">${cnt}</span>`;
+            menu.appendChild(btn);
+        });
+    }
+
+    function loadLiveSapData(cfg) {
+        showSpinner();
+        const params = new URLSearchParams({
+            so: cfg.so,
+            q: cfg.search || '',
+            _: String(Date.now()),
+        });
+        fetch(`${cfg.dataUrl}?${params.toString()}`, {
+            headers: { Accept: 'application/json' },
+            cache: 'no-store',
+            credentials: 'same-origin',
+        })
+            .then(async (res) => {
+                const raw = await res.text();
+                let json;
+                try { json = JSON.parse(raw); } catch (e) {
+                    throw new Error('SAP API returned invalid JSON.');
+                }
+                if (!res.ok || json.success === false) {
+                    throw new Error(json.message || json.error || `SAP API failed (${res.status})`);
+                }
+                return json;
+            })
+            .then((json) => {
+                const data = json.data || {};
+                renderLiveRows(cfg, data.records || []);
+                applyLiveSummary(data.summary || {});
+                if (dataNode) dataNode.textContent = JSON.stringify(data.chart || {});
+                chartsDrawn = false;
+                if (totalsChart) { totalsChart.destroy(); totalsChart = null; }
+                if (mixChart) { mixChart.destroy(); mixChart = null; }
+                drawCharts();
+                initDataTable();
+            })
+            .catch((err) => {
+                const tbody = document.getElementById('rptTableBody');
+                if (tbody) {
+                    tbody.innerHTML = `<tr><td colspan="${cfg.isFabric ? 12 : 13}" class="rpt-table-empty">${escapeHtml(err.message || 'Unable to load SAP data.')}</td></tr>`;
+                }
+                const alertBox = document.createElement('div');
+                alertBox.className = 'rpt-alert';
+                alertBox.textContent = err.message || 'Unable to load SAP data.';
+                document.querySelector('.rpt-main')?.prepend(alertBox);
+            })
+            .finally(() => {
+                if (spinner) spinner.hidden = true;
+                document.body.classList.remove('rpt-loading');
+            });
+    }
 
     function initDataTable() {
         const table = document.getElementById('rptDataTable');

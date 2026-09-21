@@ -47,17 +47,21 @@ class ReportsController extends Controller
         $export = strtolower((string) ($_GET['export'] ?? '')) === 'csv';
 
         $payload = [
-            'records'  => [],
-            'total'    => 0,
-            'page'     => 1,
-            'pages'    => 1,
-            'per_page' => $perPage,
+            'records'     => [],
+            'total'       => 0,
+            'page'        => 1,
+            'pages'       => 1,
+            'per_page'    => $perPage,
+            'sales_order' => $salesOrder,
         ];
         $loadError = '';
-        try {
-            $payload = $model->fetch($report, $year, $page, $perPage, $search, $from, $to, $export, $salesOrder);
-        } catch (Throwable $e) {
-            $loadError = $e->getMessage();
+        $liveClient = in_array($report, ['fabric', 'trims'], true) && !$export;
+        if (!$liveClient) {
+            try {
+                $payload = $model->fetch($report, $year, $page, $perPage, $search, $from, $to, $export, $salesOrder);
+            } catch (Throwable $e) {
+                $loadError = $e->getMessage();
+            }
         }
 
         if ($export) {
@@ -94,6 +98,7 @@ class ReportsController extends Controller
             'model'       => $model,
             'summary'     => $payload['summary'] ?? [],
             'chart'       => $payload['chart'] ?? [],
+            'liveClient'  => $liveClient,
             'extraHead'   => in_array($report, ['fabric', 'trims'], true)
                 ? '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>'
                 : '',
@@ -180,5 +185,67 @@ class ReportsController extends Controller
             }
         }
         fclose($out);
+    }
+
+    /*
+     * JSON API — browser Network tab (Fetch/XHR)
+     */
+    public function data(string $report = ''): void
+    {
+        $model = new ReportsModel();
+        $catalog = $model->catalog();
+        $report = strtolower(trim($report !== '' ? $report : (string) ($_GET['r'] ?? '')));
+        if ($report === '' || !isset($catalog[$report])) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Unknown report.',
+                'error'   => 'Unknown report.',
+                'data'    => [],
+            ], 404);
+            return;
+        }
+
+        $year = (int) date('Y');
+        $page = max(1, (int) ($_GET['page'] ?? 1));
+        $perPage = min(10000, max(10, (int) ($_GET['per_page'] ?? 10000)));
+        $search = trim((string) ($_GET['q'] ?? ''));
+        $salesOrder = trim((string) ($_GET['so'] ?? ''));
+        $from = trim((string) ($_GET['from'] ?? date('Y-m-01')));
+        $to = trim((string) ($_GET['to'] ?? date('Y-m-d')));
+
+        $cfg = config('sap');
+        $sapPath = $report === 'trims'
+            ? (string) ($cfg['trims_service'] ?? '')
+            : ($report === 'fabric' ? (string) ($cfg['fabric_service'] ?? '') : (string) ($cfg['service'] ?? ''));
+
+        try {
+            $payload = $model->fetch($report, $year, $page, $perPage, $search, $from, $to, true, $salesOrder);
+            $this->jsonResponse([
+                'success' => true,
+                'message' => 'Live SAP data',
+                'data'    => $payload,
+                'meta'    => [
+                    'source'      => 'SAP',
+                    'report'      => $report,
+                    'sales_order' => $salesOrder,
+                    'sap_path'    => $sapPath,
+                    'count'       => (int) ($payload['total'] ?? count($payload['records'] ?? [])),
+                ],
+            ]);
+        } catch (Throwable $e) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Unable to fetch SAP data: ' . $e->getMessage(),
+                'error'   => $e->getMessage(),
+                'data'    => [],
+                'meta'    => [
+                    'source'      => 'SAP',
+                    'report'      => $report,
+                    'sales_order' => $salesOrder,
+                    'sap_path'    => $sapPath,
+                    'count'       => 0,
+                ],
+            ], 500);
+        }
     }
 }

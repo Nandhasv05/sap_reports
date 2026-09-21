@@ -10,6 +10,12 @@
 /*
  * Return the SAP configuration
  */
+
+/*
+ * DEVELOPEMET URL : 'http://APP-DEV.evolvclothing.com:8000/'
+ * PRODUCTION URL : 'http://APP-PROD.evolvclothing.com:8000/'
+ */
+
 return [
     'enabled'          => true,
     'base_url'         => 'http://APP-PROD.evolvclothing.com:8000',

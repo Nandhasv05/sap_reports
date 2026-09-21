@@ -8,11 +8,12 @@ $isFabric = $report === 'fabric';
 $mode = (string) ($_GET['mode'] ?? 'unit');
 $showAllOptions = $mode === 'all';
 $salesOrder = (string) ($salesOrder ?? '');
+$awaitLive = !empty($liveClient) && $salesOrder !== '';
 $home = sap_reports_evol_url('portal_dashboard.php');
 $logoUrl = sap_reports_logo_url();
 $summary = is_array($summary ?? null) ? $summary : [];
 $chart = is_array($chart ?? null) ? $chart : [];
-$hasData = $records !== [] || (int) $total > 0;
+$hasData = $records !== [] || (int) $total > 0 || $awaitLive;
 $isLookup = $salesOrder === '' && !$hasData;
 $kindLabel = $isFabric ? 'Fabric' : 'Trims';
 $catalogHome = url('/');
@@ -146,7 +147,7 @@ if (!$isFabric && $hasData) {
                 </div> -->
             <?php endif; ?>
 
-            <?php if (!$isFabric && $trimPills !== []): ?>
+            <?php if (!$isFabric && $hasData): ?>
                 <div class="rpt-cat-dropdown" id="rptCatDropdown">
                     <button type="button" class="rpt-cat-dd-trigger" id="rptCatDropdownBtn" aria-haspopup="true" aria-expanded="false">
                         <span class="material-icons-round rpt-cat-dd-icon">filter_alt</span>
@@ -285,7 +286,7 @@ if (!$isFabric && $hasData) {
                 </section>
             </div>
 
-            <?php if ($records !== []): ?>
+            <?php if ($hasData): ?>
                 <div class="rpt-table-toolbar">
                     <div class="rpt-tb-search">
                         <span class="material-icons-round rpt-search-ico">search</span>
@@ -303,7 +304,7 @@ if (!$isFabric && $hasData) {
                             <span class="tb-legend-item is-down" title="Below BOM (< BOM)"><i class="fas fa-arrow-trend-down"></i> &lt; BOM</span>
                         </div>
 
-                        <?php if (!$isFabric && $trimPills !== []): ?>
+                        <?php if (!$isFabric): ?>
                             <button type="button" class="rpt-tb-btn" id="rptGroupByCategory" title="Group rows by trim category">
                                 <span class="material-icons-round" style="font-size:15px;">category</span>
                                 <span>Group By</span>
@@ -402,7 +403,7 @@ if (!$isFabric && $hasData) {
                                 </div>
                             </th>
                         </tr>
-                        <?php if ($records !== []): ?>
+                        <?php if ($hasData): ?>
                             <tr class="rpt-filter-row" id="rptFilterRow">
                                 <th class="num sno">
                                     <button type="button" class="rpt-col-filter-reset" id="rptColFilterReset" title="Clear all column filters" aria-label="Clear all column filters">
@@ -487,7 +488,18 @@ if (!$isFabric && $hasData) {
                         <?php endif; ?>
                     </thead>
                     <tbody id="rptTableBody">
-                        <?php if ($records === []): ?>
+                        <?php if ($awaitLive): ?>
+                            <tr class="rpt-table-loading"><td colspan="<?= $isFabric ? '12' : '13' ?>" class="rpt-table-empty">Loading live SAP data…</td></tr>
+                            <tr id="rptNoMatchRow" class="rpt-table-no-match" style="display: none;">
+                                <td colspan="<?= $isFabric ? '12' : '13' ?>" class="rpt-table-empty">
+                                    <div class="rpt-no-match-card">
+                                        <span class="material-icons-round">filter_alt_off</span>
+                                        <p>No records match the applied search or filter criteria.</p>
+                                        <button type="button" class="rpt-btn rpt-btn-sm" id="rptResetFilterTableBtn">Clear All Filters</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        <?php elseif ($records === []): ?>
                             <tr><td colspan="<?= $isFabric ? '12' : '13' ?>" class="rpt-table-empty"><?= e($emptyHint) ?></td></tr>
                         <?php else: ?>
                             <?php foreach ($records as $i => $row): ?>
@@ -586,7 +598,7 @@ if (!$isFabric && $hasData) {
                             </tr>
                         <?php endif; ?>
                     </tbody>
-                    <?php if ($records !== []): ?>
+                    <?php if ($hasData): ?>
                         <tfoot>
                             <tr id="rptTableFoot">
                                 <th colspan="<?= $isFabric ? '5' : '6' ?>" id="footTotalLabel">Total (<?= e($model->num($total)) ?> lines)</th>
@@ -621,4 +633,16 @@ if (!$isFabric && $hasData) {
     <?php endif; ?>
 </div>
 <script type="application/json" id="rptChartData"><?= json_encode($chart, JSON_UNESCAPED_UNICODE) ?></script>
+<script type="application/json" id="rptPageConfig"><?= json_encode([
+    'report'    => $report,
+    'isFabric'  => $isFabric,
+    'so'        => $salesOrder,
+    'mode'      => $mode,
+    'search'    => $search,
+    'live'      => $awaitLive,
+    'dataUrl'   => url($report . '/data'),
+    'pageUrl'   => url($report),
+    'catIcons'  => $trimCatIcons,
+    'catColors' => $trimCatColors,
+], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
 <script src="<?= e(asset('js/utilization.js')) ?>"></script>

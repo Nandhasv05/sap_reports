@@ -1273,6 +1273,8 @@ body.rpt-loading { cursor: wait; }
 .rpt-index-header {
     margin-bottom: 14px;
 }
+
+
 .index-title {
     font-family: Outfit, sans-serif;
     font-size: 24px;
