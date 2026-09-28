@@ -176,6 +176,7 @@ class SapUtilizationService
             'sales_order'      => $this->displaySo((string) ($row['SalesOrder'] ?? '')),
             'category'         => $kind === 'trims' ? $this->categorizeTrim($material) : '',
             'material'         => $material,
+            'description'      => (string) ($row['Description'] ?? ''),
             'purchase_order'   => (string) ($row['PurchaseOrder'] ?? ''),
             'po_item'          => $this->displaySo((string) ($row['PO_Item'] ?? '')),
             'so_qty'           => (float) ($row['SO_QTY'] ?? 0),
@@ -187,6 +188,10 @@ class SapUtilizationService
             'issue_qty'        => (float) ($row['Issue_QTY'] ?? 0),
             'grn_sales_orders' => implode(', ', $soList),
             'grn_so_list'      => $soList,
+            'attribute1_text'  => (string) ($row['Attribute1_text'] ?? ''),
+            'attribute2_text'  => (string) ($row['Attribute2_text'] ?? ''),
+            'attribute3_text'  => (string) ($row['Attribute3_text'] ?? ''),
+            'colour'           => (string) ($row['Colour'] ?? ''), 
         ];
     }
 

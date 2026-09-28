@@ -672,7 +672,7 @@ body.rpt-loading { cursor: wait; }
     color: #64748b;
     font-variant-numeric: tabular-nums;
 }
-.rpt-mat { font-weight: 600; }
+.rpt-mat { font-weight: 600; white-space: nowrap; }
 .rpt-table .grn-sos {
     max-width: 260px;
     white-space: normal;

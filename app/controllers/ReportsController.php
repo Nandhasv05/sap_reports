@@ -146,15 +146,17 @@ class ReportsController extends Controller
             }
         } elseif ($report === 'fabric') {
             fputcsv($out, [
-                'S.No', 'Sales Order', 'Material', 'Purchase Order', 'PO Item',
+                'S.No', 'Sales Order', 'Material', 'Description', 'Purchase Order', 'PO Item',
                 'SO Qty', 'BOM Qty', 'Planned Qty', 'Production Qty',
                 'PO Qty', 'GRN Qty', 'Issue Qty', 'GRN Sales Orders',
+                'Attribute1_text', 'Attribute2_text', 'Attribute3_text', 'Colour'
             ]);
             foreach ($records as $i => $row) {
                 fputcsv($out, [
                     $i + 1,
                     $row['sales_order'] ?? '',
                     $row['material'] ?? '',
+                    $row['description'] ?? '',
                     $row['purchase_order'] ?? '',
                     $row['po_item'] ?? '',
                     $row['so_qty'] ?? 0,
@@ -165,6 +167,10 @@ class ReportsController extends Controller
                     $row['grn_qty'] ?? 0,
                     $row['issue_qty'] ?? 0,
                     $row['grn_sales_orders'] ?? '',
+                    $row['attribute1_text'] ?? '',
+                    $row['attribute2_text'] ?? '',
+                    $row['attribute3_text'] ?? '',
+                    $row['colour'] ?? '',
                 ]);
             }
         } else {

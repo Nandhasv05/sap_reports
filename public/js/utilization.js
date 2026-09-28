@@ -15,7 +15,7 @@
     */
     const COL = isTrims
         ? { bom: 6, plan: 7, prod: 8, po: 9, grn: 10, issue: 11 }
-        : { bom: 5, plan: 6, prod: 7, po: 8, grn: 9, issue: 10 };
+        : { bom: 7, plan: 8, prod: 9, po: 10, grn: 11, issue: 12 };
 
     /*
     *  SHOW SPINNER 
@@ -176,14 +176,21 @@
 
     function dashCell(n) {
         if (n === null || n === undefined || n === '' || n === '-') return '—';
-        const num = typeof n === 'number' ? n : parseFloat(String(n).replace(/,/g, ''));
-        if (!isNaN(num) && Math.abs(num) < 0.0000001) return '—';
-        if (!isNaN(num)) {
-            if (Math.abs(num - Math.round(num)) < 0.0005) return String(Math.round(num));
-            return String(num);
-        }
         const text = String(n).trim();
-        return text === '' ? '—' : text.replace(/,/g, '');
+        if (text === '') return '—';
+        const cleaned = text.replace(/,/g, '');
+        if (!/^-?\d+(\.\d+)?$/.test(cleaned)) {
+            return text;
+        }
+        const num = parseFloat(cleaned);
+        if (!isNaN(num) && Math.abs(num) < 0.0000001) return '—';
+        if (Math.abs(num - Math.round(num)) < 0.0005) return String(Math.round(num));
+        return String(num);
+    }
+
+    function displayCode(n) {
+        const text = String(n ?? '').trim();
+        return (text === '' || text === '-') ? '—' : text;
     }
 
     function soListFromRow(row) {
@@ -198,7 +205,7 @@
         const tbody = document.getElementById('rptTableBody');
         if (!tbody) return;
         const isFabric = !!cfg.isFabric;
-        const colSpan = isFabric ? 12 : 13;
+        const colSpan = isFabric ? 18 : 13;
         const pageUrl = cfg.pageUrl || '';
         const icons = cfg.catIcons || {};
         const colors = cfg.catColors || {};
@@ -249,13 +256,28 @@
             tr.setAttribute('data-r-po', String(po));
             tr.setAttribute('data-r-grn', String(grn));
             tr.setAttribute('data-r-iss', String(iss));
+            let descHtml = '';
+            let soQtyHtml = '';
+            let attrHtml = '';
+            if (isFabric) {
+                descHtml = `<td title="${escapeHtml(displayCode(row.description))}">${escapeHtml(displayCode(row.description))}</td>`;
+                soQtyHtml = `<td class="num qty-cell" data-qty-type="so"><span class="qty-val">${escapeHtml(dashCell(row.so_qty))}</span></td>`;
+                attrHtml = `
+                    <td title="${escapeHtml(displayCode(row.attribute1_text))}">${escapeHtml(displayCode(row.attribute1_text))}</td>
+                    <td title="${escapeHtml(displayCode(row.attribute2_text))}">${escapeHtml(displayCode(row.attribute2_text))}</td>
+                    <td title="${escapeHtml(displayCode(row.attribute3_text))}">${escapeHtml(displayCode(row.attribute3_text))}</td>
+                    <td title="${escapeHtml(displayCode(row.colour))}">${escapeHtml(displayCode(row.colour))}</td>
+                `;
+            }
             tr.innerHTML = `
                 <td class="num sno">${i + 1}</td>
                 ${catHtml}
                 <td>${soHtml}</td>
-                <td class="rpt-mat">${escapeHtml(dashCell(row.material))}</td>
-                <td>${escapeHtml(String(dashCell(row.purchase_order)).replace(/,/g, ''))}</td>
-                <td>${escapeHtml(String(dashCell(row.po_item)).replace(/,/g, ''))}</td>
+                <td class="rpt-mat" title="${escapeHtml(displayCode(row.material))}">${escapeHtml(displayCode(row.material))}</td>
+                ${descHtml}
+                <td>${escapeHtml(displayCode(row.purchase_order).replace(/,/g, ''))}</td>
+                <td>${escapeHtml(displayCode(row.po_item).replace(/,/g, ''))}</td>
+                ${soQtyHtml}
                 <td class="num bom-qty-cell"><span class="bom-val">${escapeHtml(dashCell(row.bom_qty))}</span></td>
                 <td class="num qty-cell" data-qty-type="plan"><span class="qty-val">${escapeHtml(dashCell(row.planned_qty))}</span></td>
                 <td class="num qty-cell" data-qty-type="prod"><span class="qty-val">${escapeHtml(dashCell(row.production_qty))}</span></td>
@@ -263,6 +285,7 @@
                 <td class="num qty-cell" data-qty-type="grn"><span class="qty-val">${escapeHtml(dashCell(row.grn_qty))}</span></td>
                 <td class="num qty-cell" data-qty-type="issue"><span class="qty-val">${escapeHtml(dashCell(row.issue_qty))}</span></td>
                 <td class="grn-sos">${extraSo}</td>
+                ${attrHtml}
             `;
             frag.appendChild(tr);
         });
@@ -358,7 +381,7 @@
             .catch((err) => {
                 const tbody = document.getElementById('rptTableBody');
                 if (tbody) {
-                    tbody.innerHTML = `<tr><td colspan="${cfg.isFabric ? 12 : 13}" class="rpt-table-empty">${escapeHtml(err.message || 'Unable to load SAP data.')}</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="${cfg.isFabric ? 18 : 13}" class="rpt-table-empty">${escapeHtml(err.message || 'Unable to load SAP data.')}</td></tr>`;
                 }
                 const alertBox = document.createElement('div');
                 alertBox.className = 'rpt-alert';

@@ -356,52 +356,87 @@ if (!$isFabric && $hasData) {
                                     <span>Material</span>
                                 </div>
                             </th>
-                            <th class="is-sortable" data-col="<?= $isFabric ? '3' : '4' ?>" data-type="text" title="Click to sort by Purchase Order">
+                            <?php if ($isFabric): ?>
+                            <th class="is-sortable" data-col="3" data-type="text" title="Click to sort by Description">
+                                <div class="th-content">
+                                    <span>Description</span>
+                                </div>
+                            </th>
+                            <?php endif; ?>
+                            <th class="is-sortable" data-col="4" data-type="text" title="Click to sort by Purchase Order">
                                 <div class="th-content">
                                     <span>Purchase Order</span>
                                 </div>
                             </th>
-                            <th class="is-sortable" data-col="<?= $isFabric ? '4' : '5' ?>" data-type="num" title="Click to sort by PO Line">
+                            <th class="is-sortable" data-col="5" data-type="num" title="Click to sort by PO Line">
                                 <div class="th-content">
                                     <span>PO Line</span>
                                 </div>
                             </th>
-                            <!-- <th class="num">SO Qty</th> -->
-                            <th class="num is-sortable" data-col="<?= $isFabric ? '5' : '6' ?>" data-type="num" title="Click to sort by BOM Qty">
+                            <?php if ($isFabric): ?>
+                            <th class="num is-sortable" data-col="6" data-type="num" title="Click to sort by SO Qty">
+                                <div class="th-content num">
+                                    <span>SO Qty</span>
+                                </div>
+                            </th>
+                            <?php endif; ?>
+                            <th class="num is-sortable" data-col="<?= $isFabric ? '7' : '6' ?>" data-type="num" title="Click to sort by BOM Qty">
                                 <div class="th-content num">
                                     <span>BOM Qty</span>
                                 </div>
                             </th>
-                            <th class="num is-sortable" data-col="<?= $isFabric ? '6' : '7' ?>" data-type="num" title="Click to sort by Planned Qty">
+                            <th class="num is-sortable" data-col="<?= $isFabric ? '8' : '7' ?>" data-type="num" title="Click to sort by Planned Qty">
                                 <div class="th-content num">
                                     <span>Planned</span>
                                 </div>
                             </th>
-                            <th class="num is-sortable" data-col="<?= $isFabric ? '7' : '8' ?>" data-type="num" title="Click to sort by Production Qty">
+                            <th class="num is-sortable" data-col="<?= $isFabric ? '9' : '8' ?>" data-type="num" title="Click to sort by Production Qty">
                                 <div class="th-content num">
                                     <span>Production</span>
                                 </div>
                             </th>
-                            <th class="num is-sortable" data-col="<?= $isFabric ? '8' : '9' ?>" data-type="num" title="Click to sort by PO Qty">
+                            <th class="num is-sortable" data-col="<?= $isFabric ? '10' : '9' ?>" data-type="num" title="Click to sort by PO Qty">
                                 <div class="th-content num">
                                     <span>PO Qty</span>
                                 </div>
                             </th>
-                            <th class="num is-sortable" data-col="<?= $isFabric ? '9' : '10' ?>" data-type="num" title="Click to sort by GRN Qty">
+                            <th class="num is-sortable" data-col="<?= $isFabric ? '11' : '10' ?>" data-type="num" title="Click to sort by GRN Qty">
                                 <div class="th-content num">
                                     <span>GRN Qty</span>
                                 </div>
                             </th>
-                            <th class="num is-sortable" data-col="<?= $isFabric ? '10' : '11' ?>" data-type="num" title="Click to sort by Issue Qty">
+                            <th class="num is-sortable" data-col="<?= $isFabric ? '12' : '11' ?>" data-type="num" title="Click to sort by Issue Qty">
                                 <div class="th-content num">
                                     <span>Issue Qty</span>
                                 </div>
                             </th>
-                            <th class="is-sortable" data-col="<?= $isFabric ? '11' : '12' ?>" data-type="text" title="Click to sort by Additional Sale Orders">
+                            <th class="is-sortable" data-col="<?= $isFabric ? '13' : '12' ?>" data-type="text" title="Click to sort by Additional Sale Orders">
                                 <div class="th-content">
                                     <span>Additional Sale Orders</span>
                                 </div>
                             </th>
+                            <?php if ($isFabric): ?>
+                            <th class="is-sortable" data-col="14" data-type="text" title="Click to sort by Attribute 1">
+                                <div class="th-content">
+                                    <span>Attribute1_text</span>
+                                </div>
+                            </th>
+                            <th class="is-sortable" data-col="15" data-type="text" title="Click to sort by Attribute 2">
+                                <div class="th-content">
+                                    <span>Attribute2_text</span>
+                                </div>
+                            </th>
+                            <th class="is-sortable" data-col="16" data-type="text" title="Click to sort by Attribute 3">
+                                <div class="th-content">
+                                    <span>Attribute3_text</span>
+                                </div>
+                            </th>
+                            <th class="is-sortable" data-col="17" data-type="text" title="Click to sort by Colour">
+                                <div class="th-content">
+                                    <span>Colour</span>
+                                </div>
+                            </th>
+                            <?php endif; ?>
                         </tr>
                         <?php if ($hasData): ?>
                             <tr class="rpt-filter-row" id="rptFilterRow">
@@ -430,68 +465,110 @@ if (!$isFabric && $hasData) {
                                         <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
                                     </div>
                                 </th>
+                                <?php if ($isFabric): ?>
                                 <th>
                                     <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input" data-col="<?= $isFabric ? '3' : '4' ?>" placeholder="Filter PO..." title="Filter Purchase Order">
+                                        <input type="text" class="rpt-col-input" data-col="3" placeholder="Filter Desc..." title="Filter Description">
                                         <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
                                     </div>
                                 </th>
+                                <?php endif; ?>
                                 <th>
                                     <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input" data-col="<?= $isFabric ? '4' : '5' ?>" placeholder="PO Line..." title="Filter PO Line">
-                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
-                                    </div>
-                                </th>
-                                <th class="num">
-                                    <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '5' : '6' ?>" data-numeric="true" placeholder="BOM Qty..." title="Filter BOM Qty (e.g. >0, 100)">
-                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
-                                    </div>
-                                </th>
-                                <th class="num">
-                                    <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '6' : '7' ?>" data-numeric="true" placeholder="Planned..." title="Filter Planned Qty (e.g. >0, 100)">
-                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
-                                    </div>
-                                </th>
-                                <th class="num">
-                                    <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '7' : '8' ?>" data-numeric="true" placeholder="Prod Qty..." title="Filter Production Qty (e.g. >0, 100)">
-                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
-                                    </div>
-                                </th>
-                                <th class="num">
-                                    <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '8' : '9' ?>" data-numeric="true" placeholder="PO Qty..." title="Filter PO Qty (e.g. >0, 100)">
-                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
-                                    </div>
-                                </th>
-                                <th class="num">
-                                    <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '9' : '10' ?>" data-numeric="true" placeholder="GRN Qty..." title="Filter GRN Qty (e.g. >0, 100)">
-                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
-                                    </div>
-                                </th>
-                                <th class="num">
-                                    <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '10' : '11' ?>" data-numeric="true" placeholder="Issue Qty..." title="Filter Issue Qty (e.g. >0, 100)">
+                                        <input type="text" class="rpt-col-input" data-col="4" placeholder="Filter PO..." title="Filter Purchase Order">
                                         <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
                                     </div>
                                 </th>
                                 <th>
                                     <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input" data-col="<?= $isFabric ? '11' : '12' ?>" placeholder="Filter Add. SO..." title="Filter Additional Sale Orders">
+                                        <input type="text" class="rpt-col-input" data-col="5" placeholder="PO Line..." title="Filter PO Line">
                                         <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
                                     </div>
                                 </th>
+                                <?php if ($isFabric): ?>
+                                <th class="num">
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input num" data-col="6" data-numeric="true" placeholder="SO Qty..." title="Filter SO Qty">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <?php endif; ?>
+                                <th class="num">
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '7' : '6' ?>" data-numeric="true" placeholder="BOM Qty..." title="Filter BOM Qty (e.g. >0, 100)">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th class="num">
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '8' : '7' ?>" data-numeric="true" placeholder="Planned..." title="Filter Planned Qty (e.g. >0, 100)">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th class="num">
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '9' : '8' ?>" data-numeric="true" placeholder="Prod Qty..." title="Filter Production Qty (e.g. >0, 100)">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th class="num">
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '10' : '9' ?>" data-numeric="true" placeholder="PO Qty..." title="Filter PO Qty (e.g. >0, 100)">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th class="num">
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '11' : '10' ?>" data-numeric="true" placeholder="GRN Qty..." title="Filter GRN Qty (e.g. >0, 100)">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th class="num">
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '12' : '11' ?>" data-numeric="true" placeholder="Issue Qty..." title="Filter Issue Qty (e.g. >0, 100)">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th>
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input" data-col="<?= $isFabric ? '13' : '12' ?>" placeholder="Filter Add. SO..." title="Filter Additional Sale Orders">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <?php if ($isFabric): ?>
+                                <th>
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input" data-col="14" placeholder="Attribute 1..." title="Filter Attribute 1">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th>
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input" data-col="15" placeholder="Attribute 2..." title="Filter Attribute 2">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th>
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input" data-col="16" placeholder="Attribute 3..." title="Filter Attribute 3">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th>
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input" data-col="17" placeholder="Colour..." title="Filter Colour">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <?php endif; ?>
                             </tr>
                         <?php endif; ?>
                     </thead>
                     <tbody id="rptTableBody">
                         <?php if ($awaitLive): ?>
-                            <tr class="rpt-table-loading"><td colspan="<?= $isFabric ? '12' : '13' ?>" class="rpt-table-empty">Loading live SAP data…</td></tr>
+                            <tr class="rpt-table-loading"><td colspan="<?= $isFabric ? '18' : '13' ?>" class="rpt-table-empty">Loading live SAP data…</td></tr>
                             <tr id="rptNoMatchRow" class="rpt-table-no-match" style="display: none;">
-                                <td colspan="<?= $isFabric ? '12' : '13' ?>" class="rpt-table-empty">
+                                <td colspan="<?= $isFabric ? '18' : '13' ?>" class="rpt-table-empty">
                                     <div class="rpt-no-match-card">
                                         <span class="material-icons-round">filter_alt_off</span>
                                         <p>No records match the applied search or filter criteria.</p>
@@ -500,7 +577,7 @@ if (!$isFabric && $hasData) {
                                 </td>
                             </tr>
                         <?php elseif ($records === []): ?>
-                            <tr><td colspan="<?= $isFabric ? '12' : '13' ?>" class="rpt-table-empty"><?= e($emptyHint) ?></td></tr>
+                            <tr><td colspan="<?= $isFabric ? '18' : '13' ?>" class="rpt-table-empty"><?= e($emptyHint) ?></td></tr>
                         <?php else: ?>
                             <?php foreach ($records as $i => $row): ?>
                                 <?php
@@ -537,13 +614,21 @@ if (!$isFabric && $hasData) {
                                             -
                                         <?php endif; ?>
                                     </td>
-                                    <td class="rpt-mat"><?= e($model->dash($row['material'] ?? '')) ?></td>
+                                    <td class="rpt-mat" title="<?= e((string) ($row['material'] ?? '')) ?>"><?= e((string) ($row['material'] ?? '')) ?></td>
+                                    <?php if ($isFabric): ?>
+                                    <td title="<?= e((string) ($row['description'] ?? '')) ?>"><?= e((string) ($row['description'] ?? '')) ?></td>
+                                    <?php endif; ?>
                                     <td>
                                         <?= e(str_replace(',', '', $model->dash($row['purchase_order'] ?? ''))) ?>
                                     </td>
                                     <td>
                                         <?= e(str_replace(',', '', $model->dash($row['po_item'] ?? ''))) ?>
                                     </td>
+                                    <?php if ($isFabric): ?>
+                                    <td class="num qty-cell" data-qty-type="so">
+                                        <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['so_qty'] ?? ''))) ?></span>
+                                    </td>
+                                    <?php endif; ?>
                                     <td class="num bom-qty-cell">
                                         <span class="bom-val"><?= e(str_replace(',', '', $model->dash($row['bom_qty'] ?? ''))) ?></span>
                                     </td>
@@ -585,10 +670,16 @@ if (!$isFabric && $hasData) {
                                             </div>
                                         <?php endif; ?>
                                     </td>
+                                    <?php if ($isFabric): ?>
+                                    <td title="<?= e((string) ($row['attribute1_text'] ?? '')) ?>"><?= e((string) ($row['attribute1_text'] ?? '')) ?></td>
+                                    <td title="<?= e((string) ($row['attribute2_text'] ?? '')) ?>"><?= e((string) ($row['attribute2_text'] ?? '')) ?></td>
+                                    <td title="<?= e((string) ($row['attribute3_text'] ?? '')) ?>"><?= e((string) ($row['attribute3_text'] ?? '')) ?></td>
+                                    <td title="<?= e((string) ($row['colour'] ?? '')) ?>"><?= e((string) ($row['colour'] ?? '')) ?></td>
+                                    <?php endif; ?>
                                 </tr>
                             <?php endforeach; ?>
                             <tr id="rptNoMatchRow" class="rpt-table-no-match" style="display: none;">
-                                <td colspan="<?= $isFabric ? '12' : '13' ?>" class="rpt-table-empty">
+                                <td colspan="<?= $isFabric ? '18' : '13' ?>" class="rpt-table-empty">
                                     <div class="rpt-no-match-card">
                                         <span class="material-icons-round">filter_alt_off</span>
                                         <p>No records match the applied search or filter criteria.</p>
@@ -601,7 +692,7 @@ if (!$isFabric && $hasData) {
                     <?php if ($hasData): ?>
                         <tfoot>
                             <tr id="rptTableFoot">
-                                <th colspan="<?= $isFabric ? '5' : '6' ?>" id="footTotalLabel">Total (<?= e($model->num($total)) ?> lines)</th>
+                                <th colspan="<?= $isFabric ? '7' : '6' ?>" id="footTotalLabel">Total (<?= e($model->num($total)) ?> lines)</th>
                                 <th class="num" id="footBomQty"><span class="foot-val"><?= e(str_replace(',', '', $model->dash($summary['bom_qty'] ?? null))) ?></span></th>
                                 <th class="num foot-qty-cell" id="footPlannedQty">
                                     <span class="foot-val"><?= e(str_replace(',', '', $model->dash($summary['planned_qty'] ?? null))) ?></span>
@@ -624,6 +715,12 @@ if (!$isFabric && $hasData) {
                                     <?php if ($bomQtyRaw > 0): ?><span class="foot-trend is-<?= $issTrend['status'] ?>" title="Total Issue Qty vs BOM (<?= $issTrend['label'] ?>)"><i class="fas <?= $issTrend['icon'] ?>"></i></span><?php endif; ?>
                                 </th>
                                 <th></th>
+                                <?php if ($isFabric): ?>
+                                <th></th>
+                                <th></th>
+                                <th></th>
+                                <th></th>
+                                <?php endif; ?>
                             </tr>
                         </tfoot>
                     <?php endif; ?>
