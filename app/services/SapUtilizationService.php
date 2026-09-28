@@ -174,9 +174,12 @@ class SapUtilizationService
         $material = (string) ($row['Material'] ?? '');
         return [
             'sales_order'      => $this->displaySo((string) ($row['SalesOrder'] ?? '')),
-            'category'         => $kind === 'trims' ? $this->categorizeTrim($material) : '',
             'material'         => $material,
             'description'      => (string) ($row['Description'] ?? ''),
+            'mat_type'         => (string) ($row['MatType'] ?? ''),
+            'mat_type_desc'    => (string) ($row['MatTypeDesc'] ?? ''),
+            'mat_group'        => (string) ($row['MatGroup'] ?? ''),
+            'mat_group_desc'   => (string) ($row['MatGroupDesc'] ?? ''),
             'purchase_order'   => (string) ($row['PurchaseOrder'] ?? ''),
             'po_item'          => $this->displaySo((string) ($row['PO_Item'] ?? '')),
             'so_qty'           => (float) ($row['SO_QTY'] ?? 0),

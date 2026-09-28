@@ -674,18 +674,19 @@ body.rpt-loading { cursor: wait; }
 }
 .rpt-mat { font-weight: 600; white-space: nowrap; }
 .rpt-table .grn-sos {
-    max-width: 260px;
-    white-space: normal;
+    max-width: none;
+    white-space: nowrap;
     line-height: 1.35;
     color: #475569;
     font-size: 12px;
 }
 .grn-so-tags {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 4px;
     align-items: center;
 }
+.grn-so-tags .so-chip { flex: 0 0 auto; }
 .so-chip {
     display: inline-flex;
     align-items: center;
@@ -1683,6 +1684,22 @@ body.rpt-loading { cursor: wait; }
     border-bottom: 1px solid var(--border, #e2e8f0);
     background: rgba(248, 250, 252, 0.7);
 }
+/* Column drag-to-reorder */
+.rpt-table thead tr.rpt-header-row th[draggable="true"] { cursor: grab; }
+.rpt-table thead tr.rpt-header-row th.is-dragging { opacity: .45; }
+.rpt-table thead tr.rpt-header-row th.is-drag-over { box-shadow: inset 3px 0 0 var(--rpt, #0f766e); }
+#rptColumnToggleMenu { min-width: 230px; }
+#rptColumnToggleMenu .rpt-cat-dd-item { padding: 6px 10px; }
+#rptColumnToggleMenu .rpt-cat-dd-item input {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 15px;
+    margin: 0;
+    padding: 0;
+    accent-color: var(--rpt, #0f766e);
+}
+#rptColumnToggleMenu .rpt-cat-dd-item-text { text-align: left; white-space: nowrap; }
+
 /* ============================================================
    Category Filter Dropdown Badge (Header)
    ============================================================ */

@@ -21,6 +21,9 @@ require EVOLV_ROOT . '/app/core/portal_auth.php';
 require EVOLV_ROOT . '/app/core/access.php';
 
 evolv_boot_app_base();
+if (sap_reports_wants_json() && !portal_user()) {
+    sap_reports_json_error(401, 'Your portal session has expired. Please log in again and reopen the report.', 'session_expired');
+}
 portal_require_login();
 sap_reports_require_access();
 

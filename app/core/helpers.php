@@ -79,6 +79,26 @@ function sap_reports_home_url(): string
     return ($base === '' ? '/sap_reports' : $base) . '/';
 }
 
+/*
+ * True for the background data calls (…/data) that the report pages fetch as JSON
+ */
+function sap_reports_wants_json(): bool
+{
+    $path = rtrim((string) (parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: ''), '/');
+    return str_ends_with($path, '/data') || str_contains((string) ($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json');
+}
+
+/*
+ * JSON error for data calls (a login redirect would reach the page as HTML)
+ */
+function sap_reports_json_error(int $status, string $message, string $code): void
+{
+    http_response_code($status);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['success' => false, 'code' => $code, 'message' => $message, 'error' => $message, 'data' => []], JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
 function sap_reports_logo_url(): string
 {
     foreach (['assets/logo.png', 'assets/evolv-logo.png'] as $rel) {

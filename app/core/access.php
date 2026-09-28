@@ -43,6 +43,9 @@ function sap_reports_require_access(): void
     $role = (string) ($_SESSION['role'] ?? '');
     $user = (string) ($_SESSION['username'] ?? '');
     if (!function_exists('portal_user_can_sap_reports') || !portal_user_can_sap_reports($role, $user)) {
+        if (sap_reports_wants_json()) {
+            sap_reports_json_error(403, 'You do not have access to SAP Reports.', 'no_access');
+        }
         header('Location: ' . sap_reports_evol_url('portal_dashboard.php'));
         exit;
     }

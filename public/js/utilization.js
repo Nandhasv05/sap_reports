@@ -14,8 +14,10 @@
     *  COLOR PLAN - GET THE COLUMN INDEX BASED ON THE MATERIAL TYPE
     */
     const COL = isTrims
-        ? { bom: 6, plan: 7, prod: 8, po: 9, grn: 10, issue: 11 }
+        ? { bom: 11, plan: 12, prod: 13, po: 14, grn: 15, issue: 16 }
         : { bom: 7, plan: 8, prod: 9, po: 10, grn: 11, issue: 12 };
+    const TABLE_COLUMNS = 18;
+    const MAT_COL = 2;
 
     /*
     *  SHOW SPINNER 
@@ -120,7 +122,7 @@
 
         const byKey = {};
         const useCategory = isTrims && (activeCat === '' || activeCat === undefined);
-        const matColIndex = isTrims ? 3 : 2;
+        const matColIndex = MAT_COL;
 
         const seenKeys = new Set();
         visibleRows.forEach(r => {
@@ -205,10 +207,8 @@
         const tbody = document.getElementById('rptTableBody');
         if (!tbody) return;
         const isFabric = !!cfg.isFabric;
-        const colSpan = isFabric ? 18 : 13;
+        const colSpan = TABLE_COLUMNS;
         const pageUrl = cfg.pageUrl || '';
-        const icons = cfg.catIcons || {};
-        const colors = cfg.catColors || {};
         const noMatch = document.getElementById('rptNoMatchRow');
         tbody.querySelectorAll('tr.rpt-table-loading, tr[data-orig-sno]').forEach(tr => tr.remove());
 
@@ -221,7 +221,6 @@
 
         const frag = document.createDocumentFragment();
         records.forEach((row, i) => {
-            const cat = isFabric ? '' : String(row.category || '');
             const bom = parseFloat(String(row.bom_qty ?? 0).replace(/,/g, '')) || 0;
             const plan = parseFloat(String(row.planned_qty ?? 0).replace(/,/g, '')) || 0;
             const prod = parseFloat(String(row.production_qty ?? 0).replace(/,/g, '')) || 0;
@@ -232,12 +231,6 @@
             const soHtml = soNum && soNum !== '-'
                 ? `<a href="${escapeHtml(pageUrl)}?so=${encodeURIComponent(soNum)}" class="so-main-link" title="Direct API call for Sales Order ${escapeHtml(soNum)}">${escapeHtml(soNum)}</a>`
                 : '-';
-            let catHtml = '';
-            if (!isFabric) {
-                catHtml = cat
-                    ? `<td class="rpt-cat-cell"><span class="rpt-cat-badge ${escapeHtml(colors[cat] || 'cat-other')}"><span class="material-icons-round">${escapeHtml(icons[cat] || 'label')}</span> ${escapeHtml(cat)}</span></td>`
-                    : `<td class="rpt-cat-cell"><span class="grn-so-empty">—</span></td>`;
-            }
             const sos = soListFromRow(row);
             let extraSo = '<span class="grn-so-empty">-</span>';
             if (sos.length) {
@@ -249,35 +242,25 @@
             }
             const tr = document.createElement('tr');
             tr.setAttribute('data-orig-sno', String(i + 1));
-            if (cat) tr.setAttribute('data-category', cat);
             tr.setAttribute('data-r-bom', String(bom));
             tr.setAttribute('data-r-plan', String(plan));
             tr.setAttribute('data-r-prod', String(prod));
             tr.setAttribute('data-r-po', String(po));
             tr.setAttribute('data-r-grn', String(grn));
             tr.setAttribute('data-r-iss', String(iss));
-            let descHtml = '';
-            let soQtyHtml = '';
-            let attrHtml = '';
-            if (isFabric) {
-                descHtml = `<td title="${escapeHtml(displayCode(row.description))}">${escapeHtml(displayCode(row.description))}</td>`;
-                soQtyHtml = `<td class="num qty-cell" data-qty-type="so"><span class="qty-val">${escapeHtml(dashCell(row.so_qty))}</span></td>`;
-                attrHtml = `
-                    <td title="${escapeHtml(displayCode(row.attribute1_text))}">${escapeHtml(displayCode(row.attribute1_text))}</td>
-                    <td title="${escapeHtml(displayCode(row.attribute2_text))}">${escapeHtml(displayCode(row.attribute2_text))}</td>
-                    <td title="${escapeHtml(displayCode(row.attribute3_text))}">${escapeHtml(displayCode(row.attribute3_text))}</td>
-                    <td title="${escapeHtml(displayCode(row.colour))}">${escapeHtml(displayCode(row.colour))}</td>
-                `;
-            }
+            const textCell = (value) => `<td title="${escapeHtml(displayCode(value))}">${escapeHtml(displayCode(value))}</td>`;
+            const matInfoHtml = isFabric ? '' : [row.mat_type, row.mat_type_desc, row.mat_group, row.mat_group_desc].map(textCell).join('');
+            const attrHtml = isFabric ? [row.attribute1_text, row.attribute2_text, row.attribute3_text, row.colour].map(textCell).join('') : '';
+            // Cell order must match the <thead> in app/views/reports/material.php (18 columns for both reports).
             tr.innerHTML = `
                 <td class="num sno">${i + 1}</td>
-                ${catHtml}
                 <td>${soHtml}</td>
                 <td class="rpt-mat" title="${escapeHtml(displayCode(row.material))}">${escapeHtml(displayCode(row.material))}</td>
-                ${descHtml}
+                ${textCell(row.description)}
+                ${matInfoHtml}
                 <td>${escapeHtml(displayCode(row.purchase_order).replace(/,/g, ''))}</td>
                 <td>${escapeHtml(displayCode(row.po_item).replace(/,/g, ''))}</td>
-                ${soQtyHtml}
+                <td class="num qty-cell" data-qty-type="so"><span class="qty-val">${escapeHtml(dashCell(row.so_qty))}</span></td>
                 <td class="num bom-qty-cell"><span class="bom-val">${escapeHtml(dashCell(row.bom_qty))}</span></td>
                 <td class="num qty-cell" data-qty-type="plan"><span class="qty-val">${escapeHtml(dashCell(row.planned_qty))}</span></td>
                 <td class="num qty-cell" data-qty-type="prod"><span class="qty-val">${escapeHtml(dashCell(row.production_qty))}</span></td>
@@ -322,26 +305,183 @@
         if (allCount) allCount.textContent = String(lines);
         const selectedCount = document.getElementById('rptCatSelectedCount');
         if (selectedCount) selectedCount.textContent = String(lines);
-        fillTrimPills(s.category_counts || {});
+        
     }
 
-    function fillTrimPills(counts) {
+    function fillMaterialGroupMenu(rowData) {
         const menu = document.getElementById('rptCatDropdownMenu');
-        if (!menu || isTrims === false) return;
-        const cfg = pageCfg;
-        const order = ['Button', 'Zipper', 'Thread', 'Labels', 'Packing', 'Lining', 'Consumables', 'Other'];
-        menu.querySelectorAll('.rpt-cat-dd-item:not(.rpt-trim-pill-all)').forEach(el => el.remove());
-        order.forEach(cat => {
-            const cnt = Number(counts[cat] || 0);
-            if (!cnt) return;
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = `rpt-cat-dd-item rpt-trim-pill ${cfg.catColors?.[cat] || 'cat-other'}`;
-            btn.setAttribute('data-cat', cat);
-            btn.setAttribute('role', 'menuitem');
-            btn.innerHTML = `<span class="material-icons-round">${escapeHtml(cfg.catIcons?.[cat] || 'label')}</span><span class="rpt-cat-dd-item-text">${escapeHtml(cat)}</span><span class="rpt-cat-dd-item-count">${cnt}</span>`;
-            menu.appendChild(btn);
+        if (!menu || !isTrims) return;
+        const groups = new Map();
+        rowData.forEach(item => {
+            const g = groups.get(item.category) || { code: item.groupCode, count: 0 };
+            g.count++;
+            groups.set(item.category, g);
         });
+        menu.querySelectorAll('.rpt-cat-dd-item:not(.rpt-trim-pill-all)').forEach(el => el.remove());
+        const allCount = menu.querySelector('.rpt-trim-pill-all .rpt-cat-dd-item-count');
+        if (allCount) allCount.textContent = String(rowData.length);
+        Array.from(groups.entries())
+            .sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true, sensitivity: 'base' }))
+            .forEach(([label, g]) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'rpt-cat-dd-item rpt-trim-pill';
+                btn.setAttribute('data-cat', label);
+                btn.setAttribute('role', 'menuitem');
+                const code = g.code && g.code !== label ? ` <small style="color:#94a3b8;">${escapeHtml(g.code)}</small>` : '';
+                btn.innerHTML = `<span class="material-icons-round">label</span><span class="rpt-cat-dd-item-text">${escapeHtml(label)}${code}</span><span class="rpt-cat-dd-item-count">${g.count}</span>`;
+                menu.appendChild(btn);
+            });
+    }
+
+    function setupColumnFeatures(table, onChange) {
+        const headerRow = table.querySelector('thead tr.rpt-header-row');
+        const menu = document.getElementById('rptColumnToggleMenu');
+        const dropdown = document.getElementById('rptColumnToggleDropdown');
+        const toggleBtn = document.getElementById('rptColumnToggleBtn');
+        if (!headerRow) return;
+        const headers = Array.from(headerRow.children);
+        const count = headers.length;
+        const names = headers.map(th => (th.textContent || '').replace(/\s+/g, ' ').trim());
+        const storeKey = (isTrims ? 'trims' : 'fabric') + '_v2';
+        const hiddenKey = 'rpt_hidden_cols_' + storeKey;
+        const orderKey = 'rpt_col_order_' + storeKey;
+
+        const readJson = (key) => { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; } };
+        const writeJson = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {} };
+        const defaultOrder = () => headers.map((_, i) => i);
+        const validOrder = (o) => Array.isArray(o) && o.length === count && new Set(o).size === count && o.every(i => Number.isInteger(i) && i >= 0 && i < count);
+
+        let order = readJson(orderKey);
+        if (!validOrder(order)) order = defaultOrder();
+        let hidden = new Set((readJson(hiddenKey) || []).filter(i => Number.isInteger(i) && i > 0 && i < count));
+
+        // Tag every full-width row cell with its original column index so hide/reorder work whatever the current order.
+        function tableRows() {
+            return Array.from(table.querySelectorAll('thead tr, tbody tr, tfoot tr')).filter(tr => tr.children.length === count);
+        }
+        tableRows().forEach(tr => Array.from(tr.children).forEach((cell, i) => {
+            if (!cell.hasAttribute('data-col-id')) cell.setAttribute('data-col-id', String(i));
+        }));
+
+        const style = document.createElement('style');
+        style.id = 'rptHiddenColsStyle';
+        document.head.appendChild(style);
+
+        function applyHidden() {
+            style.textContent = Array.from(hidden)
+                .map(i => `#${table.id} [data-col-id="${i}"]{display:none !important;}`)
+                .join('\n');
+            menu?.querySelectorAll('input[data-col-toggle]').forEach(cb => {
+                cb.checked = !hidden.has(parseInt(cb.getAttribute('data-col-toggle'), 10));
+            });
+            toggleBtn?.classList.toggle('is-active', hidden.size > 0);
+        }
+
+        function applyOrder() {
+            tableRows().forEach(tr => {
+                const byId = {};
+                Array.from(tr.children).forEach(cell => { byId[cell.getAttribute('data-col-id')] = cell; });
+                const frag = document.createDocumentFragment();
+                order.forEach(i => { if (byId[i]) frag.appendChild(byId[i]); });
+                tr.appendChild(frag);
+            });
+        }
+
+        function buildMenu() {
+            if (!menu) return;
+            const items = order.map(i => `
+                <label class="rpt-cat-dd-item" style="cursor:${i === 0 ? 'default' : 'pointer'};">
+                    <input type="checkbox" data-col-toggle="${i}" ${hidden.has(i) ? '' : 'checked'} ${i === 0 ? 'disabled' : ''} style="margin:0;">
+                    <span class="rpt-cat-dd-item-text">${escapeHtml(names[i])}</span>
+                </label>`).join('');
+            menu.innerHTML = `
+                <div class="rpt-cat-dd-header">Show / hide columns</div>
+                ${items}
+                <div class="rpt-cat-dd-divider"></div>
+                <button type="button" class="rpt-cat-dd-item" data-col-reset>
+                    <span class="material-icons-round">restart_alt</span>
+                    <span class="rpt-cat-dd-item-text">Reset columns</span>
+                </button>`;
+        }
+
+        function changed() {
+            applyHidden();
+            if (typeof onChange === 'function') onChange();
+        }
+
+        toggleBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            dropdown?.classList.toggle('is-open');
+        });
+        document.addEventListener('click', (e) => {
+            if (dropdown && !dropdown.contains(e.target)) dropdown.classList.remove('is-open');
+        });
+        menu?.addEventListener('click', (e) => e.stopPropagation());
+        menu?.addEventListener('change', (e) => {
+            const cb = e.target.closest('input[data-col-toggle]');
+            if (!cb) return;
+            const i = parseInt(cb.getAttribute('data-col-toggle'), 10);
+            if (cb.checked) hidden.delete(i); else hidden.add(i);
+            writeJson(hiddenKey, Array.from(hidden));
+            changed();
+        });
+        menu?.addEventListener('click', (e) => {
+            if (!e.target.closest('[data-col-reset]')) return;
+            hidden = new Set();
+            order = defaultOrder();
+            writeJson(hiddenKey, []);
+            writeJson(orderKey, order);
+            applyOrder();
+            buildMenu();
+            changed();
+        });
+
+        let dragFrom = null;
+        const clearDragMarks = () => headerRow.querySelectorAll('.is-drag-over, .is-dragging').forEach(th => th.classList.remove('is-drag-over', 'is-dragging'));
+        headers.forEach(th => {
+            th.setAttribute('draggable', 'true');
+            th.title = (th.title ? th.title + ' — ' : '') + 'drag to move column';
+            th.addEventListener('dragstart', (e) => {
+                dragFrom = th.getAttribute('data-col-id');
+                th.classList.add('is-dragging');
+                if (e.dataTransfer) {
+                    e.dataTransfer.effectAllowed = 'move';
+                    try { e.dataTransfer.setData('text/plain', dragFrom); } catch (err) {}
+                }
+            });
+            th.addEventListener('dragover', (e) => {
+                if (dragFrom === null) return;
+                e.preventDefault();
+                if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+                if (th.getAttribute('data-col-id') !== dragFrom) th.classList.add('is-drag-over');
+            });
+            th.addEventListener('dragleave', () => th.classList.remove('is-drag-over'));
+            th.addEventListener('drop', (e) => {
+                e.preventDefault();
+                const to = th.getAttribute('data-col-id');
+                const from = dragFrom;
+                dragFrom = null;
+                clearDragMarks();
+                if (from === null || to === null || from === to) return;
+                const fromId = parseInt(from, 10);
+                const toId = parseInt(to, 10);
+                const fromPos = order.indexOf(fromId);
+                const next = order.filter(i => i !== fromId);
+                const toPos = next.indexOf(toId);
+                next.splice(fromPos <= toPos ? toPos + 1 : toPos, 0, fromId);
+                order = next;
+                writeJson(orderKey, order);
+                applyOrder();
+                buildMenu();
+                changed();
+            });
+            th.addEventListener('dragend', () => { dragFrom = null; clearDragMarks(); });
+        });
+
+        applyOrder();
+        buildMenu();
+        applyHidden();
     }
 
     function loadLiveSapData(cfg) {
@@ -360,7 +500,12 @@
                 const raw = await res.text();
                 let json;
                 try { json = JSON.parse(raw); } catch (e) {
-                    throw new Error('SAP API returned invalid JSON.');
+                    const type = res.headers.get('Content-Type') || '';
+                    console.error('SAP report data: non-JSON response', res.status, res.url, raw.slice(0, 300));
+                    if (res.redirected || /login/i.test(res.url) || (res.ok && /text\/html/i.test(type))) {
+                        throw new Error('Your portal session has expired. Please log in again and reopen the report.');
+                    }
+                    throw new Error(`SAP data could not be read (HTTP ${res.status}). Please retry.`);
                 }
                 if (!res.ok || json.success === false) {
                     throw new Error(json.message || json.error || `SAP API failed (${res.status})`);
@@ -381,7 +526,7 @@
             .catch((err) => {
                 const tbody = document.getElementById('rptTableBody');
                 if (tbody) {
-                    tbody.innerHTML = `<tr><td colspan="${cfg.isFabric ? 18 : 13}" class="rpt-table-empty">${escapeHtml(err.message || 'Unable to load SAP data.')}</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="${TABLE_COLUMNS}" class="rpt-table-empty">${escapeHtml(err.message || 'Unable to load SAP data.')}</td></tr>`;
                 }
                 const alertBox = document.createElement('div');
                 alertBox.className = 'rpt-alert';
@@ -413,7 +558,6 @@
         const filterRow = document.getElementById('rptFilterRow');
         const sortableHeaders = Array.from(table.querySelectorAll('thead th.is-sortable'));
         const colInputs = Array.from(table.querySelectorAll('.rpt-col-input'));
-        const trimsPills = Array.from(document.querySelectorAll('.rpt-cat-dd-item, .rpt-trim-pill'));
         const catDropdown = document.getElementById('rptCatDropdown');
         const catDropdownBtn = document.getElementById('rptCatDropdownBtn');
         const catSelectedLabel = document.getElementById('rptCatSelectedLabel');
@@ -454,8 +598,15 @@
                 return valSpan ? valSpan.textContent.trim() : td.textContent.trim();
             });
             const colNums = colTexts.map(val => parseNum(val));
-            return { tr, origIndex: index, origSno: parseInt(tr.getAttribute('data-orig-sno') || (index + 1), 10), category: tr.getAttribute('data-category') || '', colTexts, colNums, fullSearchText: colTexts.slice(1).join(' ').toLowerCase(), visible: true };
+            const clean = (v) => (v && v !== '\u2014' && v !== '-') ? v : '';
+            const groupCode = isTrims ? clean(colTexts[6]) : '';
+            const category = isTrims ? (clean(colTexts[7]) || groupCode || 'Unassigned') : '';
+            return { tr, origIndex: index, origSno: parseInt(tr.getAttribute('data-orig-sno') || (index + 1), 10),  colTexts, colNums, category, groupCode, fullSearchText: colTexts.slice(1).join(' ').toLowerCase(), visible: true };
         });
+
+        fillMaterialGroupMenu(rowData);
+        const trimsPills = Array.from(document.querySelectorAll('#rptCatDropdownMenu .rpt-cat-dd-item'));
+        if (catSelectedCount) catSelectedCount.textContent = rowData.length.toLocaleString('en-US');
 
         let currentSort = { col: null, dir: null, type: null };
         let activeCatFilter = '';
@@ -489,7 +640,7 @@
                     const catItems = vis.filter(r => (r.category || 'Other') === cat);
                     let bs = 0, ps = 0, pos = 0, gs = 0;
                     const catSeenMats = new Set();
-                    const matColIndex = isTrims ? 3 : 2;
+                    const matColIndex = MAT_COL;
                     catItems.forEach(r => {
                         pos += r.colNums[COL.po];
                         gs += r.colNums[COL.grn];
@@ -503,12 +654,12 @@
                     const htr = document.createElement('tr');
                     htr.className = 'rpt-group-header-row';
                     htr.setAttribute('data-group-cat', cat);
-                    htr.innerHTML = `<td colspan="${isTrims ? 13 : 12}"><div class="rpt-group-header-inner"><span class="rpt-group-cat-label">${cat}</span><span class="rpt-group-cat-count">${catItems.length} line${catItems.length !== 1 ? 's' : ''}</span><span class="rpt-group-subtotals">BOM&nbsp;<b>${formatQty(bs)}</b>&nbsp;&middot;&nbsp;Planned&nbsp;<b>${formatQty(ps)}</b>&nbsp;&middot;&nbsp;PO&nbsp;<b>${formatQty(pos)}</b>&nbsp;&middot;&nbsp;GRN&nbsp;<b>${formatQty(gs)}</b></span><span class="rpt-group-chevron material-icons-round">expand_less</span></div></td>`;
- htr.addEventListener('click', function () { const gc = htr.getAttribute('data-group-cat'); const ch = htr.querySelector('.rpt-group-chevron'); const collapsed = htr.classList.toggle('is-collapsed'); if (ch) ch.textContent = collapsed ? 'expand_more' : 'expand_less'; rowData.forEach(it => { if ((it.category || 'Other') === gc && it.visible) it.tr.style.display = collapsed ? 'none' : ''; }); });
- item.tr.before(htr);
- }
- });
- }
+                                htr.innerHTML = `<td colspan="${TABLE_COLUMNS}"><div class="rpt-group-header-inner"><span class="rpt-group-cat-label">${escapeHtml(cat)}</span><span class="rpt-group-cat-count">${catItems.length} line${catItems.length !== 1 ? 's' : ''}</span><span class="rpt-group-subtotals">BOM&nbsp;<b>${formatQty(bs)}</b>&nbsp;&middot;&nbsp;Planned&nbsp;<b>${formatQty(ps)}</b>&nbsp;&middot;&nbsp;PO&nbsp;<b>${formatQty(pos)}</b>&nbsp;&middot;&nbsp;GRN&nbsp;<b>${formatQty(gs)}</b></span><span class="rpt-group-chevron material-icons-round">expand_less</span></div></td>`;
+            htr.addEventListener('click', function () { const gc = htr.getAttribute('data-group-cat'); const ch = htr.querySelector('.rpt-group-chevron'); const collapsed = htr.classList.toggle('is-collapsed'); if (ch) ch.textContent = collapsed ? 'expand_more' : 'expand_less'; rowData.forEach(it => { if ((it.category || 'Other') === gc && it.visible) it.tr.style.display = collapsed ? 'none' : ''; }); });
+            item.tr.before(htr);
+            }
+            });
+      }
 
  function applyFilterAndSearch() {
  const query = (searchInput?.value || '').trim().toLowerCase();
@@ -525,7 +676,7 @@
 
         let vc = 0, sb = 0, sp = 0, spd = 0, spo = 0, sg = 0, si = 0;
         const seenMats = new Set();
-        const matColIndex = isTrims ? 3 : 2;
+        const matColIndex = MAT_COL;
 
         rowData.forEach(item => {
             let match = true;
@@ -542,7 +693,7 @@
             if (match) { 
                 vc++; 
                 item.tr.style.display = ''; 
-                const sno = item.tr.firstElementChild; 
+                const sno = item.tr.querySelector('td.sno'); 
                 if (sno) sno.textContent = vc; 
                 
                 spo += item.colNums[COL.po]; 
@@ -671,7 +822,7 @@
  trimsPills.forEach(p => p.classList.remove('is-active'));
  const allPill = document.querySelector('.rpt-trim-pill-all');
  if (allPill) allPill.classList.add('is-active');
- if (catSelectedLabel) catSelectedLabel.innerHTML = 'Category: <b>All</b>';
+ if (catSelectedLabel) catSelectedLabel.innerHTML = 'Material Group: <b>All</b>';
  if (catSelectedCount) catSelectedCount.textContent = rowData.length.toLocaleString('en-US');
  applySorting();
  applyFilterAndSearch();
@@ -686,7 +837,7 @@
  pill.classList.add('is-active');
 
  const catName = activeCatFilter !== '' ? activeCatFilter : 'All';
- if (catSelectedLabel) catSelectedLabel.innerHTML = `Category: <b>${catName}</b>`;
+ if (catSelectedLabel) catSelectedLabel.innerHTML = `Material Group: <b>${escapeHtml(catName)}</b>`;
 
  const cntEl = pill.querySelector('.rpt-cat-dd-item-count, .rpt-trim-pill-count');
  if (catSelectedCount && cntEl) catSelectedCount.textContent = cntEl.textContent;
@@ -708,5 +859,7 @@
  } else { applySorting(); }
  applyFilterAndSearch();
  });
+
+        setupColumnFeatures(table, syncHeaderHeight);
  }
 })();
