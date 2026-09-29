@@ -6,6 +6,8 @@
  */
 require_once base_path('app/services/SapSalesService.php');
 require_once base_path('app/services/SapUtilizationService.php');
+require_once base_path('app/services/SapProductionService.php');
+require_once base_path('app/services/SapProcurementService.php');
 
 class ReportsModel
 {
@@ -54,6 +56,22 @@ class ReportsModel
                 'color' => '#c2410c',
                 'bg'    => '#ffedd5',
                 'group' => 'Utilization Reports',
+            ],
+            'production' => [
+                'title' => 'Production Report',
+                'blurb' => 'SAP cutting, sewing, washing, finishing and shipment status by sales order.',
+                'icon'  => 'fa-industry',
+                'color' => '#6d28d9',
+                'bg'    => '#ede9fe',
+                'group' => 'Production Reports',
+            ],
+            'procurement' => [
+                'title' => 'Procurement Report',
+                'blurb' => 'SAP requirement, PR, PO and stock quantities per component by sales order.',
+                'icon'  => 'fa-cart-shopping',
+                'color' => '#be123c',
+                'bg'    => '#ffe4e6',
+                'group' => 'Procurement Reports',
             ],
         ];
     }
@@ -107,8 +125,24 @@ class ReportsModel
     /*
      * Fetch the records
      */
-    public function fetch(string $report, int $year, int $page, int $perPage, string $search, string $from, string $to, bool $export, string $salesOrder = ''): array
+    public function fetch(string $report, int $year, int $page, int $perPage, string $search, string $from, string $to, bool $export, string $salesOrder = '', string $plant = ''): array
     {
+        if ($report === 'production') {
+            $payload = (new SapProductionService())->report($salesOrder, $plant);
+            if (($payload['error'] ?? null) !== null) {
+                throw new RuntimeException((string) $payload['error']);
+            }
+            return $payload;
+        }
+
+        if ($report === 'procurement') {
+            $payload = (new SapProcurementService())->report($salesOrder);
+            if (($payload['error'] ?? null) !== null) {
+                throw new RuntimeException((string) $payload['error']);
+            }
+            return $payload;
+        }
+
         if ($report === 'fabric' || $report === 'trims') {
             $util = new SapUtilizationService();
             $payload = $util->paginated($report, $salesOrder, $search, $page, $perPage, $export);

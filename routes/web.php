@@ -6,6 +6,7 @@
  */
 require_once base_path('app/controllers/ReportsController.php');
 require_once base_path('app/controllers/ErrorController.php');
+require_once base_path('app/controllers/TablePreferencesController.php');
 
 /** @var Router $router */
 $router->get('/', [ReportsController::class, 'index']);
@@ -31,3 +32,19 @@ $router->get('trims/data', function () {
 $router->get('trims', function () {
     (new ReportsController())->show('trims');
 });
+$router->get('production/data', function () {
+    (new ReportsController())->data('production');
+});
+$router->get('production', function () {
+    (new ReportsController())->show('production');
+});
+$router->get('procurement/data', function () {
+    (new ReportsController())->data('procurement');
+});
+$router->get('procurement', function () {
+    (new ReportsController())->show('procurement');
+});
+
+$router->get('api/user/table-preferences/{tableKey}', [TablePreferencesController::class, 'show']);
+$router->put('api/user/table-preferences/{tableKey}', [TablePreferencesController::class, 'update']);
+$router->delete('api/user/table-preferences/{tableKey}', [TablePreferencesController::class, 'destroy']);

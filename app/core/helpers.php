@@ -80,12 +80,14 @@ function sap_reports_home_url(): string
 }
 
 /*
- * True for the background data calls (…/data) that the report pages fetch as JSON
+ * True for the background data calls (…/data) and /api/ calls that the report pages fetch as JSON
  */
 function sap_reports_wants_json(): bool
 {
     $path = rtrim((string) (parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: ''), '/');
-    return str_ends_with($path, '/data') || str_contains((string) ($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json');
+    return str_ends_with($path, '/data')
+        || str_contains($path, '/api/')
+        || str_contains((string) ($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json');
 }
 
 /*

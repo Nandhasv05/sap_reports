@@ -27,6 +27,10 @@ return [
     'service'          => '/sap/opu/odata/sap/ZI_SALEORDERITEMS_CDS/ZI_SaleOrderItems',
     'fabric_service'   => '/sap/opu/odata/sap/ZBUSINESS_API_SRV/FABRIC_UTILIZATIONSet',
     'trims_service'    => '/sap/opu/odata/sap/ZBUSINESS_API_SRV/TRIMS_UTILIZATIONSet',
+    'production_service' => '/sap/opu/odata/sap/ZBUSINESS_API_SRV/ZPROD_NEWSet',
+    // ZPROD_NEWSet needs a plant; blank = detect it from the sales order.
+    'production_plants'  => ['P001', 'P002', 'P003', 'P004', 'P005', 'P006'],
+    'procurement_service' => '/sap/opu/odata/sap/ZBUSINESS_API_SRV/ProcurementDashboardSet',
     'username'         => 'APIUSER',
     'password'         => 'Api@321',
     'page_size'        => 500,

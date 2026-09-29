@@ -26,6 +26,10 @@ if (sap_reports_wants_json() && !portal_user()) {
 }
 portal_require_login();
 sap_reports_require_access();
+if (sap_reports_wants_json()) {
+    // JSON calls only read the session; releasing its lock lets the SAP data and column preference calls run in parallel
+    session_write_close();
+}
 
 $routePath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 if (str_starts_with($routePath, '/sap_reports')) {

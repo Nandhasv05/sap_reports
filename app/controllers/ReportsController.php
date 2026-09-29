@@ -32,6 +32,14 @@ class ReportsController extends Controller
             $this->index();
             return;
         }
+        if ($report === 'production') {
+            $this->showProduction($model, $catalog[$report]);
+            return;
+        }
+        if ($report === 'procurement') {
+            $this->showProcurement($model, $catalog[$report]);
+            return;
+        }
 
         $year = (int) date('Y');
         $page = max(1, (int) ($_GET['page'] ?? 1));
@@ -103,6 +111,122 @@ class ReportsController extends Controller
                 ? '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>'
                 : '',
         ]);
+    }
+
+    /*
+     * Production report page (rows are loaded by production.js from production/data)
+     */
+    private function showProduction(ReportsModel $model, array $item): void
+    {
+        $salesOrder = preg_replace('/\D/', '', (string) ($_GET['so'] ?? '')) ?? '';
+        $plant = substr(strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string) ($_GET['plant'] ?? '')) ?? ''), 0, 10);
+        $service = new SapProductionService();
+
+        if (strtolower((string) ($_GET['export'] ?? '')) === 'csv') {
+            $records = [];
+            try {
+                $records = $model->fetch('production', (int) date('Y'), 1, 10000, '', '', '', true, $salesOrder, $plant)['records'] ?? [];
+            } catch (Throwable $e) {
+                $records = [];
+            }
+            $this->sendProductionCsv($salesOrder, $records);
+            return;
+        }
+
+        $this->view('reports/production', [
+            'pageTitle'  => $item['title'],
+            'layoutWide' => true,
+            'appShell'   => true,
+            'item'       => $item,
+            'report'     => 'production',
+            'salesOrder' => $salesOrder,
+            'plant'      => $plant,
+            'plants'     => $service->plants(),
+            'columns'    => SapProductionService::columns(),
+            'extraHead'  => '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>',
+        ]);
+    }
+
+    private function sendProductionCsv(string $salesOrder, array $records): void
+    {
+        $columns = SapProductionService::columns();
+        $filename = 'sap-production-' . ($salesOrder !== '' ? $salesOrder . '-' : '') . date('Ymd-His') . '.csv';
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        $out = fopen('php://output', 'w');
+        fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF));
+        fputcsv($out, array_column($columns, 'label'));
+        foreach ($records as $i => $row) {
+            $line = [];
+            foreach ($columns as $col) {
+                $line[] = $col['key'] === 'sno' ? $i + 1 : ($row[$col['key']] ?? '');
+            }
+            fputcsv($out, $line);
+        }
+        fclose($out);
+    }
+
+    /*
+     * Procurement report page (rows are loaded by procurement.js from procurement/data)
+     */
+    private function showProcurement(ReportsModel $model, array $item): void
+    {
+        $salesOrder = preg_replace('/\D/', '', (string) ($_GET['so'] ?? '')) ?? '';
+
+        if (strtolower((string) ($_GET['export'] ?? '')) === 'csv') {
+            $records = [];
+            try {
+                $records = $model->fetch('procurement', (int) date('Y'), 1, 10000, '', '', '', true, $salesOrder)['records'] ?? [];
+            } catch (Throwable $e) {
+                $records = [];
+            }
+            $this->sendProcurementCsv($salesOrder, $records);
+            return;
+        }
+
+        $this->view('reports/procurement', [
+            'pageTitle'  => $item['title'],
+            'layoutWide' => true,
+            'appShell'   => true,
+            'item'       => $item,
+            'report'     => 'procurement',
+            'salesOrder' => $salesOrder,
+            'columns'    => SapProcurementService::columns(),
+            'extraHead'  => '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>',
+        ]);
+    }
+
+    /*
+     * One CSV line per PR line; components without PR lines get a single line with empty PR fields.
+     */
+    private function sendProcurementCsv(string $salesOrder, array $records): void
+    {
+        $columns = array_values(array_filter(SapProcurementService::columns(), static fn (array $c): bool => $c['key'] !== 'pr_count'));
+        $prColumns = SapProcurementService::prColumns();
+        $filename = 'sap-procurement-' . ($salesOrder !== '' ? $salesOrder . '-' : '') . date('Ymd-His') . '.csv';
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        $out = fopen('php://output', 'w');
+        fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF));
+        fputcsv($out, array_merge(
+            array_column($columns, 'label'),
+            array_map(static fn (array $c): string => 'PR: ' . $c['label'], $prColumns)
+        ));
+        foreach ($records as $i => $row) {
+            $base = [];
+            foreach ($columns as $col) {
+                $base[] = $col['key'] === 'sno' ? $i + 1 : ($row[$col['key']] ?? '');
+            }
+            $lines = is_array($row['pr_lines'] ?? null) && $row['pr_lines'] !== [] ? $row['pr_lines'] : [[]];
+            foreach ($lines as $pr) {
+                $line = $base;
+                foreach ($prColumns as $col) {
+                    $line[] = $pr[$col['key']] ?? '';
+                }
+                fputcsv($out, $line);
+            }
+        }
+        fclose($out);
     }
 
     /*
@@ -219,13 +343,19 @@ class ReportsController extends Controller
         $from = trim((string) ($_GET['from'] ?? date('Y-m-01')));
         $to = trim((string) ($_GET['to'] ?? date('Y-m-d')));
 
+        $plant = strtoupper(trim((string) ($_GET['plant'] ?? '')));
+
         $cfg = config('sap');
-        $sapPath = $report === 'trims'
-            ? (string) ($cfg['trims_service'] ?? '')
-            : ($report === 'fabric' ? (string) ($cfg['fabric_service'] ?? '') : (string) ($cfg['service'] ?? ''));
+        $servicePaths = [
+            'trims'       => (string) ($cfg['trims_service'] ?? ''),
+            'fabric'      => (string) ($cfg['fabric_service'] ?? ''),
+            'production'  => (string) ($cfg['production_service'] ?? ''),
+            'procurement' => (string) ($cfg['procurement_service'] ?? ''),
+        ];
+        $sapPath = $servicePaths[$report] ?? (string) ($cfg['service'] ?? '');
 
         try {
-            $payload = $model->fetch($report, $year, $page, $perPage, $search, $from, $to, true, $salesOrder);
+            $payload = $model->fetch($report, $year, $page, $perPage, $search, $from, $to, true, $salesOrder, $plant);
             $this->jsonResponse([
                 'success' => true,
                 'message' => 'Live SAP data',

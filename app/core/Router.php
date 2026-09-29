@@ -26,6 +26,22 @@ class Router
     }
 
     /*
+     * Add a PUT route
+     */
+    public function put(string $pattern, $handler): void
+    {
+        $this->add('PUT', $pattern, $handler);
+    }
+
+    /*
+     * Add a DELETE route
+     */
+    public function delete(string $pattern, $handler): void
+    {
+        $this->add('DELETE', $pattern, $handler);
+    }
+
+    /*
      * Add a route
      */
     private function add(string $method, string $pattern, $handler): void
@@ -62,15 +78,16 @@ class Router
         /*
          * Dispatch the request
          */
+        $allowed = [];
         foreach ($this->routes as $route) {
-            if ($route['method'] !== $method && !($method === 'HEAD' && $route['method'] === 'GET')) {
-                continue;
-            }
-
             $regex = preg_replace('#\{([a-zA-Z_][a-zA-Z0-9_]*)\}#', '(?P<$1>[^/]+)', $route['pattern']);
             $regex = '#^' . $regex . '$#';
 
             if (!preg_match($regex, $uri, $matches)) {
+                continue;
+            }
+            if ($route['method'] !== $method && !($method === 'HEAD' && $route['method'] === 'GET')) {
+                $allowed[] = $route['method'];
                 continue;
             }
 
@@ -89,6 +106,14 @@ class Router
 
             call_user_func_array($handler, $params);
             return;
+        }
+
+        if ($allowed !== []) {
+            header('Allow: ' . implode(', ', array_unique($allowed)));
+            sap_reports_json_error(405, 'Method not allowed.', 'method_not_allowed');
+        }
+        if (sap_reports_wants_json()) {
+            sap_reports_json_error(404, 'Not found.', 'not_found');
         }
 
         require_once base_path('app/controllers/ErrorController.php');

@@ -97,12 +97,11 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
         </div>
     </div>
 
-    <div class="rpt-spinner" id="rptSpinner" hidden>
-        <div class="rpt-spinner-card">
-            <div class="rpt-spin" aria-hidden="true"></div>
-            <p>Loading from SAP…</p>
-        </div>
-    </div>
+    <?php
+        $loaderIcon = $isFabric ? 'texture' : 'sell';
+        $loaderSteps = ['Connecting to SAP…', 'Fetching ' . strtolower($kindLabel) . ' utilization…', 'Matching BOM, PO & GRN…', 'Preparing report…'];
+        require base_path('app/views/partials/loader.php');
+    ?>
 
     <header class="rpt-bar">
         <div class="rpt-bar-left">
@@ -291,7 +290,7 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                         </button>
 
                         <div class="rpt-cat-dropdown" id="rptColumnToggleDropdown">
-                            <button type="button" class="rpt-tb-btn" id="rptColumnToggleBtn" title="Show/Hide Columns">
+                            <button type="button" class="rpt-tb-btn" id="rptColumnToggleBtn" title="Manage columns: reorder, show or hide (saved to your account)">
                                 <i class="fas fa-columns"></i>
                                 <span>Columns</span>
                                 <span class="material-icons-round rpt-cat-dd-arrow" style="font-size: 14px;">expand_more</span>
@@ -300,6 +299,15 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                                 <!-- Checkboxes populated by JS -->
                             </div>
                         </div>
+
+                        <button type="button" class="rpt-tb-btn rpt-tb-btn-excel" data-excel-export="rptDataTable"
+                                data-excel-title="<?= e($kindLabel . ' Utilization — Sales Order ' . $salesOrder) ?>"
+                                data-excel-file="<?= e(strtolower($kindLabel) . '-utilization-SO' . $salesOrder) ?>"
+                                data-excel-sheet="<?= e($kindLabel . ' ' . $salesOrder) ?>"
+                                title="Download the table as an Excel file (visible columns and filtered rows)">
+                            <i class="fas fa-file-excel"></i>
+                            <span>Excel</span>
+                        </button>
 
                         <button type="button" class="rpt-tb-btn is-active" id="rptToggleColFilters" title="Toggle column filter inputs">
                             <i class="fas fa-filter"></i>
@@ -549,7 +557,7 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                     </thead>
                     <tbody id="rptTableBody">
                         <?php if ($awaitLive): ?>
-                            <tr class="rpt-table-loading"><td colspan="18" class="rpt-table-empty">Loading live SAP data…</td></tr>
+                            <tr class="rpt-table-loading"><td colspan="18" class="rpt-table-skeleton"><div class="rpt-skel-rows" aria-label="Loading live SAP data"><i></i><i></i><i></i><i></i><i></i><i></i></div></td></tr>
                             <tr id="rptNoMatchRow" class="rpt-table-no-match" style="display: none;">
                                 <td colspan="18" class="rpt-table-empty">
                                     <div class="rpt-no-match-card">
@@ -731,4 +739,8 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
     'catIcons'  => $trimCatIcons ?? [],
     'catColors' => $trimCatColors ?? [],
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
+<script src="<?= e(asset('js/loader.js')) ?>"></script>
+<?php $prefTableKey = $isFabric ? 'fabric_utilization_table' : 'trims_utilization_table'; require base_path('app/views/partials/table_preferences.php'); ?>
+<script src="<?= e(asset('js/table-columns.js')) ?>"></script>
+<script src="<?= e(asset('js/excel-export.js')) ?>"></script>
 <script src="<?= e(asset('js/utilization.js')) ?>"></script>

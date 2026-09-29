@@ -2,7 +2,7 @@
 /*
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 03/09/2026
- * DESCRIPTION : Reports index view - Compact 3-card non-scrolling layout
+ * DESCRIPTION : Reports index view - Compact card non-scrolling layout
  */ 
 $dashboardUrl = sap_reports_evol_url('portal_dashboard.php');
 ?>
@@ -15,7 +15,7 @@ $dashboardUrl = sap_reports_evol_url('portal_dashboard.php');
     <p class="lede">Select a report module to view live SAP utilization and order analytics.</p>
 </div>
 
-<!-- Compact 3-Column Non-Scrolling Card Row -->
+<!-- Compact Non-Scrolling Card Row -->
 <div class="rpt-cards-row">
     <!-- Card 1: Utilization Report (All Materials - Modal) -->
     <div class="rpt-card card-all" id="openUtilModalBtn" role="button" tabindex="0" aria-haspopup="dialog">
@@ -64,6 +64,40 @@ $dashboardUrl = sap_reports_evol_url('portal_dashboard.php');
         <p>Dedicated SAP trims report with categorical breakdown (Buttons, Zippers, Thread, Labels &amp; Consumables).</p>
         <div class="card-action action-amber">
             <span>Open Trims Unit</span>
+            <i class="fas fa-arrow-right"></i>
+        </div>
+    </a>
+
+    <!-- Card 4: Production Report -->
+    <a class="rpt-card card-production" href="<?= e(url('production')) ?>">
+        <div class="card-accent-line accent-violet"></div>
+        <div class="card-top">
+            <div class="card-icon icon-violet">
+                <i class="fas fa-industry"></i>
+            </div>
+            <span class="card-badge badge-violet">PRODUCTION</span>
+        </div>
+        <h3>Production Report</h3>
+        <p>Live SAP production status by sales order: cutting, sewing, washing, finishing &amp; shipment quantities.</p>
+        <div class="card-action action-violet">
+            <span>Open Production</span>
+            <i class="fas fa-arrow-right"></i>
+        </div>
+    </a>
+
+    <!-- Card 5: Procurement Report -->
+    <a class="rpt-card card-procurement" href="<?= e(url('procurement')) ?>">
+        <div class="card-accent-line accent-rose"></div>
+        <div class="card-top">
+            <div class="card-icon icon-rose">
+                <i class="fas fa-cart-shopping"></i>
+            </div>
+            <span class="card-badge badge-rose">PROCUREMENT</span>
+        </div>
+        <h3>Procurement Report</h3>
+        <p>Live SAP component requirement, PR, PO &amp; stock quantities by sales order, with PR line details.</p>
+        <div class="card-action action-rose">
+            <span>Open Procurement</span>
             <i class="fas fa-arrow-right"></i>
         </div>
     </a>
