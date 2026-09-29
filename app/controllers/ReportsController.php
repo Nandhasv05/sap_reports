@@ -247,7 +247,7 @@ class ReportsController extends Controller
         } elseif ($report === 'trims') {
             fputcsv($out, [
                 'S.No', 'Category', 'Sales Order', 'Material', 'Purchase Order', 'PO Item',
-                'SO Qty', 'BOM Qty', 'Planned Qty', 'Production Qty',
+                'SO Qty', 'BOM Qty', 'Total BOM Qty', 'Planned Qty', 'Production Qty',
                 'PO Qty', 'GRN Qty', 'Issue Qty', 'GRN Sales Orders',
             ]);
             foreach ($records as $i => $row) {
@@ -260,6 +260,7 @@ class ReportsController extends Controller
                     $row['po_item'] ?? '',
                     $row['so_qty'] ?? 0,
                     $row['bom_qty'] ?? 0,
+                    $row['total_bom_qty'] ?? 0,
                     $row['planned_qty'] ?? 0,
                     $row['production_qty'] ?? 0,
                     $row['po_qty'] ?? 0,

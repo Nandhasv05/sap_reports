@@ -14,9 +14,9 @@
     *  COLOR PLAN - GET THE COLUMN INDEX BASED ON THE MATERIAL TYPE
     */
     const COL = isTrims
-        ? { bom: 11, plan: 12, prod: 13, po: 14, grn: 15, issue: 16 }
-        : { bom: 7, plan: 8, prod: 9, po: 10, grn: 11, issue: 12 };
-    const TABLE_COLUMNS = 18;
+        ? { bom: 11, totalBom: 12, plan: 13, prod: 14, po: 15, grn: 16, issue: 17, sos: 18 }
+        : { bom: 7, totalBom: null, plan: 8, prod: 9, po: 10, grn: 11, issue: 12, sos: 13 };
+    const TABLE_COLUMNS = isTrims ? 19 : 18;
     const MAT_COL = 2;
 
     /*
@@ -190,15 +190,22 @@
         return String(num);
     }
 
+    function footTotal(n) {
+        const v = Number(n) || 0;
+        return Math.abs(v) < 0.0000001 ? '—' : String(Math.round(v) || 0);
+    }
+
     function displayCode(n) {
         const text = String(n ?? '').trim();
         return (text === '' || text === '-') ? '—' : text;
     }
 
+    // [{ so, qty }] — qty is null when SAP sends a plain SO number without "-quantity".
     function soListFromRow(row) {
-        if (Array.isArray(row.grn_so_list) && row.grn_so_list.length) return row.grn_so_list;
+        if (Array.isArray(row.grn_so_qty) && row.grn_so_qty.length) return row.grn_so_qty;
+        if (Array.isArray(row.grn_so_list) && row.grn_so_list.length) return row.grn_so_list.map(so => ({ so, qty: null }));
         if (row.grn_sales_orders) {
-            return String(row.grn_sales_orders).replace(/ /g, '').split(',').map(s => s.trim()).filter(Boolean);
+            return String(row.grn_sales_orders).replace(/ /g, '').split(',').map(s => s.trim()).filter(Boolean).map(so => ({ so, qty: null }));
         }
         return [];
     }
@@ -235,9 +242,13 @@
             let extraSo = '<span class="grn-so-empty">-</span>';
             if (sos.length) {
                 extraSo = '<div class="grn-so-tags">' + sos.map(item => {
-                    const clean = String(item).replace(/,/g, '').trim();
+                    const clean = String(item.so ?? '').replace(/,/g, '').trim();
                     if (!clean) return '';
-                    return `<a href="${escapeHtml(pageUrl)}?so=${encodeURIComponent(clean)}" class="so-chip" title="Direct API call for Sales Order ${escapeHtml(clean)}">${escapeHtml(clean)}</a>`;
+                    const qtyText = item.qty === null || item.qty === undefined ? '' : dashCell(item.qty).replace('—', '-');
+                    const exportText = qtyText ? `${clean} (${qtyText})` : clean;
+                    const title = `Direct API call for Sales Order ${clean}` + (qtyText ? ` · Qty ${qtyText}` : '');
+                    const qtyBadge = qtyText ? `<span class="so-chip-qty">${escapeHtml(qtyText)}</span>` : '';
+                    return `<a href="${escapeHtml(pageUrl)}?so=${encodeURIComponent(clean)}" class="so-chip" data-export="${escapeHtml(exportText)}" title="${escapeHtml(title)}">${escapeHtml(clean)}${qtyBadge}</a>`;
                 }).join('') + '</div>';
             }
             const tr = document.createElement('tr');
@@ -251,7 +262,8 @@
             const textCell = (value) => `<td title="${escapeHtml(displayCode(value))}">${escapeHtml(displayCode(value))}</td>`;
             const matInfoHtml = isFabric ? '' : [row.mat_type, row.mat_type_desc, row.mat_group, row.mat_group_desc].map(textCell).join('');
             const attrHtml = isFabric ? [row.attribute1_text, row.attribute2_text, row.attribute3_text, row.colour].map(textCell).join('') : '';
-            // Cell order must match the <thead> in app/views/reports/material.php (18 columns for both reports).
+            const totalBomHtml = isFabric ? '' : `<td class="num bom-qty-cell total-bom-cell"><span class="bom-val">${escapeHtml(dashCell(row.total_bom_qty))}</span></td>`;
+            // Cell order must match the <thead> in app/views/reports/material.php (19 columns for trims, 18 for fabric).
             tr.innerHTML = `
                 <td class="num sno">${i + 1}</td>
                 <td>${soHtml}</td>
@@ -262,6 +274,7 @@
                 <td>${escapeHtml(displayCode(row.po_item).replace(/,/g, ''))}</td>
                 <td class="num qty-cell" data-qty-type="so"><span class="qty-val">${escapeHtml(dashCell(row.so_qty))}</span></td>
                 <td class="num bom-qty-cell"><span class="bom-val">${escapeHtml(dashCell(row.bom_qty))}</span></td>
+                ${totalBomHtml}
                 <td class="num qty-cell" data-qty-type="plan"><span class="qty-val">${escapeHtml(dashCell(row.planned_qty))}</span></td>
                 <td class="num qty-cell" data-qty-type="prod"><span class="qty-val">${escapeHtml(dashCell(row.production_qty))}</span></td>
                 <td class="num qty-cell" data-qty-type="po"><span class="qty-val">${escapeHtml(dashCell(row.po_qty))}</span></td>
@@ -289,11 +302,12 @@
         const setFoot = (id, val) => {
             const el = document.getElementById(id);
             const span = el?.querySelector('.foot-val') || el;
-            if (span) span.textContent = dashCell(val);
+            if (span) span.textContent = footTotal(val);
         };
         const label = document.getElementById('footTotalLabel');
         if (label) label.textContent = `Total (${lines.toLocaleString('en-US')} lines)`;
         setFoot('footBomQty', bom);
+        setFoot('footTotalBomQty', Number(s.total_bom_qty || 0));
         setFoot('footPlannedQty', plan);
         setFoot('footProductionQty', prod);
         setFoot('footPoQty', po);
@@ -425,6 +439,7 @@
         });
         const footTotalLabel = document.getElementById('footTotalLabel');
         const footBomQty = document.getElementById('footBomQty');
+        const footTotalBomQty = document.getElementById('footTotalBomQty');
         const footPlannedQty = document.getElementById('footPlannedQty');
         const footProductionQty = document.getElementById('footProductionQty');
         const footPoQty = document.getElementById('footPoQty');
@@ -524,8 +539,9 @@
  });
  if (searchClear) searchClear.style.display = query !== '' ? 'flex' : 'none';
 
-        let vc = 0, sb = 0, sp = 0, spd = 0, spo = 0, sg = 0, si = 0;
+        let vc = 0, sb = 0, stb = 0, sp = 0, spd = 0, spo = 0, sg = 0, si = 0;
         const seenMats = new Set();
+        const seenTotalBom = new Set();
         const matColIndex = MAT_COL;
 
         rowData.forEach(item => {
@@ -550,6 +566,14 @@
                 sg += item.colNums[COL.grn]; 
                 
                 const mat = item.colTexts[matColIndex] || '';
+                if (COL.totalBom !== null) {
+                    // Lines with the same material and GRN sales orders repeat the same Total BOM Qty.
+                    const totalBomKey = mat + '|' + (item.colTexts[COL.sos] || '').replace(/\s+/g, ' ');
+                    if (!seenTotalBom.has(totalBomKey)) {
+                        seenTotalBom.add(totalBomKey);
+                        stb += item.colNums[COL.totalBom];
+                    }
+                }
                 if (mat !== '' && !seenMats.has(mat)) {
                     seenMats.add(mat);
                     sb += item.colNums[COL.bom]; 
@@ -570,26 +594,27 @@
  if (activeFilterBadge) { activeFilterBadge.style.display = colFilters.length > 0 ? 'inline-flex' : 'none'; activeFilterBadge.textContent = colFilters.length; }
  if (clearAllBtn) clearAllBtn.style.display = (isFiltered || currentSort.col !== null) ? 'inline-flex' : 'none';
         if (footTotalLabel) footTotalLabel.textContent = isFiltered ? `Total (${vc.toLocaleString()} of ${rowData.length.toLocaleString()} lines)` : `Total (${rowData.length.toLocaleString()} lines)`;
-        if (footBomQty) footBomQty.innerHTML = `<span class="foot-val">${formatQty(sb)}</span>`;
+        if (footBomQty) footBomQty.innerHTML = `<span class="foot-val">${footTotal(sb)}</span>`;
+        if (footTotalBomQty) footTotalBomQty.innerHTML = `<span class="foot-val">${footTotal(stb)}</span>`;
         if (footPlannedQty) {
             const tr = getTrend(sp, sb);
-            footPlannedQty.innerHTML = `<span class="foot-val">${formatQty(sp)}</span>` + (sb > 0 ? `<span class="foot-trend is-${tr.status}" title="Total Planned vs BOM (${tr.label})"><i class="fas ${tr.icon}"></i></span>` : '');
+            footPlannedQty.innerHTML = `<span class="foot-val">${footTotal(sp)}</span>` + (sb > 0 ? `<span class="foot-trend is-${tr.status}" title="Total Planned vs BOM (${tr.label})"><i class="fas ${tr.icon}"></i></span>` : '');
         }
         if (footProductionQty) {
             const tr = getTrend(spd, sb);
-            footProductionQty.innerHTML = `<span class="foot-val">${formatQty(spd)}</span>` + (sb > 0 ? `<span class="foot-trend is-${tr.status}" title="Total Production vs BOM (${tr.label})"><i class="fas ${tr.icon}"></i></span>` : '');
+            footProductionQty.innerHTML = `<span class="foot-val">${footTotal(spd)}</span>` + (sb > 0 ? `<span class="foot-trend is-${tr.status}" title="Total Production vs BOM (${tr.label})"><i class="fas ${tr.icon}"></i></span>` : '');
         }
         if (footPoQty) {
             const tr = getTrend(spo, sb);
-            footPoQty.innerHTML = `<span class="foot-val">${formatQty(spo)}</span>` + (sb > 0 ? `<span class="foot-trend is-${tr.status}" title="Total PO Qty vs BOM (${tr.label})"><i class="fas ${tr.icon}"></i></span>` : '');
+            footPoQty.innerHTML = `<span class="foot-val">${footTotal(spo)}</span>` + (sb > 0 ? `<span class="foot-trend is-${tr.status}" title="Total PO Qty vs BOM (${tr.label})"><i class="fas ${tr.icon}"></i></span>` : '');
         }
         if (footGrnQty) {
             const tr = getTrend(sg, sb);
-            footGrnQty.innerHTML = `<span class="foot-val">${formatQty(sg)}</span>` + (sb > 0 ? `<span class="foot-trend is-${tr.status}" title="Total GRN Qty vs BOM (${tr.label})"><i class="fas ${tr.icon}"></i></span>` : '');
+            footGrnQty.innerHTML = `<span class="foot-val">${footTotal(sg)}</span>` + (sb > 0 ? `<span class="foot-trend is-${tr.status}" title="Total GRN Qty vs BOM (${tr.label})"><i class="fas ${tr.icon}"></i></span>` : '');
         }
         if (footIssueQty) {
             const tr = getTrend(si, sb);
-            footIssueQty.innerHTML = `<span class="foot-val">${formatQty(si)}</span>` + (sb > 0 ? `<span class="foot-trend is-${tr.status}" title="Total Issue Qty vs BOM (${tr.label})"><i class="fas ${tr.icon}"></i></span>` : '');
+            footIssueQty.innerHTML = `<span class="foot-val">${footTotal(si)}</span>` + (sb > 0 ? `<span class="foot-trend is-${tr.status}" title="Total Issue Qty vs BOM (${tr.label})"><i class="fas ${tr.icon}"></i></span>` : '');
         }
  // Update stat cards and charts
  updateStatCards(vc, sb, sp, spd, spo, sg, si);

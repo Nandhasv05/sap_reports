@@ -170,7 +170,8 @@ class SapUtilizationService
      */
     private function mapRow(array $row, string $kind = ''): array
     {
-        $soList = $this->parseSoList((string) ($row['GRN_SalesOrders'] ?? ''));
+        $soQty = $this->parseSoQtyList((string) ($row['GRN_SalesOrders'] ?? ''));
+        $soList = array_column($soQty, 'so');
         $material = (string) ($row['Material'] ?? '');
         return [
             'sales_order'      => $this->displaySo((string) ($row['SalesOrder'] ?? '')),
@@ -184,13 +185,15 @@ class SapUtilizationService
             'po_item'          => $this->displaySo((string) ($row['PO_Item'] ?? '')),
             'so_qty'           => (float) ($row['SO_QTY'] ?? 0),
             'bom_qty'          => (float) ($row['BOM_QTY'] ?? 0),
+            'total_bom_qty'    => (float) ($row['TotalBOM_QTY'] ?? 0),
             'planned_qty'      => (float) ($row['Planned_Qty'] ?? 0),
             'production_qty'   => (float) ($row['Production_Qty'] ?? 0),
             'po_qty'           => (float) ($row['PO_QTY'] ?? 0),
             'grn_qty'          => (float) ($row['GRN_QTY'] ?? 0),
             'issue_qty'        => (float) ($row['Issue_QTY'] ?? 0),
-            'grn_sales_orders' => implode(', ', $soList),
+            'grn_sales_orders' => $this->formatSoQtyList($soQty),
             'grn_so_list'      => $soList,
+            'grn_so_qty'       => $soQty,
             'attribute1_text'  => (string) ($row['Attribute1_text'] ?? ''),
             'attribute2_text'  => (string) ($row['Attribute2_text'] ?? ''),
             'attribute3_text'  => (string) ($row['Attribute3_text'] ?? ''),
@@ -240,6 +243,57 @@ class SapUtilizationService
     }
 
     /*
+     * Parse "0060000332-2728.000,0060000335-2524.000" into [['so' => '60000332', 'qty' => 2728.0], ...].
+     * Entries without a quantity (plain SO numbers) get qty null; repeated SOs are merged and their quantities summed.
+     *
+     * @return array<int, array{so: string, qty: ?float}>
+     */
+    public function parseSoQtyList(string $raw): array
+    {
+        $raw = trim($raw);
+        if ($raw === '') {
+            return [];
+        }
+        $out = [];
+        foreach (preg_split('/[\s,]+/', $raw) ?: [] as $part) {
+            $qty = null;
+            if (preg_match('/^([^-]+)-(-?\d+(?:\.\d+)?)$/', $part, $m)) {
+                $part = $m[1];
+                $qty = (float) $m[2];
+            }
+            $so = $this->displaySo($part);
+            if ($so === '') {
+                continue;
+            }
+            if (!isset($out[$so])) {
+                $out[$so] = ['so' => $so, 'qty' => $qty];
+            } elseif ($qty !== null) {
+                $out[$so]['qty'] = ($out[$so]['qty'] ?? 0.0) + $qty;
+            }
+        }
+        return array_values($out);
+    }
+
+    /*
+     * "60000332 (2728), 60000335 (2524)" — used for search and CSV export
+     */
+    public function formatSoQtyList(array $soQty): string
+    {
+        return implode(', ', array_map(
+            fn (array $entry): string => $entry['qty'] === null ? $entry['so'] : $entry['so'] . ' (' . $this->qtyText($entry['qty']) . ')',
+            $soQty
+        ));
+    }
+
+    /*
+     * Whole numbers without decimals, otherwise up to 3 decimals
+     */
+    public function qtyText(float $qty): string
+    {
+        return abs($qty - round($qty)) < 0.0005 ? (string) (int) round($qty) : rtrim(rtrim(number_format($qty, 3, '.', ''), '0'), '.');
+    }
+
+    /*
      * Empty summary method
      */
     private function emptySummary(): array
@@ -248,6 +302,7 @@ class SapUtilizationService
             'lines'            => 0,
             'so_qty'           => 0,
             'bom_qty'          => 0,
+            'total_bom_qty'    => 0,
             'planned_qty'      => 0,
             'production_qty'   => 0,
             'po_qty'           => 0,
@@ -274,11 +329,18 @@ class SapUtilizationService
         $sum = $this->emptySummary();
         $sum['lines'] = count($rows);
         $seen = [];
+        $seenTotalBom = [];
         foreach ($rows as $row) {
             $sum['po_qty'] += (float) ($row['po_qty'] ?? 0);
             $sum['grn_qty'] += (float) ($row['grn_qty'] ?? 0);
 
             $mat = (string) ($row['material'] ?? '');
+            // TotalBOM_QTY is the BOM across the line's GRN sales orders, so lines sharing material and SO set count once.
+            $totalBomKey = $mat . '|' . implode(',', $row['grn_so_list'] ?? []);
+            if (!isset($seenTotalBom[$totalBomKey])) {
+                $seenTotalBom[$totalBomKey] = true;
+                $sum['total_bom_qty'] += (float) ($row['total_bom_qty'] ?? 0);
+            }
             if ($mat !== '' && !isset($seen[$mat])) {
                 $seen[$mat] = true;
                 $sum['so_qty'] += (float) ($row['so_qty'] ?? 0);

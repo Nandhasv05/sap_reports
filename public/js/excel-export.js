@@ -217,7 +217,7 @@ ${colsXml}
     function cellText(cell) {
         if (!cell) return '';
         const chips = cell.querySelectorAll('.so-chip');
-        if (chips.length) return Array.from(chips).map(c => c.textContent.trim()).filter(Boolean).join(', ');
+        if (chips.length) return Array.from(chips).map(c => (c.dataset.export || c.textContent).trim()).filter(Boolean).join(', ');
         const val = cell.querySelector('.qty-val, .bom-val, .foot-val');
         return (val ? val.textContent : cell.textContent).replace(/\s+/g, ' ').trim();
     }

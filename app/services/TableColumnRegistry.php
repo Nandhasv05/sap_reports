@@ -76,6 +76,7 @@ final class TableColumnRegistry
                 'po_line'             => 'PO Line',
                 'so_qty'              => 'SO Qty',
                 'bom_qty'             => 'BOM Qty',
+                'total_bom_qty'       => 'Total BOM Qty',
                 'planned_qty'         => 'Planned',
                 'production_qty'      => 'Production',
                 'po_qty'              => 'PO Qty',

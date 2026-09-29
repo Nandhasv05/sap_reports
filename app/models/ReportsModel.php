@@ -123,6 +123,17 @@ class ReportsModel
     }
 
     /*
+     * Table footer total rounded to a whole number (no thousands separator, like the table cells)
+     */
+    public function footTotal($n): string
+    {
+        if (!is_numeric($n) || abs((float) $n) < 0.0000001) {
+            return '-';
+        }
+        return number_format((float) $n, 0, '.', '');
+    }
+
+    /*
      * Fetch the records
      */
     public function fetch(string $report, int $year, int $page, int $perPage, string $search, string $from, string $to, bool $export, string $salesOrder = '', string $plant = ''): array

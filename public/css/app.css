@@ -1171,6 +1171,24 @@ body.rpt-loading { cursor: wait; }
     border-color: #c2410c;
     box-shadow: 0 2px 5px rgba(194, 65, 12, 0.25);
 }
+.so-chip-qty {
+    margin-left: 5px;
+    padding: 0 5px;
+    border-radius: 4px;
+    font-size: 10.5px;
+    font-weight: 700;
+    background: rgba(255, 255, 255, 0.85);
+    color: #334155;
+    border: 1px solid rgba(51, 65, 85, 0.2);
+}
+.so-chip:hover .so-chip-qty {
+    background: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.45);
+}
+.total-bom-cell .bom-val {
+    font-weight: 700;
+}
 .so-main-link {
     font-weight: 700;
     color: #0f766e;

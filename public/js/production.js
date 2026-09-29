@@ -60,6 +60,12 @@
         return v.toLocaleString('en-US', { maximumFractionDigits: 3 });
     }
 
+    function fmtTotal(n) {
+        const v = Number(n) || 0;
+        if (Math.abs(v) < 0.0005) return '—';
+        return (Math.round(v) || 0).toLocaleString('en-US');
+    }
+
     function fmtDate(iso) {
         const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
         return m ? `${m[3]}-${m[2]}-${m[1]}` : '—';
@@ -241,7 +247,7 @@
         table.querySelectorAll('tfoot [data-foot-col]').forEach(th => {
             const col = columns[parseInt(th.getAttribute('data-foot-col'), 10)];
             if (!col || !isQty(col)) return;
-            th.innerHTML = `<span class="foot-val">${fmtQty(sums[col.key])}</span>`;
+            th.innerHTML = `<span class="foot-val">${fmtTotal(sums[col.key])}</span>`;
             th.classList.toggle('is-neg', sums[col.key] < 0);
         });
         statKeys.forEach(k => {
