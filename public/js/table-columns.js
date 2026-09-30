@@ -61,8 +61,15 @@
                 .filter(id => known.has(id) && !locked.includes(id));
             const hidden = new Set((prefs && Array.isArray(prefs.hiddenColumns) ? prefs.hiddenColumns : [])
                 .filter(id => known.has(id) && !locked.includes(id)));
+            // Columns added since the save go right after the column that precedes them in the default order.
+            const order = Array.from(new Set([...locked, ...saved]));
+            ids.forEach((id, i) => {
+                if (order.includes(id)) return;
+                const prev = ids.slice(0, i).reverse().find(p => order.includes(p));
+                order.splice(prev ? order.indexOf(prev) + 1 : order.length, 0, id);
+            });
             return {
-                columnOrder: Array.from(new Set([...locked, ...saved, ...ids])),
+                columnOrder: order,
                 hiddenColumns: ids.filter(id => hidden.has(id)),
             };
         }

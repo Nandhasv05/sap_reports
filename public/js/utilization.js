@@ -15,8 +15,8 @@
     */
     const COL = isTrims
         ? { bom: 11, totalBom: 12, plan: 13, prod: 14, po: 15, grn: 16, issue: 17, sos: 18 }
-        : { bom: 7, totalBom: null, plan: 8, prod: 9, po: 10, grn: 11, issue: 12, sos: 13 };
-    const TABLE_COLUMNS = isTrims ? 19 : 18;
+        : { bom: 7, totalBom: 8, plan: 9, prod: 10, po: 11, grn: 12, issue: 13, sos: 14 };
+    const TABLE_COLUMNS = 19;
     const MAT_COL = 2;
 
     /*
@@ -262,8 +262,8 @@
             const textCell = (value) => `<td title="${escapeHtml(displayCode(value))}">${escapeHtml(displayCode(value))}</td>`;
             const matInfoHtml = isFabric ? '' : [row.mat_type, row.mat_type_desc, row.mat_group, row.mat_group_desc].map(textCell).join('');
             const attrHtml = isFabric ? [row.attribute1_text, row.attribute2_text, row.attribute3_text, row.colour].map(textCell).join('') : '';
-            const totalBomHtml = isFabric ? '' : `<td class="num bom-qty-cell total-bom-cell"><span class="bom-val">${escapeHtml(dashCell(row.total_bom_qty))}</span></td>`;
-            // Cell order must match the <thead> in app/views/reports/material.php (19 columns for trims, 18 for fabric).
+            const totalBomHtml = `<td class="num bom-qty-cell total-bom-cell"><span class="bom-val">${escapeHtml(dashCell(row.total_bom_qty))}</span></td>`;
+            // Cell order must match the <thead> in app/views/reports/material.php (19 columns for both fabric and trims).
             tr.innerHTML = `
                 <td class="num sno">${i + 1}</td>
                 <td>${soHtml}</td>

@@ -121,15 +121,19 @@ class ReportsController extends Controller
         $salesOrder = preg_replace('/\D/', '', (string) ($_GET['so'] ?? '')) ?? '';
         $plant = substr(strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string) ($_GET['plant'] ?? '')) ?? ''), 0, 10);
         $service = new SapProductionService();
+        $range = $this->productionRange($service, $plant);
+        $activeRange = $range !== null && $range['error'] === null ? $range : null;
 
         if (strtolower((string) ($_GET['export'] ?? '')) === 'csv') {
             $records = [];
             try {
-                $records = $model->fetch('production', (int) date('Y'), 1, 10000, '', '', '', true, $salesOrder, $plant)['records'] ?? [];
+                $records = $activeRange !== null
+                    ? $service->rangeReport($activeRange['from'], $activeRange['to'], $salesOrder, $plant)['records']
+                    : ($model->fetch('production', (int) date('Y'), 1, 10000, '', '', '', true, $salesOrder, $plant)['records'] ?? []);
             } catch (Throwable $e) {
                 $records = [];
             }
-            $this->sendProductionCsv($salesOrder, $records);
+            $this->sendProductionCsv($activeRange !== null ? $activeRange['from'] . '_to_' . $activeRange['to'] . ($salesOrder !== '' ? '-SO' . $salesOrder : '') . ($plant !== '' ? '-' . $plant : '') : $salesOrder, $records);
             return;
         }
 
@@ -142,15 +146,67 @@ class ReportsController extends Controller
             'salesOrder' => $salesOrder,
             'plant'      => $plant,
             'plants'     => $service->plants(),
+            'range'      => $activeRange,
+            'rangeError' => $range['error'] ?? null,
+            'rangeInput' => $range,
+            'presets'    => SapProductionService::rangePresets(),
             'columns'    => SapProductionService::columns(),
             'extraHead'  => '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>',
         ]);
     }
 
-    private function sendProductionCsv(string $salesOrder, array $records): void
+    /*
+     * SO creation date range from ?range=preset[&from=&to=]; null when no date was chosen.
+     * The sales order / plant fields then narrow the range, so a plant must be one of the production plants.
+     */
+    private function productionRange(SapProductionService $service, string $plant): ?array
+    {
+        $preset = strtolower(trim((string) ($_GET['range'] ?? '')));
+        if ($preset === '') {
+            return null;
+        }
+        $range = SapProductionService::resolveRange($preset, (string) ($_GET['from'] ?? ''), (string) ($_GET['to'] ?? ''));
+        if ($range['error'] === null && $plant !== '' && !in_array($plant, $service->plants(), true)) {
+            $range['error'] = 'Plant must be one of ' . implode(', ', $service->plants()) . ', or leave it empty.';
+        }
+        return $range;
+    }
+
+    /*
+     * Date-range mode: ?range=… returns the sales orders created in the range, ?pairs=4489-P002,… the production of one batch
+     */
+    private function productionRangeData(): void
+    {
+        $service = new SapProductionService();
+        $cfg = config('sap');
+        if (isset($_GET['pairs'])) {
+            $pairs = $service->parsePairs((string) $_GET['pairs'], max(1, (int) ($cfg['production_batch_size'] ?? 4)));
+            if ($pairs === []) {
+                $this->jsonResponse(['success' => false, 'message' => 'No valid sales orders in this batch.', 'error' => 'No valid sales orders in this batch.', 'data' => []], 422);
+            }
+            $this->jsonResponse(['success' => true, 'message' => 'Live SAP data', 'data' => $service->pairsReport($pairs)]);
+        }
+
+        $salesOrder = preg_replace('/\D/', '', (string) ($_GET['so'] ?? '')) ?? '';
+        $plant = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string) ($_GET['plant'] ?? '')) ?? '');
+        $range = $this->productionRange($service, $plant);
+        if ($range === null || $range['error'] !== null) {
+            $message = $range['error'] ?? 'Choose a date range.';
+            $this->jsonResponse(['success' => false, 'message' => $message, 'error' => $message, 'data' => []], 422);
+        }
+        $orders = $service->rangeOrders($range['from'], $range['to'], $salesOrder, $plant);
+        if ($orders['error'] !== null) {
+            $this->jsonResponse(['success' => false, 'message' => 'Unable to fetch SAP data: ' . $orders['error'], 'error' => $orders['error'], 'data' => []], 500);
+        }
+        $orders['batch_size'] = max(1, (int) ($cfg['production_batch_size'] ?? 4));
+        $orders['batch_parallel'] = max(1, (int) ($cfg['production_batch_parallel'] ?? 3));
+        $this->jsonResponse(['success' => true, 'message' => 'Live SAP data', 'data' => $orders]);
+    }
+
+    private function sendProductionCsv(string $fileTag, array $records): void
     {
         $columns = SapProductionService::columns();
-        $filename = 'sap-production-' . ($salesOrder !== '' ? $salesOrder . '-' : '') . date('Ymd-His') . '.csv';
+        $filename = 'sap-production-' . ($fileTag !== '' ? $fileTag . '-' : '') . date('Ymd-His') . '.csv';
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="' . $filename . '"');
         $out = fopen('php://output', 'w');
@@ -272,7 +328,7 @@ class ReportsController extends Controller
         } elseif ($report === 'fabric') {
             fputcsv($out, [
                 'S.No', 'Sales Order', 'Material', 'Description', 'Purchase Order', 'PO Item',
-                'SO Qty', 'BOM Qty', 'Planned Qty', 'Production Qty',
+                'SO Qty', 'BOM Qty', 'Total BOM Qty', 'Planned Qty', 'Production Qty',
                 'PO Qty', 'GRN Qty', 'Issue Qty', 'GRN Sales Orders',
                 'Attribute1_text', 'Attribute2_text', 'Attribute3_text', 'Colour'
             ]);
@@ -286,6 +342,7 @@ class ReportsController extends Controller
                     $row['po_item'] ?? '',
                     $row['so_qty'] ?? 0,
                     $row['bom_qty'] ?? 0,
+                    $row['total_bom_qty'] ?? 0,
                     $row['planned_qty'] ?? 0,
                     $row['production_qty'] ?? 0,
                     $row['po_qty'] ?? 0,
@@ -345,6 +402,11 @@ class ReportsController extends Controller
         $to = trim((string) ($_GET['to'] ?? date('Y-m-d')));
 
         $plant = strtoupper(trim((string) ($_GET['plant'] ?? '')));
+
+        if ($report === 'production' && (isset($_GET['pairs']) || trim((string) ($_GET['range'] ?? '')) !== '')) {
+            $this->productionRangeData();
+            return;
+        }
 
         $cfg = config('sap');
         $servicePaths = [

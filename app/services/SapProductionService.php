@@ -11,6 +11,11 @@ class SapProductionService
 {
     use SapValueFormat;
 
+    /** Longest date range (days) that may be loaded at once; each sales order in it is a separate SAP call */
+    public const MAX_RANGE_DAYS = 62;
+    private const RANGE_TIMEZONE = 'Asia/Kolkata';
+    private const RANGE_CHUNK_DAYS = 7;
+
     private SapODataClient $client;
     private array $cfg;
 
@@ -84,6 +89,85 @@ class SapProductionService
     public static function defaultHiddenColumns(): array
     {
         return ['sales_order', 'plant', 'customer', 'customer_name', 'header_material', 'material_group'];
+    }
+
+    /*
+     * Date-range mode lists many sales orders, so the order / customer columns stay visible there.
+     */
+    public static function defaultHiddenRangeColumns(): array
+    {
+        return ['customer', 'material_group'];
+    }
+
+    /*
+     * Date presets for the SO creation date filter (key => label)
+     */
+    public static function rangePresets(): array
+    {
+        return [
+            'today'      => 'Today',
+            'yesterday'  => 'Yesterday',
+            'this_week'  => 'This Week',
+            'this_month' => 'This Month',
+            'last_week'  => 'Previous Week',
+            'last_month' => 'Previous Month',
+            'custom'     => 'Custom Date',
+        ];
+    }
+
+    /*
+     * Turn a preset (weeks start on Monday) or a custom from / to into a validated Y-m-d range.
+     *
+     * @return array{preset: string, from: string, to: string, label: string, error: ?string}
+     */
+    public static function resolveRange(string $preset, string $from = '', string $to = ''): array
+    {
+        $tz = new DateTimeZone(self::RANGE_TIMEZONE);
+        $today = new DateTimeImmutable('today', $tz);
+        $preset = array_key_exists($preset, self::rangePresets()) ? $preset : 'today';
+        $out = ['preset' => $preset, 'from' => '', 'to' => '', 'label' => self::rangePresets()[$preset], 'error' => null];
+
+        [$start, $end] = match ($preset) {
+            'today'      => [$today, $today],
+            'yesterday'  => [$today->modify('-1 day'), $today->modify('-1 day')],
+            'this_week'  => [$today->modify('monday this week'), $today],
+            'last_week'  => [$today->modify('monday last week'), $today->modify('monday last week')->modify('+6 days')],
+            'this_month' => [$today->modify('first day of this month'), $today],
+            'last_month' => [$today->modify('first day of last month'), $today->modify('last day of last month')],
+            default      => [self::parseDate($from, $tz), self::parseDate($to, $tz)],
+        };
+
+        if ($start === null || $end === null) {
+            $out['error'] = 'Choose both a From and a To date.';
+            return $out;
+        }
+        if ($start > $end) {
+            [$start, $end] = [$end, $start];
+        }
+        if ($end > $today) {
+            $end = $today;
+        }
+        if ($start > $today) {
+            $out['error'] = 'The date range is in the future.';
+            return $out;
+        }
+        if ((int) $start->diff($end)->days + 1 > self::MAX_RANGE_DAYS) {
+            $out['error'] = 'Choose a range of ' . self::MAX_RANGE_DAYS . ' days or less.';
+            return $out;
+        }
+
+        $out['from'] = $start->format('Y-m-d');
+        $out['to'] = $end->format('Y-m-d');
+        if ($preset === 'custom') {
+            $out['label'] = $out['from'] === $out['to'] ? $start->format('d M Y') : $start->format('d M Y') . ' – ' . $end->format('d M Y');
+        }
+        return $out;
+    }
+
+    private static function parseDate(string $value, DateTimeZone $tz): ?DateTimeImmutable
+    {
+        $date = DateTimeImmutable::createFromFormat('!Y-m-d', trim($value), $tz);
+        return $date !== false && $date->format('Y-m-d') === trim($value) ? $date : null;
     }
 
     /*
@@ -188,6 +272,218 @@ class SapProductionService
             'tolerance'       => (string) ($first['tolerance'] ?? ''),
         ];
         return $out;
+    }
+
+    /*
+     * Sales orders (+ production plant) created between $from and $to (Y-m-d, already validated by resolveRange).
+     * ZPROD_NEWSet cannot filter by date, so the page loads this list first and then the production in batches (pairsReport).
+     *
+     * Optional $salesOrder / $plant narrow the list (both must match).
+     *
+     * @return array{orders: array<int, array{so: string, plant: string}>, orders_found: int, range: array, warning: string, error: ?string}
+     */
+    public function rangeOrders(string $from, string $to, string $salesOrder = '', string $plant = ''): array
+    {
+        $out = $this->allRangeOrders($from, $to);
+        $so = $this->displayNumber(preg_replace('/\D/', '', $salesOrder) ?? '');
+        $plant = strtoupper(trim($plant));
+        if ($out['error'] === null && ($so !== '' || $plant !== '')) {
+            $out['orders'] = array_values(array_filter(
+                $out['orders'],
+                static fn (array $o): bool => ($so === '' || $o['so'] === $so) && ($plant === '' || $o['plant'] === $plant)
+            ));
+            $out['orders_found'] = count(array_unique(array_column($out['orders'], 'so')));
+        }
+        return $out;
+    }
+
+    private function allRangeOrders(string $from, string $to): array
+    {
+        $cacheName = 'orders_' . $from . '_' . $to;
+        $cached = $this->cacheRead($cacheName, (int) ($this->cfg['cache_ttl'] ?? 0));
+        if ($cached !== null) {
+            return $cached;
+        }
+
+        $found = $this->ordersCreatedBetween($from, $to);
+        $orders = array_map(fn (array $p): array => ['so' => $this->displayNumber($p['so']), 'plant' => $p['plant']], array_values($found['pairs']));
+        $out = [
+            'orders'       => $orders,
+            'orders_found' => count(array_unique(array_column($orders, 'so'))),
+            'range'        => ['from' => $from, 'to' => $to],
+            'warning'      => $found['truncated'] ? 'SAP returned the maximum number of order lines for part of this range, so some sales orders may be missing. Choose a shorter range.' : '',
+            'error'        => $found['error'],
+        ];
+        if ($found['error'] === null && !$found['truncated']) {
+            $this->cacheWrite($cacheName, $out);
+        }
+        return $out;
+    }
+
+    /*
+     * Production rows for a batch of sales order + plant pairs, fetched in parallel. Each pair is cached on its own
+     * (orders without production for longer, because SAP needs ~20 s to answer them with nothing).
+     *
+     * @param array<int, array{so: string, plant: string}> $pairs
+     * @return array{records: array, failed: array<int, string>, error: ?string}
+     */
+    public function pairsReport(array $pairs): array
+    {
+        $service = (string) ($this->cfg['production_service'] ?? '');
+        if ($service === '') {
+            return ['records' => [], 'failed' => [], 'error' => 'Production service path is not configured.'];
+        }
+        $ttl = (int) ($this->cfg['cache_ttl'] ?? 0);
+        $emptyTtl = max($ttl, (int) ($this->cfg['production_empty_ttl'] ?? 0));
+
+        $rowsByPair = [];
+        $queries = [];
+        foreach ($pairs as $pair) {
+            $so = $this->padSalesOrder($pair['so']);
+            $key = $so . '|' . $pair['plant'];
+            $cacheName = 'pair_' . $so . '_' . $pair['plant'];
+            $cached = $this->cacheRead($cacheName, $emptyTtl);
+            if ($cached !== null && ($cached === [] || $this->cacheAge($cacheName) <= $ttl)) {
+                $rowsByPair[$key] = $cached;
+                continue;
+            }
+            $queries[$key] = ['$filter' => "SalesOrder eq '{$so}' and Plant eq '{$pair['plant']}'"];
+        }
+
+        $failed = [];
+        if ($queries !== []) {
+            @set_time_limit(300);
+            $results = $this->client->fetchMany($service, $queries, max(1, (int) ($this->cfg['production_concurrency'] ?? 8)));
+            foreach ($results as $key => $result) {
+                [$so, $plant] = explode('|', (string) $key);
+                if ($result['error'] !== null) {
+                    $failed[] = $this->displayNumber($so);
+                    continue;
+                }
+                $rowsByPair[$key] = array_map(fn (array $row): array => $this->mapRow($row), $result['rows']);
+                $this->cacheWrite('pair_' . $so . '_' . $plant, $rowsByPair[$key]);
+            }
+        }
+
+        $records = array_merge([], ...array_values($rowsByPair));
+        usort($records, static fn (array $a, array $b): int => [(int) $a['sales_order'], $a['plant'], (int) $a['so_item']] <=> [(int) $b['sales_order'], $b['plant'], (int) $b['so_item']]);
+        return ['records' => $records, 'failed' => array_values(array_unique($failed)), 'error' => null];
+    }
+
+    /*
+     * The whole range in one call (CSV export); uses the same per-pair cache the page filled while loading.
+     */
+    public function rangeReport(string $from, string $to, string $salesOrder = '', string $plant = ''): array
+    {
+        $orders = $this->rangeOrders($from, $to, $salesOrder, $plant);
+        if ($orders['error'] !== null) {
+            return ['records' => [], 'total' => 0, 'error' => $orders['error']];
+        }
+        $report = $this->pairsReport($orders['orders']);
+        return ['records' => $report['records'], 'total' => count($report['records']), 'error' => null];
+    }
+
+    /*
+     * "4489-P002,4543-P003" from the page -> validated pairs (at most $max)
+     *
+     * @return array<int, array{so: string, plant: string}>
+     */
+    public function parsePairs(string $raw, int $max): array
+    {
+        $plants = $this->plants();
+        $pairs = [];
+        foreach (explode(',', $raw) as $item) {
+            if (preg_match('/^(\d{1,10})-([A-Z0-9]{4})$/', strtoupper(trim($item)), $m) && in_array($m[2], $plants, true)) {
+                $pairs[$m[1] . '-' . $m[2]] = ['so' => $m[1], 'plant' => $m[2]];
+            }
+        }
+        return array_slice(array_values($pairs), 0, $max);
+    }
+
+    /*
+     * Distinct sales order + production plant pairs created in the range, read in weekly chunks so no chunk hits max_rows.
+     *
+     * @return array{pairs: array<string, array{so: string, plant: string}>, truncated: bool, error: ?string}
+     */
+    private function ordersCreatedBetween(string $from, string $to): array
+    {
+        $service = (string) ($this->cfg['service'] ?? '');
+        $maxRows = (int) ($this->cfg['max_rows'] ?? 10000);
+        $queries = [];
+        $cursor = new DateTimeImmutable($from);
+        $last = new DateTimeImmutable($to);
+        while ($cursor <= $last) {
+            $chunkEnd = min($cursor->modify('+' . (self::RANGE_CHUNK_DAYS - 1) . ' days'), $last);
+            $queries[] = [
+                '$filter' => "Creationdate ge datetime'{$cursor->format('Y-m-d')}T00:00:00' and Creationdate le datetime'{$chunkEnd->format('Y-m-d')}T23:59:59'",
+                '$select' => 'Salesorder,Plant',
+            ];
+            $cursor = $chunkEnd->modify('+1 day');
+        }
+
+        $plants = $this->plants();
+        $soPattern = (string) ($this->cfg['production_so_pattern'] ?? '');
+        $pairs = [];
+        $truncated = false;
+        foreach ($this->client->fetchMany($service, $queries, 4) as $result) {
+            if ($result['error'] !== null) {
+                return ['pairs' => [], 'truncated' => false, 'error' => 'Could not read sales orders for this date range: ' . $result['error']];
+            }
+            $truncated = $truncated || count($result['rows']) >= $maxRows;
+            foreach ($result['rows'] as $row) {
+                $so = $this->padSalesOrder((string) ($row['Salesorder'] ?? ''));
+                $plant = strtoupper(trim((string) ($row['Plant'] ?? '')));
+                if (preg_match('/^\d{10}$/', $so) && in_array($plant, $plants, true)
+                    && ($soPattern === '' || preg_match($soPattern, $this->displayNumber($so)) === 1)) {
+                    $pairs[$so . '|' . $plant] = ['so' => $so, 'plant' => $plant];
+                }
+            }
+        }
+        ksort($pairs);
+        return ['pairs' => $pairs, 'truncated' => $truncated, 'error' => null];
+    }
+
+    private function cacheRead(string $name, int $ttl): ?array
+    {
+        $age = $ttl > 0 ? $this->cacheAge($name) : null;
+        if ($age === null || $age > $ttl) {
+            return null;
+        }
+        $data = json_decode((string) @file_get_contents((string) $this->cacheFile($name)), true);
+        return is_array($data) ? $data : null;
+    }
+
+    private function cacheAge(string $name): ?int
+    {
+        $file = $this->cacheFile($name);
+        $mtime = $file !== null && is_file($file) ? filemtime($file) : false;
+        return $mtime === false ? null : time() - $mtime;
+    }
+
+    private function cacheWrite(string $name, array $payload): void
+    {
+        $file = (int) ($this->cfg['cache_ttl'] ?? 0) > 0 ? $this->cacheFile($name) : null;
+        if ($file !== null) {
+            @file_put_contents($file, json_encode($payload), LOCK_EX);
+        }
+    }
+
+    /*
+     * storage/cache when the web server can write there, otherwise the system temp directory
+     */
+    private function cacheFile(string $name): ?string
+    {
+        static $dir = false;
+        if ($dir === false) {
+            $dir = null;
+            foreach ([base_path('storage/cache'), rtrim(sys_get_temp_dir(), '/\\') . DIRECTORY_SEPARATOR . 'sap_reports'] as $candidate) {
+                if ((is_dir($candidate) || @mkdir($candidate, 0775, true)) && is_writable($candidate)) {
+                    $dir = $candidate;
+                    break;
+                }
+            }
+        }
+        return $dir === null ? null : $dir . DIRECTORY_SEPARATOR . 'sap_production_v' . (int) ($this->cfg['cache_version'] ?? 1) . '_' . $name . '.json';
     }
 
     /*

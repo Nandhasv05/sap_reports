@@ -367,24 +367,22 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                             <th class="num is-sortable" data-col="<?= $isFabric ? '7' : '11' ?>" data-type="num" title="Click to sort by BOM Qty">
                                 <div class="th-content num"><span>BOM Qty</span></div>
                             </th>
-                            <?php if (!$isFabric): ?>
-                            <th class="num is-sortable" data-col="12" data-type="num" title="Click to sort by Total BOM Qty (BOM across the GRN sales orders)">
+                            <th class="num is-sortable" data-col="<?= $isFabric ? '8' : '12' ?>" data-type="num" title="Click to sort by Total BOM Qty (BOM across the <?= $isFabric ? 'additional' : 'GRN' ?> sales orders)">
                                 <div class="th-content num"><span>Total BOM Qty</span></div>
                             </th>
-                            <?php endif; ?>
-                            <th class="num is-sortable" data-col="<?= $isFabric ? '8' : '13' ?>" data-type="num" title="Click to sort by Planned Qty">
+                            <th class="num is-sortable" data-col="<?= $isFabric ? '9' : '13' ?>" data-type="num" title="Click to sort by Planned Qty">
                                 <div class="th-content num"><span>Planned</span></div>
                             </th>
-                            <th class="num is-sortable" data-col="<?= $isFabric ? '9' : '14' ?>" data-type="num" title="Click to sort by Production Qty">
+                            <th class="num is-sortable" data-col="<?= $isFabric ? '10' : '14' ?>" data-type="num" title="Click to sort by Production Qty">
                                 <div class="th-content num"><span>Production</span></div>
                             </th>
-                            <th class="num is-sortable" data-col="<?= $isFabric ? '10' : '15' ?>" data-type="num" title="Click to sort by PO Qty">
+                            <th class="num is-sortable" data-col="<?= $isFabric ? '11' : '15' ?>" data-type="num" title="Click to sort by PO Qty">
                                 <div class="th-content num"><span>PO Qty</span></div>
                             </th>
-                            <th class="num is-sortable" data-col="<?= $isFabric ? '11' : '16' ?>" data-type="num" title="Click to sort by GRN Qty">
+                            <th class="num is-sortable" data-col="<?= $isFabric ? '12' : '16' ?>" data-type="num" title="Click to sort by GRN Qty">
                                 <div class="th-content num"><span>GRN Qty</span></div>
                             </th>
-                            <th class="num is-sortable" data-col="<?= $isFabric ? '12' : '17' ?>" data-type="num" title="Click to sort by Issue Qty">
+                            <th class="num is-sortable" data-col="<?= $isFabric ? '13' : '17' ?>" data-type="num" title="Click to sort by Issue Qty">
                                 <div class="th-content num"><span>Issue Qty</span></div>
                             </th>
                             
@@ -393,19 +391,19 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                                 <div class="th-content"><span>GRN Sales Orders</span></div>
                             </th>
                             <?php else: ?>
-                            <th class="is-sortable" data-col="13" data-type="text" title="Click to sort by Additional Sale Orders">
+                            <th class="is-sortable" data-col="14" data-type="text" title="Click to sort by Additional Sale Orders">
                                 <div class="th-content"><span>Additional Sale Orders</span></div>
                             </th>
-                            <th class="is-sortable" data-col="14" data-type="text" title="Click to sort by Attribute 1">
+                            <th class="is-sortable" data-col="15" data-type="text" title="Click to sort by Attribute 1">
                                 <div class="th-content"><span>Attribute1_text</span></div>
                             </th>
-                            <th class="is-sortable" data-col="15" data-type="text" title="Click to sort by Attribute 2">
+                            <th class="is-sortable" data-col="16" data-type="text" title="Click to sort by Attribute 2">
                                 <div class="th-content"><span>Attribute2_text</span></div>
                             </th>
-                            <th class="is-sortable" data-col="16" data-type="text" title="Click to sort by Attribute 3">
+                            <th class="is-sortable" data-col="17" data-type="text" title="Click to sort by Attribute 3">
                                 <div class="th-content"><span>Attribute3_text</span></div>
                             </th>
-                            <th class="is-sortable" data-col="17" data-type="text" title="Click to sort by Colour">
+                            <th class="is-sortable" data-col="18" data-type="text" title="Click to sort by Colour">
                                 <div class="th-content"><span>Colour</span></div>
                             </th>
                             <?php endif; ?>
@@ -487,41 +485,39 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                                         <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
                                     </div>
                                 </th>
-                                <?php if (!$isFabric): ?>
                                 <th class="num">
                                     <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input num" data-col="12" data-numeric="true" placeholder="Total BOM..." title="Filter Total BOM Qty">
-                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
-                                    </div>
-                                </th>
-                                <?php endif; ?>
-                                <th class="num">
-                                    <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '8' : '13' ?>" data-numeric="true" placeholder="Planned..." title="Filter Planned Qty">
+                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '8' : '12' ?>" data-numeric="true" placeholder="Total BOM..." title="Filter Total BOM Qty">
                                         <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
                                     </div>
                                 </th>
                                 <th class="num">
                                     <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '9' : '14' ?>" data-numeric="true" placeholder="Prod..." title="Filter Production Qty">
+                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '9' : '13' ?>" data-numeric="true" placeholder="Planned..." title="Filter Planned Qty">
                                         <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
                                     </div>
                                 </th>
                                 <th class="num">
                                     <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '10' : '15' ?>" data-numeric="true" placeholder="PO Qty..." title="Filter PO Qty">
+                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '10' : '14' ?>" data-numeric="true" placeholder="Prod..." title="Filter Production Qty">
                                         <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
                                     </div>
                                 </th>
                                 <th class="num">
                                     <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '11' : '16' ?>" data-numeric="true" placeholder="GRN Qty..." title="Filter GRN Qty">
+                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '11' : '15' ?>" data-numeric="true" placeholder="PO Qty..." title="Filter PO Qty">
                                         <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
                                     </div>
                                 </th>
                                 <th class="num">
                                     <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '12' : '17' ?>" data-numeric="true" placeholder="Issue..." title="Filter Issue Qty">
+                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '12' : '16' ?>" data-numeric="true" placeholder="GRN Qty..." title="Filter GRN Qty">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th class="num">
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '13' : '17' ?>" data-numeric="true" placeholder="Issue..." title="Filter Issue Qty">
                                         <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
                                     </div>
                                 </th>
@@ -536,31 +532,31 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                                 <?php else: ?>
                                 <th>
                                     <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input" data-col="13" placeholder="Filter SOs..." title="Filter Additional Sales Orders">
+                                        <input type="text" class="rpt-col-input" data-col="14" placeholder="Filter SOs..." title="Filter Additional Sales Orders">
                                         <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
                                     </div>
                                 </th>
                                 <th>
                                     <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input" data-col="14" placeholder="Attribute 1..." title="Filter Attribute 1">
+                                        <input type="text" class="rpt-col-input" data-col="15" placeholder="Attribute 1..." title="Filter Attribute 1">
                                         <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
                                     </div>
                                 </th>
                                 <th>
                                     <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input" data-col="15" placeholder="Attribute 2..." title="Filter Attribute 2">
+                                        <input type="text" class="rpt-col-input" data-col="16" placeholder="Attribute 2..." title="Filter Attribute 2">
                                         <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
                                     </div>
                                 </th>
                                 <th>
                                     <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input" data-col="16" placeholder="Attribute 3..." title="Filter Attribute 3">
+                                        <input type="text" class="rpt-col-input" data-col="17" placeholder="Attribute 3..." title="Filter Attribute 3">
                                         <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
                                     </div>
                                 </th>
                                 <th>
                                     <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input" data-col="17" placeholder="Colour..." title="Filter Colour">
+                                        <input type="text" class="rpt-col-input" data-col="18" placeholder="Colour..." title="Filter Colour">
                                         <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
                                     </div>
                                 </th>
@@ -629,11 +625,9 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                                     <td class="num bom-qty-cell">
                                         <span class="bom-val"><?= e(str_replace(',', '', $model->dash($row['bom_qty'] ?? ''))) ?></span>
                                     </td>
-                                    <?php if (!$isFabric): ?>
                                     <td class="num bom-qty-cell total-bom-cell">
                                         <span class="bom-val"><?= e(str_replace(',', '', $model->dash($row['total_bom_qty'] ?? ''))) ?></span>
                                     </td>
-                                    <?php endif; ?>
                                     <td class="num qty-cell" data-qty-type="plan">
                                         <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['planned_qty'] ?? ''))) ?></span>
                                     </td>
@@ -710,9 +704,7 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                                 <th></th>
                                 <th></th>
                                 <th class="num" id="footBomQty"><span class="foot-val"><?= e($model->footTotal($summary['bom_qty'] ?? null)) ?></span></th>
-                                <?php if (!$isFabric): ?>
                                 <th class="num" id="footTotalBomQty"><span class="foot-val"><?= e($model->footTotal($summary['total_bom_qty'] ?? null)) ?></span></th>
-                                <?php endif; ?>
                                 <th class="num foot-qty-cell" id="footPlannedQty">
                                     <span class="foot-val"><?= e($model->footTotal($summary['planned_qty'] ?? null)) ?></span>
                                     <?php if ($bomQtyRaw > 0): ?><span class="foot-trend is-<?= $plnTrend['status'] ?>" title="Total Planned vs BOM (<?= $plnTrend['label'] ?>)"><i class="fas <?= $plnTrend['icon'] ?>"></i></span><?php endif; ?>

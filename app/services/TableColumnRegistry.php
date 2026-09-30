@@ -43,6 +43,7 @@ final class TableColumnRegistry
         $tables = [
             'procurement_table' => $fromService(SapProcurementService::columns(), SapProcurementService::defaultHiddenColumns()),
             'production_table'  => $fromService(SapProductionService::columns(), SapProductionService::defaultHiddenColumns()),
+            'production_range_table' => $fromService(SapProductionService::columns(), SapProductionService::defaultHiddenRangeColumns()),
             'fabric_utilization_table' => self::define([
                 'sno'                     => 'S.No',
                 'sales_order'             => 'Sales Order',
@@ -52,6 +53,7 @@ final class TableColumnRegistry
                 'po_line'                 => 'PO Line',
                 'so_qty'                  => 'SO Qty',
                 'bom_qty'                 => 'BOM Qty',
+                'total_bom_qty'           => 'Total BOM Qty',
                 'planned_qty'             => 'Planned',
                 'production_qty'          => 'Production',
                 'po_qty'                  => 'PO Qty',

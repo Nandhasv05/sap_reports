@@ -128,12 +128,94 @@ class SapODataClient
     }
 
     /*
+     * Fetch one page (up to max_rows) per query from the same entity set, several requests at a time.
+     * Results keep the keys of $queries.
+     *
+     * @param array<string|int, array> $queries
+     * @return array<string|int, array{rows: array<int, array>, error: ?string}>
+     */
+    public function fetchMany(string $servicePath, array $queries, int $concurrency = 8): array
+    {
+        if (!$this->isEnabled()) {
+            return array_map(static fn (): array => ['rows' => [], 'error' => 'SAP integration is disabled.'], $queries);
+        }
+        $username = (string) ($this->cfg['username'] ?? '');
+        $password = (string) ($this->cfg['password'] ?? '');
+        if ($username === '' || $password === '') {
+            return array_map(static fn (): array => ['rows' => [], 'error' => 'SAP credentials are not configured.'], $queries);
+        }
+        if (!function_exists('curl_multi_init')) {
+            $results = [];
+            foreach ($queries as $key => $query) {
+                $one = $this->fetchResults($servicePath, $query);
+                $results[$key] = ['rows' => $one['rows'], 'error' => $one['error']];
+            }
+            return $results;
+        }
+
+        $top = (string) max(1, (int) ($this->cfg['max_rows'] ?? 10000));
+        $timeout = (int) ($this->cfg['timeout'] ?? 45);
+        $pending = [];
+        foreach ($queries as $key => $query) {
+            $pending[$key] = $this->buildUrl(array_merge(['$top' => $top, '$format' => 'json'], $query), $servicePath);
+        }
+
+        $results = [];
+        $mh = curl_multi_init();
+        $active = [];
+        $startNext = function () use (&$pending, &$active, $mh, $username, $password, $timeout): void {
+            $key = array_key_first($pending);
+            $ch = $this->curlHandle($pending[$key], $username, $password, $timeout);
+            unset($pending[$key]);
+            $active[(int) $ch] = ['key' => $key, 'ch' => $ch];
+            curl_multi_add_handle($mh, $ch);
+        };
+        for ($i = 0, $n = max(1, $concurrency); $i < $n && $pending !== []; $i++) {
+            $startNext();
+        }
+
+        do {
+            curl_multi_exec($mh, $running);
+            while (($info = curl_multi_info_read($mh)) !== false) {
+                $ch = $info['handle'];
+                $job = $active[(int) $ch];
+                unset($active[(int) $ch]);
+                $body = (string) curl_multi_getcontent($ch);
+                $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                $err = curl_error($ch);
+                curl_multi_remove_handle($mh, $ch);
+                curl_close($ch);
+
+                $payload = $this->decodeResponse($info['result'] === CURLE_OK ? $body : false, $status, $err);
+                $rows = $payload['error'] === null ? $this->extractResults($payload['body']) : null;
+                $results[$job['key']] = [
+                    'rows'  => is_array($rows) ? array_values(array_filter($rows, 'is_array')) : [],
+                    'error' => $payload['error'] ?? ($rows === null ? 'Unexpected SAP OData response format.' : null),
+                ];
+                if ($pending !== []) {
+                    $startNext();
+                }
+            }
+            if ($running > 0 || $active !== []) {
+                curl_multi_select($mh, 1.0);
+            }
+        } while ($running > 0 || $active !== [] || $pending !== []);
+        curl_multi_close($mh);
+
+        $ordered = [];
+        foreach (array_keys($queries) as $key) {
+            $ordered[$key] = $results[$key] ?? ['rows' => [], 'error' => 'SAP request was not completed.'];
+        }
+        return $ordered;
+    }
+
+    /*
      * Build the URL
      */
-    private function buildUrl(array $query): string
+    private function buildUrl(array $query, ?string $servicePath = null): string
     {
         $base = rtrim((string) ($this->cfg['base_url'] ?? ''), '/');
-        $service = (string) ($this->cfg['service'] ?? '');
+        $service = $servicePath ?? (string) ($this->cfg['service'] ?? '');
         $qs = http_build_query($query, '', '&', PHP_QUERY_RFC3986);
 
         return $base . $service . '?' . $qs;
@@ -167,6 +249,17 @@ class SapODataClient
      */
     private function requestViaCurl(string $url, string $username, string $password, int $timeout): array
     {
+        $ch = $this->curlHandle($url, $username, $password, $timeout);
+        $body = curl_exec($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err = curl_error($ch);
+        curl_close($ch);
+
+        return $this->decodeResponse($body, $status, $err);
+    }
+
+    private function curlHandle(string $url, string $username, string $password, int $timeout): CurlHandle
+    {
         $ch = curl_init($url);
         $opts = [
             CURLOPT_RETURNTRANSFER => true,
@@ -181,12 +274,14 @@ class SapODataClient
             $opts[CURLOPT_RESOLVE] = array_values($resolve);
         }
         curl_setopt_array($ch, $opts);
+        return $ch;
+    }
 
-        $body = curl_exec($ch);
-        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $err = curl_error($ch);
-        curl_close($ch);
-
+    /*
+     * @return array{body: ?array, error: ?string}
+     */
+    private function decodeResponse(string|false $body, int $status, string $err): array
+    {
         if ($body === false) {
             return ['body' => null, 'error' => $err !== '' ? $err : 'SAP request failed.'];
         }

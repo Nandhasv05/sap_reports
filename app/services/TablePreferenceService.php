@@ -139,14 +139,29 @@ final class TablePreferenceService
     }
 
     /*
-     * Locked columns first, saved order next (unknown / duplicate ids dropped), then columns added since the save
+     * Locked columns first, saved order next (unknown / duplicate ids dropped); columns added since the save
+     * go right after the column that precedes them in the default order
      */
     private function result(string $tableKey, array $definition, array $order, array $hidden, bool $isDefault, ?string $updatedAt): array
     {
         $known = TableColumnRegistry::columnIds($definition);
         $saved = array_values(array_intersect(array_unique(array_filter($order, 'is_string')), $known));
         $locked = array_values(array_intersect($known, TableColumnRegistry::LOCKED));
-        $columnOrder = array_values(array_unique(array_merge($locked, $saved, $known)));
+        $columnOrder = array_values(array_unique(array_merge($locked, $saved)));
+        foreach ($known as $i => $id) {
+            if (in_array($id, $columnOrder, true)) {
+                continue;
+            }
+            $at = count($columnOrder);
+            for ($p = $i - 1; $p >= 0; $p--) {
+                $pos = array_search($known[$p], $columnOrder, true);
+                if ($pos !== false) {
+                    $at = $pos + 1;
+                    break;
+                }
+            }
+            array_splice($columnOrder, $at, 0, [$id]);
+        }
         $hiddenColumns = array_values(array_diff(array_intersect($known, array_filter($hidden, 'is_string')), $locked));
 
         return [

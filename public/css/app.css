@@ -194,6 +194,77 @@ body.rpt-body {
 .plant-input { text-transform: uppercase; }
 .plant-input::placeholder { text-transform: none; }
 .lookup-so.lookup-plant { flex: 0 0 160px; }
+
+/* Production report - SO creation date filter */
+.rpt-field[hidden],
+.lookup-so[hidden],
+.date-custom[hidden],
+[data-lookup-panel][hidden] { display: none; }
+.rpt-field-range { flex: 0 1 190px; }
+.rpt-field select {
+    border: 0;
+    background: transparent;
+    padding: 9px 0;
+    width: 100%;
+    min-width: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #0f172a;
+    cursor: pointer;
+}
+.rpt-field select:focus { outline: none; }
+.rpt-field-date { flex: 0 1 165px; min-width: 150px; }
+.rpt-field-so { flex: 0 1 170px; min-width: 140px; }
+.prod-filters { flex-wrap: wrap; justify-content: flex-end; }
+.lookup-label {
+    margin: 18px 0 8px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: #64748b;
+}
+.lookup-submit {
+    width: 100%;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 18px;
+    padding: 13px 20px;
+    border-radius: 14px;
+    font-size: 15px;
+    font-weight: 700;
+}
+.date-chip input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.date-chip:has(input:focus-visible) { border-color: var(--rpt); box-shadow: 0 0 0 3px var(--rpt-soft); }
+.date-chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.date-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 16px;
+    border-radius: 999px;
+    border: 1px solid #dbe4df;
+    background: #f8faf9;
+    color: #334155;
+    font: inherit;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background-color .15s, border-color .15s, color .15s;
+}
+.date-chip:hover,
+.date-chip:focus-visible { border-color: var(--rpt); color: var(--rpt); background: var(--rpt-soft); outline: none; }
+.date-chip.on { background: var(--rpt); border-color: var(--rpt); color: #fff; }
+.date-chip .material-icons-round { font-size: 17px; }
+.date-custom { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+.date-custom .date-input { flex: 1 1 0; min-width: 0; }
+.date-input input { font-size: 15px; }
+.date-error { margin: 12px 0 0; color: #b91c1c; font-size: 13px; font-weight: 600; }
+@media (max-width: 560px) {
+    .date-custom { flex-wrap: wrap; }
+    .date-custom .date-input { flex: 1 1 100%; }
+}
+
 .prod-notice {
     display: flex;
     align-items: center;
@@ -877,6 +948,29 @@ body.rpt-body {
     background: linear-gradient(90deg, transparent, var(--rpt), transparent);
     animation: rpt-bar 1.3s ease-in-out infinite;
 }
+.rpt-spinner.is-progress .rpt-loader-bar i {
+    left: 0;
+    width: 0;
+    background: var(--rpt);
+    animation: none;
+    transition: width .35s ease;
+}
+.rpt-loader-count {
+    margin: -4px 0 10px !important;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--rpt);
+    font-variant-numeric: tabular-nums;
+}
+.rpt-loader-count:empty { display: none; }
+/* Full-page loader for live reports: hides the dashboard until all data is in, keeps the header filters usable */
+.rpt-spinner.is-solid {
+    z-index: 15;
+    background: #f4f6f5;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+.rpt-main.is-pending { visibility: hidden; }
 .rpt-loader-meta {
     display: flex;
     align-items: center;

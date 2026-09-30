@@ -27,6 +27,87 @@
     const tableWrap = document.getElementById('rptTableWrap');
     const toggleStickyBtn = document.getElementById('rptToggleStickyScroll');
     const stickyScrollLabel = document.getElementById('rptStickyScrollLabel');
+    const range = cfg.range || null;
+    const maxRangeDays = Number(cfg.maxRangeDays) || 62;
+
+    /*
+     * Combined filters: SO creation date (select or chips, custom From-To) + sales order + plant, applied together
+     */
+    function bindDateFilters() {
+        document.querySelectorAll('[data-date-filter]').forEach(form => {
+            const select = form.querySelector('[data-range-select]');
+            const radios = Array.from(form.querySelectorAll('input[type="radio"][name="range"]'));
+            const dateInputs = Array.from(form.querySelectorAll('input[type="date"]'));
+            const [fromInput, toInput] = dateInputs;
+            const soInput = form.querySelector('input[name="so"]');
+            const plantInput = form.querySelector('input[name="plant"]');
+            const currentPreset = () => (select ? select.value : (radios.find(r => r.checked)?.value || ''));
+
+            function showCustom(on) {
+                form.querySelectorAll('[data-date-custom]').forEach(el => { el.hidden = !on; });
+                dateInputs.forEach(input => { input.disabled = !on; input.required = on; input.setCustomValidity(''); });
+            }
+
+            select?.addEventListener('change', () => {
+                showCustom(select.value === 'custom');
+                if (select.value === 'custom') fromInput?.focus();
+                else form.requestSubmit();
+            });
+            if (select) {
+                dateInputs.forEach(input => input.addEventListener('change', () => {
+                    if (fromInput?.value && toInput?.value) form.requestSubmit();
+                }));
+            }
+            radios.forEach(radio => radio.addEventListener('change', () => {
+                radios.forEach(r => r.closest('.date-chip')?.classList.toggle('on', r.checked));
+                showCustom(radio.value === 'custom' && radio.checked);
+                if (radio.value === 'custom') fromInput?.focus();
+            }));
+            dateInputs.forEach(input => input.addEventListener('input', () => input.setCustomValidity('')));
+            soInput?.addEventListener('input', () => {
+                soInput.value = soInput.value.replace(/\D/g, '');
+                soInput.setCustomValidity('');
+            });
+            plantInput?.addEventListener('input', () => {
+                const pos = plantInput.selectionStart;
+                plantInput.value = plantInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+                if (pos !== null) plantInput.setSelectionRange(pos, pos);
+            });
+
+            form.addEventListener('submit', (e) => {
+                const preset = currentPreset();
+                const so = (soInput?.value || '').trim();
+                let message = '';
+                let target = null;
+                if (!preset && !so) {
+                    message = 'Enter a sales order or choose an SO created date.';
+                    target = soInput;
+                } else if (preset === 'custom') {
+                    const from = fromInput?.value || '';
+                    const to = toInput?.value || '';
+                    if (!from || !to) message = 'Choose both a From and a To date.';
+                    else if (from > to) message = 'The From date must be on or before the To date.';
+                    else if ((Date.parse(to) - Date.parse(from)) / 86400000 + 1 > maxRangeDays) message = `Choose a range of ${maxRangeDays} days or less.`;
+                    target = !from ? fromInput : toInput;
+                }
+                if (message) {
+                    e.preventDefault();
+                    target?.setCustomValidity(message);
+                    target?.reportValidity();
+                    return;
+                }
+                if (plantInput) plantInput.value = plantInput.value.trim().toUpperCase();
+                // Leave unused fields out of the URL
+                if (preset !== 'custom') dateInputs.forEach(input => { input.disabled = true; });
+                if (!preset) { if (select) select.disabled = true; radios.forEach(r => { r.disabled = true; }); }
+                if (soInput && !so) soInput.disabled = true;
+                if (plantInput && !plantInput.value) plantInput.disabled = true;
+                showSpinner(true);
+            });
+        });
+    }
+    bindDateFilters();
+
     if (!table || !tbody || !cfg.live) return;
 
     const mixColors = ['#6d28d9', '#0f766e', '#0284c7', '#d97706', '#16a34a', '#e11d48', '#0ea5e9', '#94a3b8'];
@@ -124,10 +205,34 @@
         if (countBadge) countBadge.textContent = 'Showing 0 lines';
     }
 
+    function showNotice(message) {
+        const notice = document.getElementById('prodNotice');
+        const noticeText = document.getElementById('prodNoticeText');
+        if (!notice || !noticeText) return;
+        noticeText.textContent = message;
+        notice.hidden = false;
+    }
+
     function fillInfo(data) {
         const info = data.info || {};
         const box = document.getElementById('prodInfo');
         const set = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value || '—'; };
+        if (range) {
+            const found = Number(data.orders_found) || 0;
+            const withData = Number(data.sales_orders) || 0;
+            set('prodInfoOrders', found === withData ? withData.toLocaleString('en-US') : `${withData.toLocaleString('en-US')} of ${found.toLocaleString('en-US')} with production`);
+            set('prodInfoPlant', (data.plants || []).join(', '));
+            set('prodInfoCustomers', info.customers ? Number(info.customers).toLocaleString('en-US') : '');
+            set('prodInfoLines', (Number(data.total) || 0).toLocaleString('en-US'));
+            if (box) box.hidden = false;
+            const notice = document.getElementById('prodNotice');
+            const noticeText = document.getElementById('prodNoticeText');
+            if (notice && noticeText && data.warning) {
+                noticeText.textContent = data.warning;
+                notice.hidden = false;
+            }
+            return;
+        }
         set('prodInfoSo', data.sales_order || cfg.so);
         set('prodInfoPlant', (data.plants || []).join(', '));
         set('prodInfoCustomer', [info.customer_name, info.customer ? `(${info.customer})` : ''].filter(Boolean).join(' '));
@@ -370,59 +475,154 @@
         ? window.rptSetupColumnFeatures(table, { onChange: syncHeaderHeight })
         : { refresh() {} };
 
-    document.getElementById('rptFilterForm')?.addEventListener('submit', () => {
-        const so = (document.getElementById('so')?.value || '').trim();
-        const plantInput = document.getElementById('plant');
-        if (plantInput) plantInput.value = plantInput.value.trim().toUpperCase();
-        if (so !== '') showSpinner(true);
-    });
-    document.getElementById('plant')?.addEventListener('input', (e) => {
-        const input = e.target;
-        const pos = input.selectionStart;
-        input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
-        if (pos !== null) input.setSelectionRange(pos, pos);
-    });
-
-    showSpinner(true);
-    const params = new URLSearchParams({ so: cfg.so || '', plant: cfg.plant || '', _: String(Date.now()) });
-    fetch(`${cfg.dataUrl}?${params.toString()}`, { headers: { Accept: 'application/json' }, cache: 'no-store', credentials: 'same-origin' })
-        .then(async (res) => {
-            const raw = await res.text();
-            let json;
-            try { json = JSON.parse(raw); } catch (e) {
-                const type = res.headers.get('Content-Type') || '';
-                if (res.redirected || /login/i.test(res.url) || (res.ok && /text\/html/i.test(type))) {
-                    throw new Error('Your portal session has expired. Please log in again and reopen the report.');
+    function getJson(params) {
+        params.set('_', String(Date.now()));
+        return fetch(`${cfg.dataUrl}?${params.toString()}`, { headers: { Accept: 'application/json' }, cache: 'no-store', credentials: 'same-origin' })
+            .then(async (res) => {
+                const raw = await res.text();
+                let json;
+                try { json = JSON.parse(raw); } catch (e) {
+                    const type = res.headers.get('Content-Type') || '';
+                    if (res.redirected || /login/i.test(res.url) || (res.ok && /text\/html/i.test(type))) {
+                        throw Object.assign(new Error('Your portal session has expired. Please log in again and reopen the report.'), { fatal: true });
+                    }
+                    throw new Error(`SAP data could not be read (HTTP ${res.status}). Please retry.`);
                 }
-                throw new Error(`SAP data could not be read (HTTP ${res.status}). Please retry.`);
-            }
-            if (!res.ok || json.success === false) throw new Error(json.error || json.message || `SAP API failed (${res.status})`);
-            return json.data || {};
-        })
-        .then((data) => {
-            const records = Array.isArray(data.records) ? data.records : [];
-            fillInfo(data);
-            if (!records.length) {
-                const plantText = (data.plants || []).length ? ` (plant ${data.plants.join(', ')})` : '';
-                showEmpty(`No production data for sales order ${cfg.so}${plantText}.`);
-                updateCharts({}, {});
+                if (!res.ok || json.success === false) {
+                    throw Object.assign(new Error(json.error || json.message || `SAP API failed (${res.status})`), { fatal: res.status === 401 || res.status === 422 });
+                }
+                return json.data || {};
+            });
+    }
+
+    function showLoadError(err) {
+        showEmpty(err.message || 'Unable to load SAP data.');
+        const alertBox = document.createElement('div');
+        alertBox.className = 'rpt-alert';
+        alertBox.textContent = err.message || 'Unable to load SAP data.';
+        document.querySelector('.rpt-main')?.prepend(alertBox);
+    }
+
+    function loadSalesOrder() {
+        showSpinner(true);
+        getJson(new URLSearchParams({ so: cfg.so || '', plant: cfg.plant || '' }))
+            .then((data) => {
+                const records = Array.isArray(data.records) ? data.records : [];
+                fillInfo(data);
                 bindControls();
-                return;
-            }
-            renderRows(records);
-            columnFeatures.refresh();
-            bindControls();
-            applyFilterAndSearch();
-        })
-        .catch((err) => {
-            showEmpty(err.message || 'Unable to load SAP data.');
-            const alertBox = document.createElement('div');
-            alertBox.className = 'rpt-alert';
-            alertBox.textContent = err.message || 'Unable to load SAP data.';
-            document.querySelector('.rpt-main')?.prepend(alertBox);
-        })
-        .finally(() => {
-            showSpinner(false);
-            syncHeaderHeight();
-        });
+                if (!records.length) {
+                    const plantText = (data.plants || []).length ? ` (plant ${data.plants.join(', ')})` : '';
+                    showEmpty(`No production data for sales order ${cfg.so}${plantText}.`);
+                    updateCharts({}, {});
+                    return;
+                }
+                renderRows(records);
+                columnFeatures.refresh();
+                applyFilterAndSearch();
+            })
+            .catch(showLoadError)
+            .finally(revealReport);
+    }
+
+    function revealReport() {
+        showSpinner(false);
+        document.getElementById('rptMain')?.classList.remove('is-pending');
+        syncHeaderHeight();
+        totalsChart?.resize();
+        mixChart?.resize();
+    }
+
+    /*
+     * Date-range mode: get the sales orders created in the range, then their production in small parallel batches
+     * (SAP needs up to ~20 s per order without production). The dashboard stays behind the loader until every batch is in.
+     */
+    function loadRange() {
+        const unique = (list) => Array.from(new Set(list.filter(Boolean)));
+        const bySalesOrder = (a, b) => (Number(a.sales_order) - Number(b.sales_order)) || String(a.plant).localeCompare(String(b.plant)) || (Number(a.so_item) - Number(b.so_item));
+
+        function setProgress(done, total) {
+            window.rptLoader?.progress(done, total, done < total ? 'Fetching production from SAP…' : 'Preparing report…', 'sales orders');
+        }
+
+        function summary(records, found, warning) {
+            return {
+                orders_found: found,
+                sales_orders: unique(records.map(r => r.sales_order)).length,
+                plants: unique(records.map(r => r.plant)).sort(),
+                total: records.length,
+                info: { customers: unique(records.map(r => r.customer)).length },
+                warning,
+            };
+        }
+
+        showSpinner(true);
+        getJson(new URLSearchParams({ range: range.preset, from: range.from, to: range.to, so: cfg.so || '', plant: cfg.plant || '' }))
+            .then((plan) => {
+                bindControls();
+                const orders = Array.isArray(plan.orders) ? plan.orders : [];
+                const found = Number(plan.orders_found) || 0;
+                fillInfo(summary([], found, plan.warning || ''));
+                if (!orders.length) {
+                    const message = range.filter
+                        ? `No production sales orders match ${range.filter} created ${range.text}.`
+                        : `No production sales orders were created ${range.text}.`;
+                    showEmpty(message);
+                    showNotice(`${message} Try a wider date${range.filter ? ', or clear the sales order / plant' : ' such as This Week or This Month'}.`);
+                    updateCharts({}, {});
+                    return null;
+                }
+
+                const size = Math.max(1, Number(plan.batch_size) || 4);
+                const batches = [];
+                for (let i = 0; i < orders.length; i += size) batches.push(orders.slice(i, i + size));
+                const records = [];
+                const failed = [];
+                let done = 0;
+                let next = 0;
+                let fatal = null;
+                setProgress(0, orders.length);
+
+                const worker = async () => {
+                    while (next < batches.length && !fatal) {
+                        const batch = batches[next++];
+                        try {
+                            const data = await getJson(new URLSearchParams({ pairs: batch.map(o => `${o.so}-${o.plant}`).join(',') }));
+                            if (Array.isArray(data.records)) records.push(...data.records);
+                            failed.push(...(Array.isArray(data.failed) ? data.failed : []));
+                        } catch (err) {
+                            if (err.fatal) { fatal = err; return; }
+                            failed.push(...batch.map(o => o.so));
+                        }
+                        done += batch.length;
+                        setProgress(Math.min(done, orders.length), orders.length);
+                    }
+                };
+
+                return Promise.all(Array.from({ length: Math.min(Math.max(1, Number(plan.batch_parallel) || 3), batches.length) }, worker)).then(() => {
+                    if (fatal) throw fatal;
+                    const failedOrders = unique(failed.map(String));
+                    const warnings = plan.warning ? [plan.warning] : [];
+                    if (failedOrders.length) {
+                        warnings.push(`Production data could not be loaded for ${failedOrders.length} sales order(s): ${failedOrders.slice(0, 10).join(', ')}${failedOrders.length > 10 ? '…' : ''}. Reload to retry.`);
+                    }
+                    fillInfo(summary(records, found, warnings.join(' ')));
+                    if (records.length) {
+                        records.sort(bySalesOrder);
+                        renderRows(records);
+                        columnFeatures.refresh();
+                        sortItems();
+                        applyFilterAndSearch();
+                    } else {
+                        showEmpty(`No production data yet for the ${found} sales order(s) created ${range.text}.`);
+                        if (!failedOrders.length && !plan.warning) showNotice(`The ${found} sales order(s) created ${range.text} have no cutting, sewing or shipment entries in SAP yet.`);
+                        updateCharts({}, {});
+                    }
+                });
+            })
+            .catch(showLoadError)
+            .finally(revealReport);
+    }
+
+    if (range) loadRange();
+    else loadSalesOrder();
 })();

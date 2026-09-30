@@ -46,7 +46,8 @@ class TablePreferencesController extends Controller
         } catch (TablePreferenceException $e) {
             $this->error($e);
         } catch (Throwable $e) {
-            error_log('[sap_reports] table preferences: ' . $e->getMessage());
+            $detail = get_class($e) . ': ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')';
+            error_log('[sap_reports] table preferences: ' . $detail);
             $this->error(new TablePreferenceException(500, 'server_error', 'Column preferences are temporarily unavailable.'));
         }
     }
