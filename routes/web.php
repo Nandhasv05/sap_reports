@@ -45,6 +45,9 @@ $router->get('procurement', function () {
     (new ReportsController())->show('procurement');
 });
 
+$router->get('purchase-order/data', [ReportsController::class, 'purchaseOrderData']);
+$router->get('purchase-order', [ReportsController::class, 'showPurchaseOrder']);
+
 $router->get('api/user/table-preferences/{tableKey}', [TablePreferencesController::class, 'show']);
 $router->put('api/user/table-preferences/{tableKey}', [TablePreferencesController::class, 'update']);
 $router->delete('api/user/table-preferences/{tableKey}', [TablePreferencesController::class, 'destroy']);

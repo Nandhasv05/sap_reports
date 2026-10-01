@@ -119,21 +119,33 @@ class ReportsController extends Controller
     private function showProduction(ReportsModel $model, array $item): void
     {
         $salesOrder = preg_replace('/\D/', '', (string) ($_GET['so'] ?? '')) ?? '';
-        $plant = substr(strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string) ($_GET['plant'] ?? '')) ?? ''), 0, 10);
         $service = new SapProductionService();
-        $range = $this->productionRange($service, $plant);
-        $activeRange = $range !== null && $range['error'] === null ? $range : null;
+        $plant = $this->productionPlant($service);
+        $range = $this->productionRange();
+        $submitted = $salesOrder !== '' || $range !== null || isset($_GET['plant']);
+        $filterError = $plant['error'] ?? ($range['error'] ?? null);
+        if ($filterError === null && $submitted && $salesOrder === '' && $range === null) {
+            $filterError = 'Choose an SO created date (From / To) or enter a sales order.';
+        }
+        if (!$submitted) {
+            $filterError = null;
+        }
+        $ready = $submitted && $filterError === null;
+        $activeRange = $ready ? $range : null;
 
         if (strtolower((string) ($_GET['export'] ?? '')) === 'csv') {
             $records = [];
-            try {
-                $records = $activeRange !== null
-                    ? $service->rangeReport($activeRange['from'], $activeRange['to'], $salesOrder, $plant)['records']
-                    : ($model->fetch('production', (int) date('Y'), 1, 10000, '', '', '', true, $salesOrder, $plant)['records'] ?? []);
-            } catch (Throwable $e) {
-                $records = [];
+            if ($ready) {
+                try {
+                    $records = $activeRange !== null
+                        ? $service->rangeReport($activeRange['from'], $activeRange['to'], $salesOrder, $plant['plant'])['records']
+                        : ($model->fetch('production', (int) date('Y'), 1, 10000, '', '', '', true, $salesOrder, $plant['plant'])['records'] ?? []);
+                } catch (Throwable $e) {
+                    $records = [];
+                }
             }
-            $this->sendProductionCsv($activeRange !== null ? $activeRange['from'] . '_to_' . $activeRange['to'] . ($salesOrder !== '' ? '-SO' . $salesOrder : '') . ($plant !== '' ? '-' . $plant : '') : $salesOrder, $records);
+            $tag = $plant['plant'] . ($activeRange !== null ? '-' . $activeRange['from'] . '_to_' . $activeRange['to'] : '') . ($salesOrder !== '' ? '-SO' . $salesOrder : '');
+            $this->sendProductionCsv($tag, $records);
             return;
         }
 
@@ -143,33 +155,48 @@ class ReportsController extends Controller
             'appShell'   => true,
             'item'       => $item,
             'report'     => 'production',
-            'salesOrder' => $salesOrder,
-            'plant'      => $plant,
+            'salesOrder' => $ready ? $salesOrder : '',
+            'soInputValue' => $salesOrder,
+            'plant'      => $plant['plant'],
             'plants'     => $service->plants(),
             'range'      => $activeRange,
-            'rangeError' => $range['error'] ?? null,
+            'rangeError' => $filterError,
             'rangeInput' => $range,
             'presets'    => SapProductionService::rangePresets(),
+            'presetDates' => SapProductionService::presetDates(),
             'columns'    => SapProductionService::columns(),
             'extraHead'  => '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>',
         ]);
     }
 
     /*
-     * SO creation date range from ?range=preset[&from=&to=]; null when no date was chosen.
-     * The sales order / plant fields then narrow the range, so a plant must be one of the production plants.
+     * Required plant (?plant=P002); must be one of the configured production plants
+     *
+     * @return array{plant: string, error: ?string}
      */
-    private function productionRange(SapProductionService $service, string $plant): ?array
+    private function productionPlant(SapProductionService $service): array
+    {
+        $plant = substr(strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string) ($_GET['plant'] ?? '')) ?? ''), 0, 4);
+        if ($plant === '') {
+            return ['plant' => '', 'error' => 'Plant is required.'];
+        }
+        if (!in_array($plant, $service->plants(), true)) {
+            return ['plant' => $plant, 'error' => 'Plant must be one of ' . implode(', ', $service->plants()) . '.'];
+        }
+        return ['plant' => $plant, 'error' => null];
+    }
+
+    /*
+     * SO creation date range (From / To) from ?range=preset[&from=&to=]; null when no date was chosen.
+     * The sales order field then narrows the range.
+     */
+    private function productionRange(): ?array
     {
         $preset = strtolower(trim((string) ($_GET['range'] ?? '')));
         if ($preset === '') {
             return null;
         }
-        $range = SapProductionService::resolveRange($preset, (string) ($_GET['from'] ?? ''), (string) ($_GET['to'] ?? ''));
-        if ($range['error'] === null && $plant !== '' && !in_array($plant, $service->plants(), true)) {
-            $range['error'] = 'Plant must be one of ' . implode(', ', $service->plants()) . ', or leave it empty.';
-        }
-        return $range;
+        return SapProductionService::resolveRange($preset, (string) ($_GET['from'] ?? ''), (string) ($_GET['to'] ?? ''));
     }
 
     /*
@@ -188,13 +215,13 @@ class ReportsController extends Controller
         }
 
         $salesOrder = preg_replace('/\D/', '', (string) ($_GET['so'] ?? '')) ?? '';
-        $plant = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string) ($_GET['plant'] ?? '')) ?? '');
-        $range = $this->productionRange($service, $plant);
-        if ($range === null || $range['error'] !== null) {
-            $message = $range['error'] ?? 'Choose a date range.';
+        $plant = $this->productionPlant($service);
+        $range = $this->productionRange();
+        if ($plant['error'] !== null || $range === null || $range['error'] !== null) {
+            $message = $plant['error'] ?? ($range['error'] ?? 'Choose a date range.');
             $this->jsonResponse(['success' => false, 'message' => $message, 'error' => $message, 'data' => []], 422);
         }
-        $orders = $service->rangeOrders($range['from'], $range['to'], $salesOrder, $plant);
+        $orders = $service->rangeOrders($range['from'], $range['to'], $salesOrder, $plant['plant']);
         if ($orders['error'] !== null) {
             $this->jsonResponse(['success' => false, 'message' => 'Unable to fetch SAP data: ' . $orders['error'], 'error' => $orders['error'], 'data' => []], 500);
         }
@@ -376,6 +403,56 @@ class ReportsController extends Controller
     }
 
     /*
+     * Purchase Order report page (?po=4000006524); header and items are loaded by purchase-order.js
+     */
+    public function showPurchaseOrder(): void
+    {
+        $input = preg_replace('/[\s,]/', '', (string) ($_GET['po'] ?? '')) ?? '';
+        $error = $input !== '' && !preg_match('/^\d{1,10}$/', $input) ? 'Purchase order must be a number of up to 10 digits.' : null;
+
+        $this->view('reports/purchase_order', [
+            'pageTitle'     => 'Purchase Order Report',
+            'layoutWide'    => true,
+            'appShell'      => true,
+            'item'          => ['title' => 'Purchase Order Report'],
+            'report'        => 'purchase-order',
+            'purchaseOrder' => $error === null ? $input : '',
+            'poInput'       => $input,
+            'poError'       => $error,
+            'extraHead'     => $error === null && $input !== ''
+                ? '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>'
+                : '',
+        ]);
+    }
+
+    /*
+     * Purchase order header and items as JSON for the report page and the PO drawer (?po=4000006524)
+     */
+    public function purchaseOrderData(): void
+    {
+        $po = trim((string) ($_GET['po'] ?? ''));
+        if (!preg_match('/^\d{1,10}$/', $po)) {
+            $message = $po === '' ? 'Enter a purchase order number.' : 'Purchase order must be a number of up to 10 digits.';
+            $this->jsonResponse(['success' => false, 'message' => $message, 'error' => $message, 'data' => []], 422);
+        }
+
+        $payload = (new SapPurchaseOrderService())->report($po);
+        if ($payload['error'] !== null) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Unable to fetch SAP data: ' . $payload['error'],
+                'error'   => $payload['error'],
+                'data'    => [],
+            ], 502);
+        }
+        $this->jsonResponse([
+            'success' => true,
+            'message' => $payload['records'] === [] ? 'No purchase order found.' : 'Live SAP data',
+            'data'    => $payload,
+        ]);
+    }
+
+    /*
      * JSON API — browser Network tab (Fetch/XHR)
      */
     public function data(string $report = ''): void
@@ -406,6 +483,12 @@ class ReportsController extends Controller
         if ($report === 'production' && (isset($_GET['pairs']) || trim((string) ($_GET['range'] ?? '')) !== '')) {
             $this->productionRangeData();
             return;
+        }
+        if ($report === 'production') {
+            $check = $this->productionPlant(new SapProductionService());
+            if ($check['error'] !== null) {
+                $this->jsonResponse(['success' => false, 'message' => $check['error'], 'error' => $check['error'], 'data' => []], 422);
+            }
         }
 
         $cfg = config('sap');

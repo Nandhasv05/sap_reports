@@ -5,6 +5,7 @@
  * DESCRIPTION : Production report view (SAP ZPROD_NEWSet) - rows are loaded live by production.js
  */
 $salesOrder = (string) ($salesOrder ?? '');
+$soInputValue = (string) ($soInputValue ?? $salesOrder);
 $plant = (string) ($plant ?? '');
 $plants = is_array($plants ?? null) ? $plants : [];
 $columns = is_array($columns ?? null) ? $columns : [];
@@ -12,6 +13,7 @@ $range = is_array($range ?? null) ? $range : null;
 $rangeError = (string) ($rangeError ?? '');
 $rangeInput = is_array($rangeInput ?? null) ? $rangeInput : null;
 $presets = is_array($presets ?? null) ? $presets : [];
+$presetDates = is_array($presetDates ?? null) ? $presetDates : [];
 $isRange = $range !== null;
 $isLookup = $rangeError !== '' || ($salesOrder === '' && !$isRange);
 $home = sap_reports_evol_url('portal_dashboard.php');
@@ -20,33 +22,53 @@ $catalogHome = url('/');
 $colCount = count($columns);
 $stageNames = ['order' => 'Order', 'cut' => 'Cutting', 'sew' => 'Sewing', 'wash' => 'Washing', 'fin' => 'Finishing', 'ship' => 'Shipment'];
 $csvUrl = url('production') . '?' . http_build_query(array_filter($isRange
-    ? ['range' => $range['preset'], 'from' => $range['from'], 'to' => $range['to'], 'so' => $salesOrder, 'plant' => $plant, 'export' => 'csv']
-    : ['so' => $salesOrder, 'plant' => $plant, 'export' => 'csv'], static fn ($v): bool => $v !== ''));
+    ? ['plant' => $plant, 'range' => $range['preset'], 'from' => $range['from'], 'to' => $range['to'], 'so' => $salesOrder, 'export' => 'csv']
+    : ['plant' => $plant, 'so' => $salesOrder, 'export' => 'csv'], static fn ($v): bool => $v !== ''));
 $today = (new DateTimeImmutable('today', new DateTimeZone('Asia/Kolkata')))->format('Y-m-d');
 $datePreset = (string) ($range['preset'] ?? $rangeInput['preset'] ?? '');
-$filterText = trim(($salesOrder !== '' ? 'SO ' . $salesOrder : '') . ($salesOrder !== '' && $plant !== '' ? ' · ' : '') . ($plant !== '' ? 'Plant ' . $plant : ''));
-$dateFrom = (string) ($range['from'] ?? ($_GET['from'] ?? ''));
-$dateTo = (string) ($range['to'] ?? ($_GET['to'] ?? ''));
-$rangeText = $isRange
-    ? ($range['preset'] === 'custom' ? $range['label'] : $range['label'] . ' (' . ($range['from'] === $range['to'] ? date('d M Y', strtotime($range['from'])) : date('d M', strtotime($range['from'])) . ' – ' . date('d M Y', strtotime($range['to']))) . ')')
-    : '';
-$reportTag = $isRange
-    ? $range['from'] . '_to_' . $range['to'] . ($salesOrder !== '' ? '-SO' . $salesOrder : '') . ($plant !== '' ? '-' . $plant : '')
-    : 'SO' . $salesOrder;
-$soInput = static function (string $class, string $placeholder) use ($salesOrder): string {
-    return '<label class="' . e($class) . '" title="Sales order number (optional when a date is chosen)">'
+$filterText = trim('Plant ' . $plant . ($salesOrder !== '' ? ' · SO ' . $salesOrder : ''));
+$dateFrom = (string) ($range['from'] ?? ($rangeInput['from'] ?? '') ?: ($_GET['from'] ?? ''));
+$dateTo = (string) ($range['to'] ?? ($rangeInput['to'] ?? '') ?: ($_GET['to'] ?? ''));
+$dmy = static fn (string $ymd): string => $ymd !== '' ? date('d/m/Y', strtotime($ymd)) : '';
+$rangeText = $isRange ? 'from ' . $dmy($range['from']) . ' to ' . $dmy($range['to']) : '';
+$reportTag = $plant . ($isRange ? '-' . $range['from'] . '_to_' . $range['to'] : '') . ($salesOrder !== '' ? '-SO' . $salesOrder : '');
+$soInput = static function (string $class, string $placeholder) use ($soInputValue): string {
+    return '<label class="' . e($class) . '" title="Sales order number (optional when an SO created date is chosen)">'
         . '<span class="material-icons-round">receipt_long</span>'
-        . '<input id="so" name="so" value="' . e($salesOrder) . '" placeholder="' . e($placeholder) . '" inputmode="numeric" autocomplete="off"></label>';
+        . '<input id="so" name="so" value="' . e($soInputValue) . '" placeholder="' . e($placeholder) . '" inputmode="numeric" autocomplete="off"></label>';
 };
 
-$dateInputs = static function (string $fieldClass, bool $showCustom) use ($dateFrom, $dateTo, $today): string {
-    $attrs = ' max="' . e($today) . '"' . ($showCustom ? ' required' : ' disabled');
-    return '<label class="' . e($fieldClass) . '" data-date-custom' . ($showCustom ? '' : ' hidden') . ' title="From (SO creation date)">'
-        . '<span class="material-icons-round">event</span>'
+$plantSelect = static function (string $class) use ($plant, $plants): string {
+    $html = '<label class="' . e($class) . '" title="Plant (required)">'
+        . '<span class="material-icons-round">factory</span>'
+        . '<select name="plant" required aria-label="Plant" data-plant-select>'
+        . '<option value=""' . ($plant === '' ? ' selected' : '') . '>Plant *</option>';
+    foreach ($plants as $p) {
+        $html .= '<option value="' . e($p) . '"' . ($p === $plant ? ' selected' : '') . '>' . e($p) . '</option>';
+    }
+    return $html . '</select></label>';
+};
+
+$isCustom = $datePreset === 'custom';
+
+/*
+ * From / To inputs are only shown for Custom Date; the other presets show their dates as text (date summary)
+ */
+$dateInputs = static function (string $fieldClass) use ($dateFrom, $dateTo, $today, $isCustom): string {
+    $attrs = ' max="' . e($today) . '"' . ($isCustom ? '' : ' disabled');
+    $hidden = $isCustom ? '' : ' hidden';
+    return '<label class="' . e($fieldClass) . '" title="From (SO creation date)" data-date-custom' . $hidden . '>'
+        . '<span class="date-cap">From</span>'
         . '<input type="date" name="from" value="' . e($dateFrom) . '"' . $attrs . ' aria-label="From date"></label>'
-        . '<label class="' . e($fieldClass) . '" data-date-custom' . ($showCustom ? '' : ' hidden') . ' title="To (SO creation date)">'
-        . '<span class="material-icons-round">event</span>'
+        . '<label class="' . e($fieldClass) . '" title="To (SO creation date)" data-date-custom' . $hidden . '>'
+        . '<span class="date-cap">To</span>'
         . '<input type="date" name="to" value="' . e($dateTo) . '"' . $attrs . ' aria-label="To date"></label>';
+};
+
+$dateSummary = static function (string $class) use ($dateFrom, $dateTo, $datePreset, $isCustom, $dmy): string {
+    $show = $datePreset !== '' && !$isCustom && $dateFrom !== '';
+    return '<span class="date-summary ' . e($class) . '" data-date-summary' . ($show ? '' : ' hidden') . '>'
+        . 'From <b data-sum-from>' . e($dmy($dateFrom)) . '</b> To <b data-sum-to>' . e($dmy($dateTo)) . '</b></span>';
 };
 
 $cards = [
@@ -58,18 +80,7 @@ $cards = [
     ['id' => 'shipment',         'label' => 'Shipped',          'icon' => 'local_shipping',          'tone' => 'violet'],
     ['id' => 'pending_delivery', 'label' => 'Pending Delivery', 'icon' => 'pending_actions',         'tone' => 'rose'],
 ];
-
-$plantInput = static function (string $id) use ($plant): string {
-    return '<input id="' . e($id) . '" name="plant" class="plant-input" value="' . e($plant) . '" placeholder="Plant"'
-        . ' maxlength="4" autocomplete="off" spellcheck="false" list="prodPlantList"'
-        . ' title="Plant code, e.g. P002 (optional). Leave empty to use every plant.">';
-};
 ?>
-<datalist id="prodPlantList">
-    <?php foreach ($plants as $p): ?>
-        <option value="<?= e($p) ?>"></option>
-    <?php endforeach; ?>
-</datalist>
 <div class="rpt-app is-production <?= $isLookup ? 'is-lookup' : 'is-report' ?>">
     <?php
         $loaderIcon = 'precision_manufacturing';
@@ -95,22 +106,20 @@ $plantInput = static function (string $id) use ($plant): string {
         </div>
 
         <?php if (!$isLookup): ?>
-            <form class="rpt-search prod-filters" method="get" action="<?= e(url('production')) ?>" id="rptFilterForm" data-date-filter>
+            <form class="rpt-search prod-filters" method="get" action="<?= e(url('production')) ?>" id="rptFilterForm" data-date-filter novalidate>
+                <?= $plantSelect('rpt-field rpt-field-plant') ?>
                 <label class="rpt-field rpt-field-range" title="SO creation date">
                     <span class="material-icons-round">date_range</span>
                     <select name="range" data-range-select aria-label="SO creation date">
-                        <option value=""<?= $datePreset === '' ? ' selected' : '' ?>>All dates</option>
+                        <option value=""<?= $datePreset === '' ? ' selected' : '' ?>>SO date</option>
                         <?php foreach ($presets as $key => $label): ?>
                             <option value="<?= e($key) ?>"<?= $key === $datePreset ? ' selected' : '' ?>><?= e($label) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </label>
-                <?= $dateInputs('rpt-field rpt-field-date', $datePreset === 'custom') ?>
+                <?= $dateSummary('is-bar') ?>
+                <?= $dateInputs('rpt-field rpt-field-date') ?>
                 <?= $soInput('rpt-field rpt-field-so', 'Sales order') ?>
-                <label class="rpt-field rpt-field-plant">
-                    <span class="material-icons-round">factory</span>
-                    <?= $plantInput('plant') ?>
-                </label>
                 <button class="rpt-btn" type="submit" title="Load report">
                     <span class="material-icons-round">sync</span>
                 </button>
@@ -128,18 +137,15 @@ $plantInput = static function (string $id) use ($plant): string {
                 <p class="lookup-kicker">Production report</p>
                 <h1>Find production</h1>
                 <p class="lookup-lede">Pull cutting, sewing, washing, finishing and shipment quantities from SAP.</p>
-                <form method="get" action="<?= e(url('production')) ?>" id="rptFilterForm" class="lookup-filters" data-date-filter>
+                <form method="get" action="<?= e(url('production')) ?>" id="rptFilterForm" class="lookup-filters" data-date-filter novalidate>
                     <div class="lookup-form">
+                        <?= $plantSelect('lookup-so lookup-plant') ?>
                         <?= $soInput('lookup-so', 'Sales order number') ?>
-                        <label class="lookup-so lookup-plant">
-                            <span class="material-icons-round">factory</span>
-                            <?= $plantInput('plant') ?>
-                        </label>
                     </div>
 
-                    <p class="lookup-label">SO created</p>
-                    <div class="date-chips" role="radiogroup" aria-label="SO creation date">
-                        <?php foreach (['' => 'All dates'] + $presets as $key => $label): ?>
+                    <p class="lookup-label">SO created date <span class="lookup-label-note">or sales order *</span></p>
+                    <div class="date-chips" role="radiogroup" aria-label="SO creation date" data-date-chips>
+                        <?php foreach ($presets as $key => $label): ?>
                             <label class="date-chip<?= (string) $key === $datePreset ? ' on' : '' ?>">
                                 <input type="radio" name="range" value="<?= e((string) $key) ?>"<?= (string) $key === $datePreset ? ' checked' : '' ?>>
                                 <?php if ($key === 'custom'): ?><span class="material-icons-round">edit_calendar</span><?php endif; ?>
@@ -147,19 +153,18 @@ $plantInput = static function (string $id) use ($plant): string {
                             </label>
                         <?php endforeach; ?>
                     </div>
-                    <div class="date-custom" data-date-custom<?= $datePreset === 'custom' ? '' : ' hidden' ?>>
-                        <?= $dateInputs('lookup-so date-input', $datePreset === 'custom') ?>
+                    <?= $dateSummary('is-lookup') ?>
+                    <div class="date-custom" data-date-custom<?= $isCustom ? '' : ' hidden' ?>>
+                        <?= $dateInputs('lookup-so date-input') ?>
                     </div>
-                    <?php if ($rangeError !== ''): ?>
-                        <p class="date-error" role="alert"><?= e($rangeError) ?></p>
-                    <?php endif; ?>
+                    <p class="date-error" role="alert" data-filter-error<?= $rangeError === '' ? ' hidden' : '' ?>><?= e($rangeError) ?></p>
 
                     <button class="rpt-btn lookup-submit" type="submit">
                         <span class="material-icons-round">sync</span>
                         Show report
                     </button>
                 </form>
-                <p class="lookup-hint">Enter a <b>sales order</b>, pick an <b>SO created</b> date, or both. Plant is optional (dates up to <?= (int) SapProductionService::MAX_RANGE_DAYS ?> days).</p>
+                <p class="lookup-hint"><b>Plant</b> is required, plus an <b>SO created</b> date or a <b>sales order</b> (or both). Click a selected date again to clear it. Custom dates up to <?= (int) SapProductionService::MAX_RANGE_DAYS ?> days.</p>
             </div>
         </main>
     <?php else: ?>
@@ -170,12 +175,13 @@ $plantInput = static function (string $id) use ($plant): string {
             </div>
             <?php if ($isRange): ?>
                 <div class="prod-info" id="prodInfo" hidden>
-                    <div class="prod-info-item is-wide"><small>SO Created</small><b><?= e($rangeText) ?></b></div>
-                    <?php if ($filterText !== ''): ?>
-                        <div class="prod-info-item"><small>Filter</small><b><?= e($filterText) ?></b></div>
+                    <div class="prod-info-item"><small>SO Created From</small><b><?= e($dmy($range['from'])) ?></b></div>
+                    <div class="prod-info-item"><small>To</small><b><?= e($dmy($range['to'])) ?></b></div>
+                    <?php if ($range['preset'] !== 'custom'): ?>
+                        <div class="prod-info-item"><small>Period</small><b><?= e($range['label']) ?></b></div>
                     <?php endif; ?>
+                    <div class="prod-info-item"><small>Filter</small><b><?= e($filterText) ?></b></div>
                     <div class="prod-info-item"><small>Sales Orders</small><b id="prodInfoOrders">—</b></div>
-                    <div class="prod-info-item"><small>Plants</small><b id="prodInfoPlant">—</b></div>
                     <div class="prod-info-item"><small>Customers</small><b id="prodInfoCustomers">—</b></div>
                     <div class="prod-info-item"><small>Lines</small><b id="prodInfoLines">—</b></div>
                 </div>
@@ -344,6 +350,7 @@ $plantInput = static function (string $id) use ($plant): string {
     'report'        => 'production',
     'so'            => $salesOrder,
     'plant'         => $plant,
+    'presetDates'   => $presetDates,
     'live'          => !$isLookup,
     'range'         => $isRange ? ['preset' => $range['preset'], 'from' => $range['from'], 'to' => $range['to'], 'text' => $rangeText, 'filter' => $filterText] : null,
     'maxRangeDays'  => SapProductionService::MAX_RANGE_DAYS,

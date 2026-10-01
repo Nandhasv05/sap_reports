@@ -8,6 +8,7 @@ require_once base_path('app/services/SapSalesService.php');
 require_once base_path('app/services/SapUtilizationService.php');
 require_once base_path('app/services/SapProductionService.php');
 require_once base_path('app/services/SapProcurementService.php');
+require_once base_path('app/services/SapPurchaseOrderService.php');
 
 class ReportsModel
 {

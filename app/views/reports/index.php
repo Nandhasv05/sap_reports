@@ -101,6 +101,23 @@ $dashboardUrl = sap_reports_evol_url('portal_dashboard.php');
             <i class="fas fa-arrow-right"></i>
         </div>
     </a>
+
+    <!-- Card 6: Purchase Order Report -->
+    <a class="rpt-card card-po" href="<?= e(url('purchase-order')) ?>">
+        <div class="card-accent-line accent-indigo"></div>
+        <div class="card-top">
+            <div class="card-icon icon-indigo">
+                <i class="fas fa-file-invoice"></i>
+            </div>
+            <span class="card-badge badge-indigo">PURCHASE ORDER</span>
+        </div>
+        <h3>Purchase Order Report</h3>
+        <p>Live SAP purchase order details: supplier, items, quantities, prices and linked sales orders.</p>
+        <div class="card-action action-indigo">
+            <span>Open Purchase Order</span>
+            <i class="fas fa-arrow-right"></i>
+        </div>
+    </a>
 </div>
 
 <!-- Fabric / Trims Modal -->

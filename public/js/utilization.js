@@ -260,6 +260,11 @@
             tr.setAttribute('data-r-grn', String(grn));
             tr.setAttribute('data-r-iss', String(iss));
             const textCell = (value) => `<td title="${escapeHtml(displayCode(value))}">${escapeHtml(displayCode(value))}</td>`;
+            const poNum = displayCode(row.purchase_order).replace(/,/g, '').trim();
+            const poItem = displayCode(row.po_item).replace(/,/g, '').trim();
+            const poHtml = /^\d{1,10}$/.test(poNum)
+                ? `<button type="button" class="po-link" data-po-open="${escapeHtml(poNum)}" data-po-item="${escapeHtml(poItem)}" title="Show purchase order ${escapeHtml(poNum)} details">${escapeHtml(poNum)}</button>`
+                : escapeHtml(poNum);
             const matInfoHtml = isFabric ? '' : [row.mat_type, row.mat_type_desc, row.mat_group, row.mat_group_desc].map(textCell).join('');
             const attrHtml = isFabric ? [row.attribute1_text, row.attribute2_text, row.attribute3_text, row.colour].map(textCell).join('') : '';
             const totalBomHtml = `<td class="num bom-qty-cell total-bom-cell"><span class="bom-val">${escapeHtml(dashCell(row.total_bom_qty))}</span></td>`;
@@ -270,8 +275,8 @@
                 <td class="rpt-mat" title="${escapeHtml(displayCode(row.material))}">${escapeHtml(displayCode(row.material))}</td>
                 ${textCell(row.description)}
                 ${matInfoHtml}
-                <td>${escapeHtml(displayCode(row.purchase_order).replace(/,/g, ''))}</td>
-                <td>${escapeHtml(displayCode(row.po_item).replace(/,/g, ''))}</td>
+                <td>${poHtml}</td>
+                <td>${escapeHtml(poItem)}</td>
                 <td class="num qty-cell" data-qty-type="so"><span class="qty-val">${escapeHtml(dashCell(row.so_qty))}</span></td>
                 <td class="num bom-qty-cell"><span class="bom-val">${escapeHtml(dashCell(row.bom_qty))}</span></td>
                 ${totalBomHtml}

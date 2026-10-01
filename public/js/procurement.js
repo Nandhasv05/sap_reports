@@ -82,12 +82,14 @@
         const d = new Date();
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     })();
+
     const prStatuses = [
         ['open', 'Open'],
         ['overdue', 'Overdue'],
         ['done', 'Fully ordered'],
         ['over', 'Over-ordered'],
     ];
+    
     const prStatusLabel = Object.fromEntries(prStatuses);
 
     function prStatus(pr) {

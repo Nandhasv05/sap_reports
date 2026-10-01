@@ -614,7 +614,12 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                                     <?php endif; ?>
 
                                     <td>
-                                        <?= e(str_replace(',', '', $model->dash($row['purchase_order'] ?? ''))) ?>
+                                        <?php $poNum = str_replace(',', '', $model->dash($row['purchase_order'] ?? '')); ?>
+                                        <?php if (preg_match('/^\d{1,10}$/', $poNum)): ?>
+                                            <button type="button" class="po-link" data-po-open="<?= e($poNum) ?>" data-po-item="<?= e(str_replace(',', '', (string) ($row['po_item'] ?? ''))) ?>" title="Show purchase order <?= e($poNum) ?> details"><?= e($poNum) ?></button>
+                                        <?php else: ?>
+                                            <?= e($poNum) ?>
+                                        <?php endif; ?>
                                     </td>
                                     <td>
                                         <?= e(str_replace(',', '', $model->dash($row['po_item'] ?? ''))) ?>
@@ -753,7 +758,12 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
     'catIcons'  => $trimCatIcons ?? [],
     'catColors' => $trimCatColors ?? [],
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
+<script type="application/json" id="poConfig"><?= json_encode([
+    'dataUrl' => url('purchase-order/data'),
+    'pageUrl' => url('purchase-order'),
+], JSON_UNESCAPED_SLASHES) ?></script>
 <script src="<?= e(asset('js/loader.js')) ?>"></script>
+<script src="<?= e(asset('js/po-report.js')) ?>"></script>
 <?php $prefTableKey = $isFabric ? 'fabric_utilization_table' : 'trims_utilization_table'; require base_path('app/views/partials/table_preferences.php'); ?>
 <script src="<?= e(asset('js/table-columns.js')) ?>"></script>
 <script src="<?= e(asset('js/excel-export.js')) ?>"></script>

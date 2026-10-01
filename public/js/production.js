@@ -31,60 +31,138 @@
     const maxRangeDays = Number(cfg.maxRangeDays) || 62;
 
     /*
-     * Combined filters: SO creation date (select or chips, custom From-To) + sales order + plant, applied together
+     * Filters: Plant (required) + SO creation date preset and / or sales order (optional).
+     * From / To inputs are shown only for Custom Date; other presets show their dates as text.
      */
     function bindDateFilters() {
+        const presetDates = cfg.presetDates || {};
+        const dmy = (ymd) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd || ''); return m ? `${m[3]}/${m[2]}/${m[1]}` : ''; };
+        const filterError = document.querySelector('[data-filter-error]');
+
         document.querySelectorAll('[data-date-filter]').forEach(form => {
+            const plantSelect = form.querySelector('[data-plant-select]');
             const select = form.querySelector('[data-range-select]');
             const radios = Array.from(form.querySelectorAll('input[type="radio"][name="range"]'));
             const dateInputs = Array.from(form.querySelectorAll('input[type="date"]'));
             const [fromInput, toInput] = dateInputs;
             const soInput = form.querySelector('input[name="so"]');
-            const plantInput = form.querySelector('input[name="plant"]');
+            const customBlocks = Array.from(form.querySelectorAll('[data-date-custom]'));
+            const summary = form.querySelector('[data-date-summary]');
+            const isHeader = !!select;
+            const chips = form.querySelector('[data-date-chips]');
+            const fields = [plantSelect, soInput, select, ...dateInputs].filter(Boolean);
             const currentPreset = () => (select ? select.value : (radios.find(r => r.checked)?.value || ''));
+            const boxOf = (field) => field?.closest('label');
+
+            function clearErrors() {
+                fields.forEach(field => { field.setCustomValidity(''); boxOf(field)?.classList.remove('is-invalid'); });
+                chips?.classList.remove('is-invalid');
+                if (filterError) filterError.hidden = true;
+            }
+
+            function showError(message, target, alsoMark = []) {
+                [target, ...alsoMark].forEach(field => {
+                    if (field === chips) chips?.classList.add('is-invalid');
+                    else boxOf(field)?.classList.add('is-invalid');
+                });
+                if (filterError) {
+                    filterError.textContent = message;
+                    filterError.hidden = false;
+                }
+                if (target && target !== chips) {
+                    target.setCustomValidity(message);
+                    target.reportValidity();
+                }
+            }
+
+            function setPreset(key) {
+                if (select) select.value = key;
+                radios.forEach(r => { r.checked = r.value === key; r.closest('.date-chip')?.classList.toggle('on', r.checked); });
+            }
 
             function showCustom(on) {
-                form.querySelectorAll('[data-date-custom]').forEach(el => { el.hidden = !on; });
-                dateInputs.forEach(input => { input.disabled = !on; input.required = on; input.setCustomValidity(''); });
+                customBlocks.forEach(el => { el.hidden = !on; });
+                dateInputs.forEach(input => { input.disabled = !on; });
             }
 
-            select?.addEventListener('change', () => {
-                showCustom(select.value === 'custom');
-                if (select.value === 'custom') fromInput?.focus();
-                else form.requestSubmit();
-            });
-            if (select) {
-                dateInputs.forEach(input => input.addEventListener('change', () => {
-                    if (fromInput?.value && toInput?.value) form.requestSubmit();
-                }));
+            function applyPreset(key) {
+                clearErrors();
+                const dates = presetDates[key];
+                if (dates) {
+                    if (fromInput) fromInput.value = dates.from;
+                    if (toInput) toInput.value = dates.to;
+                } else if (key === '') {
+                    dateInputs.forEach(input => { input.value = ''; });
+                }
+                showCustom(key === 'custom');
+                if (summary) {
+                    summary.hidden = !dates;
+                    const sumFrom = summary.querySelector('[data-sum-from]');
+                    const sumTo = summary.querySelector('[data-sum-to]');
+                    if (dates && sumFrom) sumFrom.textContent = dmy(dates.from);
+                    if (dates && sumTo) sumTo.textContent = dmy(dates.to);
+                }
+                if (key === 'custom') fromInput?.focus();
             }
-            radios.forEach(radio => radio.addEventListener('change', () => {
-                radios.forEach(r => r.closest('.date-chip')?.classList.toggle('on', r.checked));
-                showCustom(radio.value === 'custom' && radio.checked);
-                if (radio.value === 'custom') fromInput?.focus();
-            }));
-            dateInputs.forEach(input => input.addEventListener('input', () => input.setCustomValidity('')));
+
+            const canSubmit = () => {
+                const preset = currentPreset();
+                if (!plantSelect?.value) return false;
+                if (!preset) return !!(soInput?.value || '').trim();
+                return preset !== 'custom' || !!(fromInput?.value && toInput?.value);
+            };
+
+            select?.addEventListener('change', () => {
+                applyPreset(select.value);
+                if (select.value !== 'custom' && canSubmit()) form.requestSubmit();
+            });
+            // Clicking the selected chip again clears the date (sales order only)
+            let activePreset = currentPreset();
+            radios.forEach(radio => {
+                radio.addEventListener('click', () => {
+                    const key = radio.value === activePreset ? '' : radio.value;
+                    activePreset = key;
+                    setPreset(key);
+                    applyPreset(key);
+                });
+            });
+            dateInputs.forEach(input => {
+                input.addEventListener('input', clearErrors);
+                if (isHeader) input.addEventListener('change', () => { if (fromInput?.value && toInput?.value && canSubmit()) form.requestSubmit(); });
+            });
+            plantSelect?.addEventListener('change', () => {
+                clearErrors();
+                if (isHeader && canSubmit()) form.requestSubmit();
+            });
             soInput?.addEventListener('input', () => {
                 soInput.value = soInput.value.replace(/\D/g, '');
-                soInput.setCustomValidity('');
+                clearErrors();
             });
-            plantInput?.addEventListener('input', () => {
-                const pos = plantInput.selectionStart;
-                plantInput.value = plantInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
-                if (pos !== null) plantInput.setSelectionRange(pos, pos);
+
+            // Back / forward cache restores the fields disabled on submit
+            window.addEventListener('pageshow', () => {
+                [plantSelect, select, soInput, ...radios].forEach(field => { if (field) field.disabled = false; });
+                showCustom(currentPreset() === 'custom');
+                showSpinner(false);
             });
 
             form.addEventListener('submit', (e) => {
+                clearErrors();
                 const preset = currentPreset();
                 const so = (soInput?.value || '').trim();
+                const from = fromInput?.value || '';
+                const to = toInput?.value || '';
                 let message = '';
                 let target = null;
-                if (!preset && !so) {
-                    message = 'Enter a sales order or choose an SO created date.';
+                let alsoMark = [];
+                if (plantSelect && !plantSelect.value) {
+                    message = 'Plant is required.';
+                    target = plantSelect;
+                } else if (!preset && !so) {
+                    message = 'Choose an SO created date (From / To) or enter a sales order.';
                     target = soInput;
+                    alsoMark = [chips || select];
                 } else if (preset === 'custom') {
-                    const from = fromInput?.value || '';
-                    const to = toInput?.value || '';
                     if (!from || !to) message = 'Choose both a From and a To date.';
                     else if (from > to) message = 'The From date must be on or before the To date.';
                     else if ((Date.parse(to) - Date.parse(from)) / 86400000 + 1 > maxRangeDays) message = `Choose a range of ${maxRangeDays} days or less.`;
@@ -92,16 +170,16 @@
                 }
                 if (message) {
                     e.preventDefault();
-                    target?.setCustomValidity(message);
-                    target?.reportValidity();
+                    showError(message, target, alsoMark);
                     return;
                 }
-                if (plantInput) plantInput.value = plantInput.value.trim().toUpperCase();
-                // Leave unused fields out of the URL
+                // Leave unused fields out of the URL (presets resolve their own dates on the server)
                 if (preset !== 'custom') dateInputs.forEach(input => { input.disabled = true; });
-                if (!preset) { if (select) select.disabled = true; radios.forEach(r => { r.disabled = true; }); }
+                if (!preset) {
+                    if (select) select.disabled = true;
+                    radios.forEach(r => { r.disabled = true; });
+                }
                 if (soInput && !so) soInput.disabled = true;
-                if (plantInput && !plantInput.value) plantInput.disabled = true;
                 showSpinner(true);
             });
         });
@@ -246,8 +324,6 @@
         if (notice && noticeText && data.warning) {
             noticeText.textContent = data.warning;
             notice.hidden = false;
-            const plantInput = document.getElementById('plant');
-            if (plantInput && (data.plants || []).length === 1) plantInput.value = data.plants[0];
         }
     }
 
@@ -563,11 +639,9 @@
                 const found = Number(plan.orders_found) || 0;
                 fillInfo(summary([], found, plan.warning || ''));
                 if (!orders.length) {
-                    const message = range.filter
-                        ? `No production sales orders match ${range.filter} created ${range.text}.`
-                        : `No production sales orders were created ${range.text}.`;
+                    const message = `No production sales orders for ${range.filter} created ${range.text}.`;
                     showEmpty(message);
-                    showNotice(`${message} Try a wider date${range.filter ? ', or clear the sales order / plant' : ' such as This Week or This Month'}.`);
+                    showNotice(`${message} Try a wider date${cfg.so ? ', or clear the sales order' : ' such as This Week or This Month'}.`);
                     updateCharts({}, {});
                     return null;
                 }
@@ -613,8 +687,8 @@
                         sortItems();
                         applyFilterAndSearch();
                     } else {
-                        showEmpty(`No production data yet for the ${found} sales order(s) created ${range.text}.`);
-                        if (!failedOrders.length && !plan.warning) showNotice(`The ${found} sales order(s) created ${range.text} have no cutting, sewing or shipment entries in SAP yet.`);
+                        showEmpty(`No production data yet for the ${found} sales order(s) of ${range.filter} created ${range.text}.`);
+                        if (!failedOrders.length && !plan.warning) showNotice(`The ${found} sales order(s) of ${range.filter} created ${range.text} have no cutting, sewing or shipment entries in SAP yet.`);
                         updateCharts({}, {});
                     }
                 });

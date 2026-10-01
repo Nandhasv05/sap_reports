@@ -164,6 +164,23 @@ class SapProductionService
         return $out;
     }
 
+    /*
+     * From / To (Y-m-d) of every preset except custom, so the page can fill the date fields when a preset is picked
+     *
+     * @return array<string, array{from: string, to: string}>
+     */
+    public static function presetDates(): array
+    {
+        $out = [];
+        foreach (array_keys(self::rangePresets()) as $key) {
+            if ($key !== 'custom') {
+                $r = self::resolveRange($key);
+                $out[$key] = ['from' => $r['from'], 'to' => $r['to']];
+            }
+        }
+        return $out;
+    }
+
     private static function parseDate(string $value, DateTimeZone $tz): ?DateTimeImmutable
     {
         $date = DateTimeImmutable::createFromFormat('!Y-m-d', trim($value), $tz);
@@ -225,7 +242,7 @@ class SapProductionService
             }
             $plants = $detected['plants'];
             if ($plants === []) {
-                $out['error'] = 'Sales order ' . $soText . ' was not found in SAP. Check the number or enter the plant.';
+                $out['error'] = 'Sales order ' . $soText . ' was not found in SAP. Check the number.';
                 return $out;
             }
         } elseif ($detected['plants'] !== [] && !in_array($plant, $detected['plants'], true)) {
@@ -278,7 +295,7 @@ class SapProductionService
      * Sales orders (+ production plant) created between $from and $to (Y-m-d, already validated by resolveRange).
      * ZPROD_NEWSet cannot filter by date, so the page loads this list first and then the production in batches (pairsReport).
      *
-     * Optional $salesOrder / $plant narrow the list (both must match).
+     * $plant (required on the page) and the optional $salesOrder narrow the list.
      *
      * @return array{orders: array<int, array{so: string, plant: string}>, orders_found: int, range: array, warning: string, error: ?string}
      */
