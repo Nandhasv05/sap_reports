@@ -171,7 +171,7 @@ $listCards = [
                     </div>
                 </div>
                 <dl class="po-hero-meta" id="poHeroMeta">
-                    <?php foreach (['PO Date', 'Supplier', 'Company Code', 'Purchasing Org.', 'Purchasing Group', 'Created By', 'Plant'] as $label): ?>
+                    <?php foreach (['PO Category', 'PO Type', 'PO Type Name', 'PO Date', 'Supplier', 'Supplier Name', 'Company Code', 'Purchasing Org.', 'Purchasing Group', 'Created By', 'Plant'] as $label): ?>
                         <div><dt><?= e($label) ?></dt><dd>—</dd></div>
                     <?php endforeach; ?>
                 </dl>

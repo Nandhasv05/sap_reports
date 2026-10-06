@@ -48,8 +48,12 @@
     function infoItems(h) {
         return [
             ['Purchase Order', h.purchase_order],
+            ['PO Category', h.purchase_order_category],
+            ['PO Type', h.purchase_order_type],
+            ['PO Type Name', h.po_type_name],
             ['PO Date', fmtDate(h.date)],
             ['Supplier', h.supplier],
+            ['Supplier Name', h.supplier_full_name],
             ['Company Code', h.company_code],
             ['Purchasing Org.', h.purchasing_org],
             ['Purchasing Group', h.purchasing_group],
@@ -171,13 +175,17 @@
                                     <tr class="rpt-header-row">
                                         <th class="num sno">S.No</th>
                                         <th>Item</th>
+                                        <th>PO Category</th>
+                                        <th>PO Type</th>
+                                        <th>PO Type Name</th>
+                                        <th>Supplier</th>
+                                        <th>Supplier Name</th>
                                         <th>Material</th>
                                         <th>Description</th>
                                         <th class="num">Order Qty</th>
                                         <th>Unit</th>
                                         <th class="num">Net Price</th>
                                         <th class="num">Net Value</th>
-                                        <th class="num po-share">Value Share</th>
                                         <th>Sales Orders</th>
                                     </tr>
                                 </thead>
@@ -306,29 +314,31 @@
         const valSum = records.reduce((s, r) => s + Number(r.net_value || 0), 0);
         drawer.querySelector('#poDrawerItemCount').textContent = `${records.length} items`;
         drawer.querySelector('[data-po-rows]').innerHTML = records.map((r, i) => {
-            const share = valSum > 0 ? ((Number(r.net_value || 0) / valSum) * 100) : 0;
             return `
                 <tr class="${current.item !== '' && String(r.item) === current.item ? 'is-current' : ''}">
                     <td class="num sno">${i + 1}</td>
                     <td><span class="po-item-tag">${dash(r.item)}</span></td>
+                    <td>${dash(r.purchase_order_category)}</td>
+                    <td>${dash(r.purchase_order_type)}</td>
+                    <td>${dash(r.po_type_name)}</td>
+                    <td>${dash(r.supplier)}</td>
+                    <td>${dash(r.supplier_full_name)}</td>
                     <td class="mono rpt-mat">${dash(r.material)}</td>
                     <td class="po-desc" title="${esc(r.description)}">${dash(r.description)}</td>
                     <td class="num"><span class="qty-val">${qty(r.order_qty)}</span></td>
                     <td>${dash(r.unit)}</td>
                     <td class="num"><span class="qty-val">${money(r.net_price)}</span></td>
                     <td class="num po-value"><span class="qty-val">${money(r.net_value)} ${esc(r.currency || '')}</span></td>
-                    <td class="num po-share"><span class="po-share-bar"><i style="width:${share.toFixed(1)}%"></i></span><span class="qty-val">${share.toFixed(1)}%</span></td>
                     <td class="po-col-sos"><div class="po-sos-inline">${soChips(r.sales_orders, 5)}</div></td>
                 </tr>`;
         }).join('');
 
         drawer.querySelector('#poDrawerFoot').innerHTML = `
-            <th colspan="4">Total (${qty(t.items || records.length)} items)</th>
+            <th colspan="9">Total (${qty(t.items || records.length)} items)</th>
             <th class="num">${t.order_qty === null ? '' : qty(t.order_qty)}</th>
             <th>${esc(t.unit || '')}</th>
             <th></th>
             <th class="num">${t.net_value === null ? '' : `${money(t.net_value)} ${esc(t.currency || '')}`}</th>
-            <th class="num">100.0%</th>
             <th></th>`;
 
         drawer.querySelector('tr.is-current')?.scrollIntoView({ block: 'nearest' });

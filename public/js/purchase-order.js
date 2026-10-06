@@ -433,9 +433,6 @@
             case 'order_qty': return `<td class="num"><span class="qty-val">${P.qty(rec.order_qty)}</span></td>`;
             case 'net_price': return `<td class="num"><span class="qty-val">${P.money(rec.net_price)}</span></td>`;
             case 'net_value': return `<td class="num po-value"><span class="qty-val">${P.money(rec.net_value)}</span></td>`;
-            case 'value_share': return rec.value_share === null
-                ? '<td class="num po-share">—</td>'
-                : `<td class="num po-share"><span class="po-share-bar"><i style="width:${rec.value_share.toFixed(1)}%"></i></span><span class="qty-val">${rec.value_share.toFixed(1)}%</span></td>`;
             case 'sales_orders': return `<td class="po-col-sos">${P.soChips(rec.sales_orders)}</td>`;
             default: return `<td>${P.dash(rec[key])}</td>`;
         }
@@ -443,10 +440,8 @@
 
     function renderDetailRows(records) {
         tbody.querySelectorAll('tr.rpt-table-loading, tr[data-orig-sno]').forEach((tr) => tr.remove());
-        const valueSum = records.reduce((s, r) => s + Number(r.net_value || 0), 0);
         const frag = document.createDocumentFragment();
-        items = records.map((r, index) => {
-            const rec = { ...r, value_share: valueSum > 0 && totals.net_value !== null ? (Number(r.net_value || 0) / valueSum) * 100 : null };
+        items = records.map((rec, index) => {
             const tr = document.createElement('tr');
             tr.setAttribute('data-orig-sno', String(index + 1));
             tr.innerHTML = columns.map((c) => renderDetailCell(c.key, rec, index)).join('');
@@ -539,7 +534,7 @@
         let visible = 0;
         const sums = isList
             ? { items_count: 0, total_qty: 0, total_value: 0 }
-            : { order_qty: 0, net_value: 0, value_share: 0 };
+            : { order_qty: 0, net_value: 0 };
 
         items.forEach((item) => {
             item.visible = matches(item, query, filters);
@@ -581,7 +576,6 @@
             setFoot('unit', sameUnit ? P.esc(totals.unit || '') : '');
             setFoot('net_value', sameCurrency ? `<span class="foot-val">${P.money(sums.net_value)}</span>` : '');
             setFoot('currency', sameCurrency ? P.esc(totals.currency || '') : '');
-            setFoot('value_share', sameCurrency ? `<span class="foot-val">${sums.value_share.toFixed(1)}%</span>` : '');
         }
     }
 

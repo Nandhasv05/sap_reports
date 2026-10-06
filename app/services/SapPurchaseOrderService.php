@@ -141,9 +141,13 @@ class SapPurchaseOrderService
         return [
             ['key' => 'sno',            'label' => 'S.No',         'type' => 'num'],
             ['key' => 'purchase_order', 'label' => 'PO Number',    'type' => 'text'],
+            ['key' => 'purchase_order_category', 'label' => 'PO Category', 'type' => 'text'],
+            ['key' => 'purchase_order_type', 'label' => 'PO Type', 'type' => 'text'],
+            ['key' => 'po_type_name',   'label' => 'PO Type Name', 'type' => 'text'],
             ['key' => 'date',           'label' => 'PO Date',      'type' => 'date'],
             ['key' => 'plant',          'label' => 'Plant',        'type' => 'text'],
             ['key' => 'supplier',       'label' => 'Supplier',     'type' => 'text'],
+            ['key' => 'supplier_full_name', 'label' => 'Supplier Name', 'type' => 'text'],
             ['key' => 'items_count',    'label' => 'Items',        'type' => 'num'],
             ['key' => 'total_qty',      'label' => 'Order Qty',    'type' => 'num'],
             ['key' => 'unit',           'label' => 'Unit',         'type' => 'text'],
@@ -162,6 +166,11 @@ class SapPurchaseOrderService
         return [
             ['key' => 'sno',              'label' => 'S.No',         'type' => 'num'],
             ['key' => 'item',             'label' => 'Item',         'type' => 'num'],
+            ['key' => 'purchase_order_category', 'label' => 'PO Category', 'type' => 'text'],
+            ['key' => 'purchase_order_type', 'label' => 'PO Type', 'type' => 'text'],
+            ['key' => 'po_type_name',     'label' => 'PO Type Name', 'type' => 'text'],
+            ['key' => 'supplier',         'label' => 'Supplier',     'type' => 'text'],
+            ['key' => 'supplier_full_name', 'label' => 'Supplier Name', 'type' => 'text'],
             ['key' => 'material',         'label' => 'Material',     'type' => 'text'],
             ['key' => 'description',      'label' => 'Description',  'type' => 'text'],
             ['key' => 'plant',            'label' => 'Plant',        'type' => 'text'],
@@ -171,7 +180,6 @@ class SapPurchaseOrderService
             ['key' => 'net_price',        'label' => 'Net Price',    'type' => 'num'],
             ['key' => 'net_value',        'label' => 'Net Value',    'type' => 'num'],
             ['key' => 'currency',         'label' => 'Currency',     'type' => 'text'],
-            ['key' => 'value_share',      'label' => 'Value Share',  'type' => 'num'],
             ['key' => 'sales_orders',     'label' => 'Sales Orders', 'type' => 'text'],
         ];
     }
@@ -254,8 +262,12 @@ class SapPurchaseOrderService
             if (!isset($pos[$poNum])) {
                 $pos[$poNum] = [
                     'purchase_order'   => $poNum,
+                    'purchase_order_category' => trim((string) ($row['PurchaseOrderCategory'] ?? '')),
+                    'purchase_order_type' => trim((string) ($row['PurchaseOrderType'] ?? '')),
+                    'po_type_name'     => trim((string) ($row['PurchasingDocumentTypeName'] ?? '')),
                     'date'             => $this->sapDate((string) ($row['PurchaseOrderDate'] ?? '')),
                     'supplier'         => $this->displayNumber((string) ($row['Supplier'] ?? '')),
+                    'supplier_full_name' => trim((string) ($row['SupplierFullName'] ?? '')),
                     'company_code'     => trim((string) ($row['CompanyCode'] ?? '')),
                     'purchasing_org'   => trim((string) ($row['PurchasingOrganization'] ?? '')),
                     'purchasing_group' => trim((string) ($row['PurchasingGroup'] ?? '')),
@@ -391,8 +403,12 @@ class SapPurchaseOrderService
         $first = $result['rows'][0];
         $out['header'] = [
             'purchase_order'   => $this->displayNumber((string) ($first['PurchaseOrder'] ?? $po)),
+            'purchase_order_category' => trim((string) ($first['PurchaseOrderCategory'] ?? '')),
+            'purchase_order_type' => trim((string) ($first['PurchaseOrderType'] ?? '')),
+            'po_type_name'     => trim((string) ($first['PurchasingDocumentTypeName'] ?? '')),
             'date'             => $this->sapDate((string) ($first['PurchaseOrderDate'] ?? '')),
             'supplier'         => $this->displayNumber((string) ($first['Supplier'] ?? '')),
+            'supplier_full_name' => trim((string) ($first['SupplierFullName'] ?? '')),
             'company_code'     => trim((string) ($first['CompanyCode'] ?? '')),
             'purchasing_org'   => trim((string) ($first['PurchasingOrganization'] ?? '')),
             'purchasing_group' => trim((string) ($first['PurchasingGroup'] ?? '')),
@@ -420,17 +436,22 @@ class SapPurchaseOrderService
         }
 
         return [
-            'item'             => $this->displayNumber((string) ($row['PurchaseOrderItem'] ?? '')),
-            'material'         => trim((string) ($row['Material'] ?? '')),
-            'description'      => trim((string) ($row['PurchaseOrderItemText'] ?? '')),
-            'plant'            => trim((string) ($row['Plant'] ?? '')),
-            'storage_location' => trim((string) ($row['StorageLocation'] ?? '')),
-            'order_qty'        => $qty,
-            'unit'             => trim((string) ($row['PurchaseOrderQuantityUnit'] ?? '')),
-            'net_price'        => $price,
-            'net_value'        => round($qty * $price, 2),
-            'currency'         => trim((string) ($row['DocumentCurrency'] ?? '')),
-            'sales_orders'     => $salesOrders,
+            'item'                    => $this->displayNumber((string) ($row['PurchaseOrderItem'] ?? '')),
+            'purchase_order_category' => trim((string) ($row['PurchaseOrderCategory'] ?? '')),
+            'purchase_order_type'     => trim((string) ($row['PurchaseOrderType'] ?? '')),
+            'po_type_name'            => trim((string) ($row['PurchasingDocumentTypeName'] ?? '')),
+            'supplier'                => $this->displayNumber((string) ($row['Supplier'] ?? '')),
+            'supplier_full_name'      => trim((string) ($row['SupplierFullName'] ?? '')),
+            'material'                => trim((string) ($row['Material'] ?? '')),
+            'description'             => trim((string) ($row['PurchaseOrderItemText'] ?? '')),
+            'plant'                   => trim((string) ($row['Plant'] ?? '')),
+            'storage_location'        => trim((string) ($row['StorageLocation'] ?? '')),
+            'order_qty'               => $qty,
+            'unit'                    => trim((string) ($row['PurchaseOrderQuantityUnit'] ?? '')),
+            'net_price'               => $price,
+            'net_value'               => round($qty * $price, 2),
+            'currency'                => trim((string) ($row['DocumentCurrency'] ?? '')),
+            'sales_orders'            => $salesOrders,
         ];
     }
 
