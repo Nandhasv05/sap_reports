@@ -14,7 +14,7 @@
 /*
  * DEVELOPEMET URL : 'http://APP-DEV.evolvclothing.com:8000/'
  * PRODUCTION URL : 'http://APP-PROD.evolvclothing.com:8000/'
- */
+*/
 
 return [
     'enabled'          => true,
@@ -28,7 +28,7 @@ return [
     'fabric_service'   => '/sap/opu/odata/sap/ZBUSINESS_API_SRV/FABRIC_UTILIZATIONSet',
     'trims_service'    => '/sap/opu/odata/sap/ZBUSINESS_API_SRV/TRIMS_UTILIZATIONSet',
     'production_service' => '/sap/opu/odata/sap/ZBUSINESS_API_SRV/ZPROD_NEWSet',
-    'production_plants'  => ['P001', 'P002', 'P003', 'P004', 'P005', 'P006'],
+    'production_plants'  => ['P002', 'P003'],
     // Live php-fpm has only 5 workers: few browser requests, each fetching a batch from SAP in parallel.
     // SAP slows down past ~8 parallel ZPROD_NEWSet calls (requests near the 60 s timeout), so keep batch x parallel <= 8.
     'production_concurrency' => 4,

@@ -181,6 +181,8 @@ class SapUtilizationService
             'mat_type_desc'    => (string) ($row['MatTypeDesc'] ?? ''),
             'mat_group'        => (string) ($row['MatGroup'] ?? ''),
             'mat_group_desc'   => (string) ($row['MatGroupDesc'] ?? ''),
+            'season'           => (string) ($row['Season'] ?? $row['FshSeason'] ?? $row['SEASON'] ?? ''),
+            'season_year'      => (string) ($row['SeasonYear'] ?? $row['Seasonyear'] ?? $row['FshSeasonYear'] ?? $row['SEASON_YEAR'] ?? $row['Season_Year'] ?? ''),
             'purchase_order'   => (string) ($row['PurchaseOrder'] ?? ''),
             'po_item'          => $this->displaySo((string) ($row['PO_Item'] ?? '')),
             'so_qty'           => (float) ($row['SO_QTY'] ?? 0),
@@ -197,7 +199,11 @@ class SapUtilizationService
             'attribute1_text'  => (string) ($row['Attribute1_text'] ?? ''),
             'attribute2_text'  => (string) ($row['Attribute2_text'] ?? ''),
             'attribute3_text'  => (string) ($row['Attribute3_text'] ?? ''),
-            'colour'           => (string) ($row['Colour'] ?? ''), 
+            'colour'           => (string) ($row['COLOR'] ?? $row['Colour'] ?? $row['Color'] ?? ''),
+            'color'            => (string) ($row['COLOR'] ?? $row['Color'] ?? $row['Colour'] ?? ''),
+            'size1'            => (string) ($row['SIZE1'] ?? $row['Size1'] ?? ''),
+            'size2'            => (string) ($row['SIZE2'] ?? $row['Size2'] ?? ''),
+            'category'         => $kind === 'trims' ? $this->categorizeTrim($material, (string) ($row['Description'] ?? '')) : '',
         ];
     }
 

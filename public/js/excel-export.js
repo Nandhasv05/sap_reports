@@ -239,9 +239,11 @@ ${colsXml}
             return n === null ? text : n;
         };
 
-        const rows = Array.from(table.querySelectorAll('tbody tr[data-orig-sno]'))
-            .filter(tr => tr.style.display !== 'none')
-            .map(tr => visible.map(({ i }, c) => convert(cellText(tr.children[i]), headers[c].numeric)));
+        const rows = typeof table._getAllExportRows === 'function'
+            ? table._getAllExportRows(visible, convert)
+            : Array.from(table.querySelectorAll('tbody tr[data-orig-sno]'))
+                .filter(tr => tr.style.display !== 'none')
+                .map(tr => visible.map(({ i }, c) => convert(cellText(tr.children[i]), headers[c].numeric)));
 
         let totals = null;
         const foot = table.querySelector('tfoot tr');

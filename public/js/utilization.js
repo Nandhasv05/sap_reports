@@ -14,9 +14,9 @@
     *  COLOR PLAN - GET THE COLUMN INDEX BASED ON THE MATERIAL TYPE
     */
     const COL = isTrims
-        ? { bom: 11, totalBom: 12, plan: 13, prod: 14, po: 15, grn: 16, issue: 17, sos: 18 }
-        : { bom: 7, totalBom: 8, plan: 9, prod: 10, po: 11, grn: 12, issue: 13, sos: 14 };
-    const TABLE_COLUMNS = 19;
+        ? { bom: 13, totalBom: 14, plan: 15, prod: 16, po: 17, grn: 18, issue: 19, sos: 20 }
+        : { bom: 9, totalBom: 10, plan: 11, prod: 12, po: 13, grn: 14, issue: 15, sos: 16 };
+    const TABLE_COLUMNS = isTrims ? 24 : 21;
     const MAT_COL = 2;
 
     /*
@@ -186,8 +186,8 @@
         }
         const num = parseFloat(cleaned);
         if (!isNaN(num) && Math.abs(num) < 0.0000001) return '—';
-        if (Math.abs(num - Math.round(num)) < 0.0005) return String(Math.round(num));
-        return String(num);
+        if (Math.abs(num - Math.round(num)) < 0.0005) return Number(num).toFixed(1);
+        return Number(num.toFixed(3)).toString();
     }
 
     function footTotal(n) {
@@ -253,6 +253,7 @@
             }
             const tr = document.createElement('tr');
             tr.setAttribute('data-orig-sno', String(i + 1));
+            if (isTrims && row.category) tr.setAttribute('data-category', row.category);
             tr.setAttribute('data-r-bom', String(bom));
             tr.setAttribute('data-r-plan', String(plan));
             tr.setAttribute('data-r-prod', String(prod));
@@ -265,16 +266,18 @@
             const poHtml = /^\d{1,10}$/.test(poNum)
                 ? `<button type="button" class="po-link" data-po-open="${escapeHtml(poNum)}" data-po-item="${escapeHtml(poItem)}" title="Show purchase order ${escapeHtml(poNum)} details">${escapeHtml(poNum)}</button>`
                 : escapeHtml(poNum);
-            const matInfoHtml = isFabric ? '' : [row.mat_type, row.mat_type_desc, row.mat_group, row.mat_group_desc].map(textCell).join('');
+            const matInfoHtml = isFabric ? '' : [row.mat_type, row.mat_type_desc, row.mat_group, row.mat_group_desc, row.season, row.season_year].map(textCell).join('');
+            const fabricSeasonHtml = isFabric ? [row.season, row.season_year].map(textCell).join('') : '';
             const attrHtml = isFabric ? [row.attribute1_text, row.attribute2_text, row.attribute3_text, row.colour].map(textCell).join('') : '';
+            const trimMetaHtml = isTrims ? [row.colour, row.size1, row.size2].map(textCell).join('') : '';
             const totalBomHtml = `<td class="num bom-qty-cell total-bom-cell"><span class="bom-val">${escapeHtml(dashCell(row.total_bom_qty))}</span></td>`;
-            // Cell order must match the <thead> in app/views/reports/material.php (19 columns for both fabric and trims).
+            // Cell order must match the <thead> in app/views/reports/material.php.
             tr.innerHTML = `
                 <td class="num sno">${i + 1}</td>
                 <td>${soHtml}</td>
                 <td class="rpt-mat" title="${escapeHtml(displayCode(row.material))}">${escapeHtml(displayCode(row.material))}</td>
                 ${textCell(row.description)}
-                ${matInfoHtml}
+                ${isFabric ? fabricSeasonHtml : matInfoHtml}
                 <td>${poHtml}</td>
                 <td>${escapeHtml(poItem)}</td>
                 <td class="num qty-cell" data-qty-type="so"><span class="qty-val">${escapeHtml(dashCell(row.so_qty))}</span></td>
@@ -286,7 +289,7 @@
                 <td class="num qty-cell" data-qty-type="grn"><span class="qty-val">${escapeHtml(dashCell(row.grn_qty))}</span></td>
                 <td class="num qty-cell" data-qty-type="issue"><span class="qty-val">${escapeHtml(dashCell(row.issue_qty))}</span></td>
                 <td class="grn-sos">${extraSo}</td>
-                ${attrHtml}
+                ${isTrims ? trimMetaHtml : attrHtml}
             `;
             frag.appendChild(tr);
         });
@@ -470,7 +473,7 @@
             const colNums = colTexts.map(val => parseNum(val));
             const clean = (v) => (v && v !== '\u2014' && v !== '-') ? v : '';
             const groupCode = isTrims ? clean(colTexts[6]) : '';
-            const category = isTrims ? (clean(colTexts[7]) || groupCode || 'Unassigned') : '';
+            const category = isTrims ? (tr.getAttribute('data-category') || 'Unassigned') : '';
             return { tr, origIndex: index, origSno: parseInt(tr.getAttribute('data-orig-sno') || (index + 1), 10),  colTexts, colNums, category, groupCode, fullSearchText: colTexts.slice(1).join(' ').toLowerCase(), visible: true };
         });
 

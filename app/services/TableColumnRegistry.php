@@ -6,6 +6,7 @@
  */
 require_once base_path('app/services/SapProcurementService.php');
 require_once base_path('app/services/SapProductionService.php');
+require_once base_path('app/services/SapPurchaseOrderService.php');
 
 final class TableColumnRegistry
 {
@@ -44,22 +45,26 @@ final class TableColumnRegistry
             'procurement_table' => $fromService(SapProcurementService::columns(), SapProcurementService::defaultHiddenColumns()),
             'production_table'  => $fromService(SapProductionService::columns(), SapProductionService::defaultHiddenColumns()),
             'production_range_table' => $fromService(SapProductionService::columns(), SapProductionService::defaultHiddenRangeColumns()),
+            'purchase_order_table' => $fromService(SapPurchaseOrderService::columns(), []),
+            'purchase_order_list_table' => $fromService(SapPurchaseOrderService::listColumns(), []),
             'fabric_utilization_table' => self::define([
                 'sno'                     => 'S.No',
                 'sales_order'             => 'Sales Order',
                 'material'                => 'Material',
                 'description'             => 'Description',
+                'season'                  => 'Season',
+                'season_year'             => 'Season Year',
                 'purchase_order'          => 'Purchase Order',
                 'po_line'                 => 'PO Line',
                 'so_qty'                  => 'SO Qty',
                 'bom_qty'                 => 'BOM Qty',
-                'total_bom_qty'           => 'Total BOM Qty',
+                'total_bom_qty'           => 'Total Add SO BOM Qty',
                 'planned_qty'             => 'Planned',
                 'production_qty'          => 'Production',
                 'po_qty'                  => 'PO Qty',
                 'grn_qty'                 => 'GRN Qty',
                 'issue_qty'               => 'Issue Qty',
-                'additional_sales_orders' => 'Additional Sale Orders',
+                'additional_sales_orders' => 'Additional Sale Order',
                 'attribute1'              => 'Attribute1_text',
                 'attribute2'              => 'Attribute2_text',
                 'attribute3'              => 'Attribute3_text',
@@ -74,17 +79,22 @@ final class TableColumnRegistry
                 'material_type_desc'  => 'MatTypeDesc',
                 'material_group'      => 'MatGroup',
                 'material_group_desc' => 'MatGroupDesc',
+                'season'              => 'Season',
+                'season_year'         => 'Season Year',
                 'purchase_order'      => 'Purchase Order',
                 'po_line'             => 'PO Line',
                 'so_qty'              => 'SO Qty',
                 'bom_qty'             => 'BOM Qty',
-                'total_bom_qty'       => 'Total BOM Qty',
+                'total_bom_qty'       => 'Total Add SO BOM Qty',
                 'planned_qty'         => 'Planned',
                 'production_qty'      => 'Production',
                 'po_qty'              => 'PO Qty',
                 'grn_qty'             => 'GRN Qty',
                 'issue_qty'           => 'Issue Qty',
-                'grn_sales_orders'    => 'GRN Sales Orders',
+                'grn_sales_orders'    => 'Additional Sale Order',
+                'colour'              => 'COLOR',
+                'size1'               => 'SIZE1',
+                'size2'               => 'SIZE2',
             ]),
         ];
         return $tables;

@@ -33,20 +33,15 @@ $dmy = static fn (string $ymd): string => $ymd !== '' ? date('d/m/Y', strtotime(
 $rangeText = $isRange ? 'from ' . $dmy($range['from']) . ' to ' . $dmy($range['to']) : '';
 $reportTag = $plant . ($isRange ? '-' . $range['from'] . '_to_' . $range['to'] : '') . ($salesOrder !== '' ? '-SO' . $salesOrder : '');
 $soInput = static function (string $class, string $placeholder) use ($soInputValue): string {
-    return '<label class="' . e($class) . '" title="Sales order number (optional when an SO created date is chosen)">'
+    return '<label class="' . e($class) . '" title="Sales order number (optional when a date range is chosen)">'
         . '<span class="material-icons-round">receipt_long</span>'
         . '<input id="so" name="so" value="' . e($soInputValue) . '" placeholder="' . e($placeholder) . '" inputmode="numeric" autocomplete="off"></label>';
 };
 
-$plantSelect = static function (string $class) use ($plant, $plants): string {
-    $html = '<label class="' . e($class) . '" title="Plant (required)">'
+$plantInput = static function (string $class, string $placeholder = 'Plant *') use ($plant): string {
+    return '<label class="' . e($class) . '" title="Plant code (e.g. P002)">'
         . '<span class="material-icons-round">factory</span>'
-        . '<select name="plant" required aria-label="Plant" data-plant-select>'
-        . '<option value=""' . ($plant === '' ? ' selected' : '') . '>Plant *</option>';
-    foreach ($plants as $p) {
-        $html .= '<option value="' . e($p) . '"' . ($p === $plant ? ' selected' : '') . '>' . e($p) . '</option>';
-    }
-    return $html . '</select></label>';
+        . '<input type="text" name="plant" id="plant" value="' . e($plant) . '" placeholder="' . e($placeholder) . '" required maxlength="4" autocomplete="off" data-plant-input style="text-transform:uppercase"></label>';
 };
 
 $isCustom = $datePreset === 'custom';
@@ -84,9 +79,7 @@ $cards = [
 <div class="rpt-app is-production <?= $isLookup ? 'is-lookup' : 'is-report' ?>">
     <?php
         $loaderIcon = 'precision_manufacturing';
-        $loaderSteps = $isRange || $isLookup
-            ? ['Connecting to SAP…', 'Finding sales orders created in this period…', 'Preparing report…']
-            : ['Connecting to SAP…', 'Finding plant for the sales order…', 'Fetching cutting, sewing & washing…', 'Fetching finishing & shipment…', 'Preparing report…'];
+        $loaderSteps = ['Connecting to SAP…', 'Fetching production records…', 'Preparing report…'];
         $loaderVisible = !$isLookup;
         require base_path('app/views/partials/loader.php');
     ?>
@@ -107,7 +100,7 @@ $cards = [
 
         <?php if (!$isLookup): ?>
             <form class="rpt-search prod-filters" method="get" action="<?= e(url('production')) ?>" id="rptFilterForm" data-date-filter novalidate>
-                <?= $plantSelect('rpt-field rpt-field-plant') ?>
+                <?= $plantInput('rpt-field rpt-field-plant', 'Plant (e.g. P002)') ?>
                 <label class="rpt-field rpt-field-range" title="SO creation date">
                     <span class="material-icons-round">date_range</span>
                     <select name="range" data-range-select aria-label="SO creation date">
@@ -117,7 +110,6 @@ $cards = [
                         <?php endforeach; ?>
                     </select>
                 </label>
-                <?= $dateSummary('is-bar') ?>
                 <?= $dateInputs('rpt-field rpt-field-date') ?>
                 <?= $soInput('rpt-field rpt-field-so', 'Sales order') ?>
                 <button class="rpt-btn" type="submit" title="Load report">
@@ -139,22 +131,23 @@ $cards = [
                 <p class="lookup-lede">Pull cutting, sewing, washing, finishing and shipment quantities from SAP.</p>
                 <form method="get" action="<?= e(url('production')) ?>" id="rptFilterForm" class="lookup-filters" data-date-filter novalidate>
                     <div class="lookup-form">
-                        <?= $plantSelect('lookup-so lookup-plant') ?>
+                        <?= $plantInput('lookup-so lookup-plant', 'Plant * (e.g. P002)') ?>
                         <?= $soInput('lookup-so', 'Sales order number') ?>
                     </div>
 
-                    <p class="lookup-label">SO created date <span class="lookup-label-note">or sales order *</span></p>
-                    <div class="date-chips" role="radiogroup" aria-label="SO creation date" data-date-chips>
-                        <?php foreach ($presets as $key => $label): ?>
-                            <label class="date-chip<?= (string) $key === $datePreset ? ' on' : '' ?>">
-                                <input type="radio" name="range" value="<?= e((string) $key) ?>"<?= (string) $key === $datePreset ? ' checked' : '' ?>>
-                                <?php if ($key === 'custom'): ?><span class="material-icons-round">edit_calendar</span><?php endif; ?>
-                                <?= e($label) ?>
-                            </label>
-                        <?php endforeach; ?>
+                    <p class="lookup-label">Date range <span class="lookup-label-note">or sales order *</span></p>
+                    <div class="lookup-range-wrap">
+                        <label class="lookup-so lookup-range" title="Date Range">
+                            <span class="material-icons-round">date_range</span>
+                            <select name="range" data-range-select aria-label="Date Range">
+                                <option value=""<?= $datePreset === '' ? ' selected' : '' ?>>Select Date Range…</option>
+                                <?php foreach ($presets as $key => $label): ?>
+                                    <option value="<?= e($key) ?>"<?= $key === $datePreset ? ' selected' : '' ?>><?= e($label) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </label>
                     </div>
-                    <?= $dateSummary('is-lookup') ?>
-                    <div class="date-custom" data-date-custom<?= $isCustom ? '' : ' hidden' ?>>
+                    <div class="date-custom" data-date-custom<?= $isCustom ? '' : ' hidden' ?> style="display: flex; gap: 10px; margin-top: 10px;">
                         <?= $dateInputs('lookup-so date-input') ?>
                     </div>
                     <p class="date-error" role="alert" data-filter-error<?= $rangeError === '' ? ' hidden' : '' ?>><?= e($rangeError) ?></p>
@@ -164,7 +157,7 @@ $cards = [
                         Show report
                     </button>
                 </form>
-                <p class="lookup-hint"><b>Plant</b> is required, plus an <b>SO created</b> date or a <b>sales order</b> (or both). Click a selected date again to clear it. Custom dates up to <?= (int) SapProductionService::MAX_RANGE_DAYS ?> days.</p>
+                <p class="lookup-hint"><b>Plant</b> is required, plus a <b>Date range</b> or a <b>sales order</b> (or both). Custom dates up to <?= (int) SapProductionService::MAX_RANGE_DAYS ?> days.</p>
             </div>
         </main>
     <?php else: ?>
@@ -175,7 +168,7 @@ $cards = [
             </div>
             <?php if ($isRange): ?>
                 <div class="prod-info" id="prodInfo" hidden>
-                    <div class="prod-info-item"><small>SO Created From</small><b><?= e($dmy($range['from'])) ?></b></div>
+                    <div class="prod-info-item"><small>From</small><b><?= e($dmy($range['from'])) ?></b></div>
                     <div class="prod-info-item"><small>To</small><b><?= e($dmy($range['to'])) ?></b></div>
                     <?php if ($range['preset'] !== 'custom'): ?>
                         <div class="prod-info-item"><small>Period</small><b><?= e($range['label']) ?></b></div>
@@ -191,6 +184,8 @@ $cards = [
                     <div class="prod-info-item"><small>Plant</small><b id="prodInfoPlant">—</b></div>
                     <div class="prod-info-item is-wide"><small>Customer</small><b id="prodInfoCustomer">—</b></div>
                     <div class="prod-info-item"><small>Header Material</small><b id="prodInfoMaterial">—</b></div>
+                    <div class="prod-info-item"><small>Season</small><b id="prodInfoSeason">—</b></div>
+                    <div class="prod-info-item"><small>Season Year</small><b id="prodInfoSeasonYear">—</b></div>
                     <div class="prod-info-item"><small>Req. Delivery</small><b id="prodInfoDelivery">—</b></div>
                     <div class="prod-info-item"><small>Over Del. Tol.</small><b id="prodInfoTolerance">—</b></div>
                 </div>
@@ -342,6 +337,27 @@ $cards = [
                         </tr>
                     </tfoot>
                 </table>
+            </div>
+
+            <div class="rpt-table-pagination" id="rptPagination" style="display: none;">
+                <div class="rpt-pg-info" id="rptPgInfo">Showing lines</div>
+                <div class="rpt-pg-nav">
+                    <button type="button" class="rpt-tb-btn" id="rptPgFirst" title="First page"><i class="fas fa-angles-left"></i></button>
+                    <button type="button" class="rpt-tb-btn" id="rptPgPrev" title="Previous page"><i class="fas fa-angle-left"></i> Prev</button>
+                    <span class="rpt-pg-curr" id="rptPgCurrent">Page 1 of 1</span>
+                    <button type="button" class="rpt-tb-btn" id="rptPgNext" title="Next page">Next <i class="fas fa-angle-right"></i></button>
+                    <button type="button" class="rpt-tb-btn" id="rptPgLast" title="Last page"><i class="fas fa-angles-right"></i></button>
+                </div>
+                <div class="rpt-pg-size">
+                    <label for="rptPageSizeSelect">Per page:</label>
+                    <select id="rptPageSizeSelect" class="rpt-tb-input">
+                        <option value="100" selected>100</option>
+                        <option value="250">250</option>
+                        <option value="500">500</option>
+                        <option value="1000">1000</option>
+                        <option value="all">All</option>
+                    </select>
+                </div>
             </div>
         </main>
     <?php endif; ?>

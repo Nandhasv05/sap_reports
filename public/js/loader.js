@@ -71,13 +71,10 @@
         .observe(overlay, { attributes: true, attributeFilter: ['hidden'] });
     if (!overlay.hidden) start();
 
-    document.querySelectorAll('#rptFilterForm').forEach((form) => {
+    document.querySelectorAll('#rptFilterForm, [data-date-filter]').forEach((form) => {
         form.addEventListener('submit', () => {
-            const so = form.querySelector('[name="so"]');
-            if (so && so.value.trim() !== '') {
-                overlay.hidden = false;
-                document.body.classList.add('rpt-loading');
-            }
+            overlay.hidden = false;
+            document.body.classList.add('rpt-loading');
         });
     });
 

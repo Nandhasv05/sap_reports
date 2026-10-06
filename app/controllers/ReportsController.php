@@ -180,8 +180,8 @@ class ReportsController extends Controller
         if ($plant === '') {
             return ['plant' => '', 'error' => 'Plant is required.'];
         }
-        if (!in_array($plant, $service->plants(), true)) {
-            return ['plant' => $plant, 'error' => 'Plant must be one of ' . implode(', ', $service->plants()) . '.'];
+        if (!$service->validPlant($plant) && !in_array($plant, $service->plants(), true)) {
+            return ['plant' => $plant, 'error' => 'Plant must be a valid 4-character code (e.g. P002).'];
         }
         return ['plant' => $plant, 'error' => null];
     }
@@ -200,34 +200,27 @@ class ReportsController extends Controller
     }
 
     /*
-     * Date-range mode: ?range=… returns the sales orders created in the range, ?pairs=4489-P002,… the production of one batch
+     * Date-range mode: ?range=… returns production records directly from ZPROD_NEWSet
      */
     private function productionRangeData(): void
     {
         $service = new SapProductionService();
-        $cfg = config('sap');
-        if (isset($_GET['pairs'])) {
-            $pairs = $service->parsePairs((string) $_GET['pairs'], max(1, (int) ($cfg['production_batch_size'] ?? 4)));
-            if ($pairs === []) {
-                $this->jsonResponse(['success' => false, 'message' => 'No valid sales orders in this batch.', 'error' => 'No valid sales orders in this batch.', 'data' => []], 422);
-            }
-            $this->jsonResponse(['success' => true, 'message' => 'Live SAP data', 'data' => $service->pairsReport($pairs)]);
-        }
-
         $salesOrder = preg_replace('/\D/', '', (string) ($_GET['so'] ?? '')) ?? '';
         $plant = $this->productionPlant($service);
         $range = $this->productionRange();
         if ($plant['error'] !== null || $range === null || $range['error'] !== null) {
             $message = $plant['error'] ?? ($range['error'] ?? 'Choose a date range.');
             $this->jsonResponse(['success' => false, 'message' => $message, 'error' => $message, 'data' => []], 422);
+            return;
         }
-        $orders = $service->rangeOrders($range['from'], $range['to'], $salesOrder, $plant['plant']);
-        if ($orders['error'] !== null) {
-            $this->jsonResponse(['success' => false, 'message' => 'Unable to fetch SAP data: ' . $orders['error'], 'error' => $orders['error'], 'data' => []], 500);
+
+        $data = $service->rangeReport($range['from'], $range['to'], $salesOrder, $plant['plant']);
+        if ($data['error'] !== null) {
+            $this->jsonResponse(['success' => false, 'message' => 'Unable to fetch SAP data: ' . $data['error'], 'error' => $data['error'], 'data' => []], 500);
+            return;
         }
-        $orders['batch_size'] = max(1, (int) ($cfg['production_batch_size'] ?? 4));
-        $orders['batch_parallel'] = max(1, (int) ($cfg['production_batch_parallel'] ?? 3));
-        $this->jsonResponse(['success' => true, 'message' => 'Live SAP data', 'data' => $orders]);
+
+        $this->jsonResponse(['success' => true, 'message' => 'Live SAP data', 'data' => $data]);
     }
 
     private function sendProductionCsv(string $fileTag, array $records): void
@@ -329,9 +322,9 @@ class ReportsController extends Controller
             }
         } elseif ($report === 'trims') {
             fputcsv($out, [
-                'S.No', 'Category', 'Sales Order', 'Material', 'Purchase Order', 'PO Item',
-                'SO Qty', 'BOM Qty', 'Total BOM Qty', 'Planned Qty', 'Production Qty',
-                'PO Qty', 'GRN Qty', 'Issue Qty', 'GRN Sales Orders',
+                'S.No', 'Category', 'Sales Order', 'Material', 'MatType', 'MatTypeDesc', 'MatGroup', 'MatGroupDesc', 'Season', 'Season Year', 'Purchase Order', 'PO Item',
+                'SO Qty', 'BOM Qty', 'Total Add SO BOM Qty', 'Planned Qty', 'Production Qty',
+                'PO Qty', 'GRN Qty', 'Issue Qty', 'Additional Sale Order', 'COLOR', 'SIZE1', 'SIZE2',
             ]);
             foreach ($records as $i => $row) {
                 fputcsv($out, [
@@ -339,6 +332,12 @@ class ReportsController extends Controller
                     $row['category'] ?? '',
                     $row['sales_order'] ?? '',
                     $row['material'] ?? '',
+                    $row['mat_type'] ?? '',
+                    $row['mat_type_desc'] ?? '',
+                    $row['mat_group'] ?? '',
+                    $row['mat_group_desc'] ?? '',
+                    $row['season'] ?? '',
+                    $row['season_year'] ?? '',
                     $row['purchase_order'] ?? '',
                     $row['po_item'] ?? '',
                     $row['so_qty'] ?? 0,
@@ -350,13 +349,16 @@ class ReportsController extends Controller
                     $row['grn_qty'] ?? 0,
                     $row['issue_qty'] ?? 0,
                     $row['grn_sales_orders'] ?? '',
+                    $row['colour'] ?? $row['color'] ?? '',
+                    $row['size1'] ?? '',
+                    $row['size2'] ?? '',
                 ]);
             }
         } elseif ($report === 'fabric') {
             fputcsv($out, [
-                'S.No', 'Sales Order', 'Material', 'Description', 'Purchase Order', 'PO Item',
-                'SO Qty', 'BOM Qty', 'Total BOM Qty', 'Planned Qty', 'Production Qty',
-                'PO Qty', 'GRN Qty', 'Issue Qty', 'GRN Sales Orders',
+                'S.No', 'Sales Order', 'Material', 'Description', 'Season', 'Season Year', 'Purchase Order', 'PO Item',
+                'SO Qty', 'BOM Qty', 'Total Add SO BOM Qty', 'Planned Qty', 'Production Qty',
+                'PO Qty', 'GRN Qty', 'Issue Qty', 'Additional Sale Order',
                 'Attribute1_text', 'Attribute2_text', 'Attribute3_text', 'Colour'
             ]);
             foreach ($records as $i => $row) {
@@ -365,6 +367,8 @@ class ReportsController extends Controller
                     $row['sales_order'] ?? '',
                     $row['material'] ?? '',
                     $row['description'] ?? '',
+                    $row['season'] ?? '',
+                    $row['season_year'] ?? '',
                     $row['purchase_order'] ?? '',
                     $row['po_item'] ?? '',
                     $row['so_qty'] ?? 0,
@@ -403,40 +407,154 @@ class ReportsController extends Controller
     }
 
     /*
-     * Purchase Order report page (?po=4000006524); header and items are loaded by purchase-order.js
+     * Purchase Order report page:
+     * - Without ?po: condition-wise PO list view (date range, plant, supplier, quick search)
+     * - With ?po=4000006524: single PO details view (Hero, KPI cards, charts, items table)
      */
     public function showPurchaseOrder(): void
     {
         $input = preg_replace('/[\s,]/', '', (string) ($_GET['po'] ?? '')) ?? '';
         $error = $input !== '' && !preg_match('/^\d{1,10}$/', $input) ? 'Purchase order must be a number of up to 10 digits.' : null;
+        $mode = ($input !== '' && $error === null) ? 'detail' : 'list';
+
+        $service = new SapPurchaseOrderService();
+        $rangePreset = strtolower(trim((string) ($_GET['range'] ?? 'this_month')));
+        $range = SapPurchaseOrderService::resolveRange($rangePreset, (string) ($_GET['from'] ?? ''), (string) ($_GET['to'] ?? ''));
+        $plant = strtoupper(trim((string) ($_GET['plant'] ?? '')));
+        $supplier = trim((string) ($_GET['supplier'] ?? ''));
+        $salesOrder = preg_replace('/\D/', '', (string) ($_GET['so'] ?? '')) ?? '';
+
+        $listColumns = SapPurchaseOrderService::listColumns();
+        $detailColumns = SapPurchaseOrderService::columns();
+
+        if (strtolower((string) ($_GET['export'] ?? '')) === 'csv') {
+            if ($mode === 'detail') {
+                $detail = $service->report($input);
+                $this->sendPurchaseOrderCsv($input, $detail['records'] ?? []);
+            } else {
+                $listData = $service->listReport([
+                    'range'    => $rangePreset,
+                    'from'     => $range['from'] ?? '',
+                    'to'       => $range['to'] ?? '',
+                    'plant'    => $plant,
+                    'supplier' => $supplier,
+                    'so'       => $salesOrder,
+                ]);
+                $this->sendPurchaseOrderListCsv($listData['records'] ?? []);
+            }
+            return;
+        }
 
         $this->view('reports/purchase_order', [
-            'pageTitle'     => 'Purchase Order Report',
+            'pageTitle'     => $mode === 'detail' ? ('Purchase Order ' . $input) : 'Purchase Order Report',
             'layoutWide'    => true,
             'appShell'      => true,
             'item'          => ['title' => 'Purchase Order Report'],
             'report'        => 'purchase-order',
+            'mode'          => $mode,
             'purchaseOrder' => $error === null ? $input : '',
             'poInput'       => $input,
             'poError'       => $error,
-            'extraHead'     => $error === null && $input !== ''
-                ? '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>'
-                : '',
+            'range'         => $range,
+            'rangePreset'   => $rangePreset,
+            'rangeError'    => $range['error'] ?? null,
+            'presets'       => SapPurchaseOrderService::rangePresets(),
+            'presetDates'   => SapPurchaseOrderService::presetDates(),
+            'plant'         => $plant,
+            'plants'        => $service->plants(),
+            'supplier'      => $supplier,
+            'salesOrder'    => $salesOrder,
+            'columns'       => $mode === 'detail' ? $detailColumns : $listColumns,
+            'detailColumns' => $detailColumns,
+            'listColumns'   => $listColumns,
+            'extraHead'     => '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>',
         ]);
     }
 
+    private function sendPurchaseOrderListCsv(array $records): void
+    {
+        $filename = 'sap-purchase-orders-list-' . date('Ymd-His') . '.csv';
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        $out = fopen('php://output', 'w');
+        fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF));
+        fputcsv($out, ['S.No', 'Purchase Order', 'PO Date', 'Plant', 'Supplier', 'Items', 'Order Qty', 'Unit', 'Net Value', 'Currency', 'Linked Sales Orders', 'Created By']);
+        foreach ($records as $i => $row) {
+            fputcsv($out, [
+                $i + 1,
+                $row['purchase_order'] ?? '',
+                $row['date'] ?? '',
+                $row['plant'] ?? '',
+                $row['supplier'] ?? '',
+                $row['items_count'] ?? 0,
+                $row['total_qty'] ?? 0,
+                $row['unit'] ?? '',
+                $row['total_value'] ?? 0,
+                $row['currency'] ?? '',
+                implode(', ', (array) ($row['sales_orders'] ?? [])),
+                $row['created_by'] ?? '',
+            ]);
+        }
+        fclose($out);
+    }
+
+    private function sendPurchaseOrderCsv(string $po, array $records): void
+    {
+        $filename = 'sap-purchase-order-' . ($po !== '' ? $po . '-' : '') . date('Ymd-His') . '.csv';
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        $out = fopen('php://output', 'w');
+        fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF));
+        $columns = SapPurchaseOrderService::columns();
+        fputcsv($out, array_column($columns, 'label'));
+        foreach ($records as $i => $row) {
+            $line = [];
+            foreach ($columns as $col) {
+                if ($col['key'] === 'sno') {
+                    $line[] = $i + 1;
+                } elseif ($col['key'] === 'sales_orders') {
+                    $line[] = implode(', ', (array) ($row['sales_orders'] ?? []));
+                } else {
+                    $line[] = $row[$col['key']] ?? '';
+                }
+            }
+            fputcsv($out, $line);
+        }
+        fclose($out);
+    }
+
     /*
-     * Purchase order header and items as JSON for the report page and the PO drawer (?po=4000006524)
+     * Purchase order header and items as JSON for the report page and the PO drawer (?po=4000006524 or ?list=1)
      */
     public function purchaseOrderData(): void
     {
+        $service = new SapPurchaseOrderService();
         $po = trim((string) ($_GET['po'] ?? ''));
-        if (!preg_match('/^\d{1,10}$/', $po)) {
-            $message = $po === '' ? 'Enter a purchase order number.' : 'Purchase order must be a number of up to 10 digits.';
-            $this->jsonResponse(['success' => false, 'message' => $message, 'error' => $message, 'data' => []], 422);
+
+        if ($po !== '') {
+            if (!preg_match('/^\d{1,10}$/', $po)) {
+                $message = 'Purchase order must be a number of up to 10 digits.';
+                $this->jsonResponse(['success' => false, 'message' => $message, 'error' => $message, 'data' => []], 422);
+            }
+
+            $payload = $service->report($po);
+            if ($payload['error'] !== null) {
+                $this->jsonResponse([
+                    'success' => false,
+                    'message' => 'Unable to fetch SAP data: ' . $payload['error'],
+                    'error'   => $payload['error'],
+                    'data'    => [],
+                ], 502);
+            }
+            $this->jsonResponse([
+                'success' => true,
+                'message' => $payload['records'] === [] ? 'No purchase order found.' : 'Live SAP data',
+                'data'    => $payload,
+            ]);
         }
 
-        $payload = (new SapPurchaseOrderService())->report($po);
+        // List mode (condition-wise)
+        $payload = $service->listReport($_GET);
         if ($payload['error'] !== null) {
             $this->jsonResponse([
                 'success' => false,
@@ -447,7 +565,7 @@ class ReportsController extends Controller
         }
         $this->jsonResponse([
             'success' => true,
-            'message' => $payload['records'] === [] ? 'No purchase order found.' : 'Live SAP data',
+            'message' => $payload['records'] === [] ? 'No purchase orders match the selected criteria.' : 'Live SAP data',
             'data'    => $payload,
         ]);
     }

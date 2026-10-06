@@ -43,6 +43,9 @@ class SapODataClient
 
         $pageSize = max(1, (int) ($this->cfg['page_size'] ?? 500));
         $maxRows = max($pageSize, (int) ($this->cfg['max_rows'] ?? 10000));
+        if (isset($extraQuery['$top']) && is_numeric($extraQuery['$top'])) {
+            $maxRows = min($maxRows, max(1, (int) $extraQuery['$top']));
+        }
         $skip = 0;
         $total = 0;
         $lastError = null;

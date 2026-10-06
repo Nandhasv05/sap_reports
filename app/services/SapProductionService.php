@@ -43,6 +43,8 @@ class SapProductionService
             ['key' => 'header_material',   'label' => 'Header Material',      'type' => 'text', 'stage' => ''],
             ['key' => 'style',             'label' => 'Style',                'type' => 'text', 'stage' => ''],
             ['key' => 'style_description', 'label' => 'Style Description',    'type' => 'text', 'stage' => ''],
+            ['key' => 'season',            'label' => 'Season',               'type' => 'text', 'stage' => ''],
+            ['key' => 'season_year',       'label' => 'Season Year',          'type' => 'text', 'stage' => ''],
             ['key' => 'material_group',    'label' => 'Material Group',       'type' => 'text', 'stage' => ''],
             ['key' => 'colour',            'label' => 'Colour',               'type' => 'text', 'stage' => ''],
             ['key' => 'size',              'label' => 'Size',                 'type' => 'text', 'stage' => ''],
@@ -285,10 +287,86 @@ class SapProductionService
             'customer'        => (string) ($first['customer'] ?? ''),
             'customer_name'   => (string) ($first['customer_name'] ?? ''),
             'header_material' => (string) ($first['header_material'] ?? ''),
+            'season'          => (string) ($first['season'] ?? ''),
+            'season_year'     => (string) ($first['season_year'] ?? ''),
             'delivery_date'   => (string) ($first['delivery_date'] ?? ''),
             'tolerance'       => (string) ($first['tolerance'] ?? ''),
         ];
         return $out;
+    }
+
+    /*
+     * Fetch production records for a plant and date range directly from ZPROD_NEWSet using FromDate and ToDate.
+     * Filter format: Plant eq 'P002' and FromDate eq 'YYYYMMDD' and ToDate eq 'YYYYMMDD'
+     *
+     * @return array{records: array, total: int, sales_orders: int, orders_found: int, plants: array, info: array, warning: string, error: ?string}
+     */
+    public function rangeReport(string $from, string $to, string $salesOrder = '', string $plant = ''): array
+    {
+        $plant = strtoupper(trim($plant));
+        if ($plant === '' || !$this->validPlant($plant)) {
+            return ['records' => [], 'total' => 0, 'sales_orders' => 0, 'orders_found' => 0, 'plants' => [], 'info' => [], 'warning' => '', 'error' => 'Plant is required.'];
+        }
+
+        $service = (string) ($this->cfg['production_service'] ?? '');
+        if ($service === '') {
+            return ['records' => [], 'total' => 0, 'sales_orders' => 0, 'orders_found' => 0, 'plants' => [], 'info' => [], 'warning' => '', 'error' => 'Production service path is not configured.'];
+        }
+
+        $fromYmd = date('Ymd', strtotime($from));
+        $toYmd   = date('Ymd', strtotime($to));
+
+        @set_time_limit(300);
+
+        $cacheName = 'prod_range_' . $plant . '_' . $fromYmd . '_' . $toYmd;
+        $ttl = (int) ($this->cfg['cache_ttl'] ?? 300);
+        $cached = $this->cacheRead($cacheName, $ttl);
+        $allRows = $cached;
+
+        if ($allRows === null) {
+            $filter = "Plant eq '{$plant}' and FromDate eq '{$fromYmd}' and ToDate eq '{$toYmd}'";
+            $result = $this->client->fetchResults($service, [
+                '$filter' => $filter,
+            ]);
+
+            if (($result['error'] ?? null) !== null) {
+                return ['records' => [], 'total' => 0, 'sales_orders' => 0, 'orders_found' => 0, 'plants' => [$plant], 'info' => [], 'warning' => '', 'error' => $result['error']];
+            }
+
+            $allRows = [];
+            foreach ($result['rows'] as $raw) {
+                if (is_array($raw)) {
+                    $allRows[] = $this->mapRow($raw);
+                }
+            }
+            if ($allRows !== []) {
+                $this->cacheWrite($cacheName, $allRows);
+            }
+        }
+
+        $rows = $allRows;
+        $filterSo = $this->displayNumber(preg_replace('/\D/', '', $salesOrder) ?? '');
+        if ($filterSo !== '') {
+            $rows = array_values(array_filter($rows, static fn (array $r): bool => (string) ($r['sales_order'] ?? '') === $filterSo));
+        }
+
+        usort($rows, static fn (array $a, array $b): int => [$a['plant'], (int) $a['sales_order'], (int) $a['so_item']] <=> [$b['plant'], (int) $b['sales_order'], (int) $b['so_item']]);
+
+        $uniqueSos = array_values(array_unique(array_filter(array_column($rows, 'sales_order'))));
+        $uniqueCustomers = array_values(array_unique(array_filter(array_column($rows, 'customer'))));
+
+        return [
+            'records'      => $rows,
+            'total'        => count($rows),
+            'sales_orders' => count($uniqueSos),
+            'orders_found' => count($uniqueSos),
+            'plants'       => [$plant],
+            'info'         => [
+                'customers' => count($uniqueCustomers),
+            ],
+            'warning'      => '',
+            'error'        => null,
+        ];
     }
 
     /*
@@ -387,18 +465,7 @@ class SapProductionService
         return ['records' => $records, 'failed' => array_values(array_unique($failed)), 'error' => null];
     }
 
-    /*
-     * The whole range in one call (CSV export); uses the same per-pair cache the page filled while loading.
-     */
-    public function rangeReport(string $from, string $to, string $salesOrder = '', string $plant = ''): array
-    {
-        $orders = $this->rangeOrders($from, $to, $salesOrder, $plant);
-        if ($orders['error'] !== null) {
-            return ['records' => [], 'total' => 0, 'error' => $orders['error']];
-        }
-        $report = $this->pairsReport($orders['orders']);
-        return ['records' => $report['records'], 'total' => count($report['records']), 'error' => null];
-    }
+
 
     /*
      * "4489-P002,4543-P003" from the page -> validated pairs (at most $max)
@@ -541,6 +608,8 @@ class SapProductionService
             'header_material'   => trim((string) ($row['HeaderMaterial'] ?? '')),
             'style'             => trim((string) ($row['Style'] ?? '')),
             'style_description' => trim((string) ($row['StyleDescription'] ?? '')),
+            'season'            => trim((string) ($row['Season'] ?? $row['FshSeason'] ?? $row['SEASON'] ?? '')),
+            'season_year'       => trim((string) ($row['SeasonYear'] ?? $row['Seasonyear'] ?? $row['FshSeasonYear'] ?? $row['SEASON_YEAR'] ?? $row['Season_Year'] ?? '')),
             'material_group'    => trim((string) ($row['MaterialGroup'] ?? '')),
             'colour'            => trim((string) ($row['Characteristic1'] ?? '')),
             'size'              => trim((string) ($row['Characteristic2'] ?? '')),

@@ -100,7 +100,7 @@ class ReportsModel
     {
         $f = (float) $n;
         if (abs($f - round($f)) < 0.0005) {
-            return number_format($f, 0);
+            return number_format($f, 1, '.', '');
         }
         return rtrim(rtrim(number_format($f, 3, '.', ','), '0'), '.');
     }
@@ -131,7 +131,11 @@ class ReportsModel
         if (!is_numeric($n) || abs((float) $n) < 0.0000001) {
             return '-';
         }
-        return number_format((float) $n, 0, '.', '');
+        $f = (float) $n;
+        if (abs($f - round($f)) < 0.0005) {
+            return number_format($f, 1, '.', '');
+        }
+        return rtrim(rtrim(number_format($f, 3, '.', ''), '0'), '.');
     }
 
     /*

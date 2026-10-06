@@ -1,7 +1,7 @@
 /*
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 28/09/2026
- * DESCRIPTION : Production report - live SAP rows, search, column filters, sorting, totals and charts
+ * DESCRIPTION : Production report - live SAP rows, search, column filters, sorting, totals, pagination and charts
  */
 (function () {
     const cfgNode = document.getElementById('rptPageConfig');
@@ -30,9 +30,27 @@
     const range = cfg.range || null;
     const maxRangeDays = Number(cfg.maxRangeDays) || 62;
 
+    // Pagination elements
+    const pgWrap = document.getElementById('rptPagination');
+    const pgInfo = document.getElementById('rptPgInfo');
+    const pgFirst = document.getElementById('rptPgFirst');
+    const pgPrev = document.getElementById('rptPgPrev');
+    const pgNext = document.getElementById('rptPgNext');
+    const pgLast = document.getElementById('rptPgLast');
+    const pgCurr = document.getElementById('rptPgCurrent');
+    const pgSizeSelect = document.getElementById('rptPageSizeSelect');
+
+    let pageSize = 100;
+    let currentPage = 1;
+    let filteredIndices = [];
+    let items = [];
+    let currentSort = { col: null, dir: null };
+    let totalsChart = null;
+    let mixChart = null;
+
     /*
-     * Filters: Plant (required) + SO creation date preset and / or sales order (optional).
-     * From / To inputs are shown only for Custom Date; other presets show their dates as text.
+     * Filters: Plant text input (required) + SO creation date preset dropdown and / or sales order (optional).
+     * From / To inputs are shown only for Custom Date.
      */
     function bindDateFilters() {
         const presetDates = cfg.presetDates || {};
@@ -40,44 +58,34 @@
         const filterError = document.querySelector('[data-filter-error]');
 
         document.querySelectorAll('[data-date-filter]').forEach(form => {
-            const plantSelect = form.querySelector('[data-plant-select]');
+            const plantInput = form.querySelector('[data-plant-input], [data-plant-select], input[name="plant"]');
             const select = form.querySelector('[data-range-select]');
-            const radios = Array.from(form.querySelectorAll('input[type="radio"][name="range"]'));
             const dateInputs = Array.from(form.querySelectorAll('input[type="date"]'));
             const [fromInput, toInput] = dateInputs;
             const soInput = form.querySelector('input[name="so"]');
             const customBlocks = Array.from(form.querySelectorAll('[data-date-custom]'));
-            const summary = form.querySelector('[data-date-summary]');
-            const isHeader = !!select;
-            const chips = form.querySelector('[data-date-chips]');
-            const fields = [plantSelect, soInput, select, ...dateInputs].filter(Boolean);
-            const currentPreset = () => (select ? select.value : (radios.find(r => r.checked)?.value || ''));
+            const isHeader = form.classList.contains('prod-filters') || !!form.closest('.rpt-bar');
+            const fields = [plantInput, soInput, select, ...dateInputs].filter(Boolean);
+            const currentPreset = () => (select ? select.value : '');
             const boxOf = (field) => field?.closest('label');
 
             function clearErrors() {
                 fields.forEach(field => { field.setCustomValidity(''); boxOf(field)?.classList.remove('is-invalid'); });
-                chips?.classList.remove('is-invalid');
                 if (filterError) filterError.hidden = true;
             }
 
             function showError(message, target, alsoMark = []) {
                 [target, ...alsoMark].forEach(field => {
-                    if (field === chips) chips?.classList.add('is-invalid');
-                    else boxOf(field)?.classList.add('is-invalid');
+                    boxOf(field)?.classList.add('is-invalid');
                 });
                 if (filterError) {
                     filterError.textContent = message;
                     filterError.hidden = false;
                 }
-                if (target && target !== chips) {
+                if (target) {
                     target.setCustomValidity(message);
                     target.reportValidity();
                 }
-            }
-
-            function setPreset(key) {
-                if (select) select.value = key;
-                radios.forEach(r => { r.checked = r.value === key; r.closest('.date-chip')?.classList.toggle('on', r.checked); });
             }
 
             function showCustom(on) {
@@ -95,90 +103,82 @@
                     dateInputs.forEach(input => { input.value = ''; });
                 }
                 showCustom(key === 'custom');
-                if (summary) {
-                    summary.hidden = !dates;
-                    const sumFrom = summary.querySelector('[data-sum-from]');
-                    const sumTo = summary.querySelector('[data-sum-to]');
-                    if (dates && sumFrom) sumFrom.textContent = dmy(dates.from);
-                    if (dates && sumTo) sumTo.textContent = dmy(dates.to);
-                }
                 if (key === 'custom') fromInput?.focus();
             }
 
             const canSubmit = () => {
                 const preset = currentPreset();
-                if (!plantSelect?.value) return false;
+                const pVal = (plantInput?.value || '').trim();
+                if (!pVal) return false;
                 if (!preset) return !!(soInput?.value || '').trim();
                 return preset !== 'custom' || !!(fromInput?.value && toInput?.value);
             };
+
+            plantInput?.addEventListener('input', () => {
+                plantInput.value = plantInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+                clearErrors();
+                if (isHeader && canSubmit()) form.requestSubmit();
+            });
 
             select?.addEventListener('change', () => {
                 applyPreset(select.value);
                 if (select.value !== 'custom' && canSubmit()) form.requestSubmit();
             });
-            // Clicking the selected chip again clears the date (sales order only)
-            let activePreset = currentPreset();
-            radios.forEach(radio => {
-                radio.addEventListener('click', () => {
-                    const key = radio.value === activePreset ? '' : radio.value;
-                    activePreset = key;
-                    setPreset(key);
-                    applyPreset(key);
-                });
-            });
+
             dateInputs.forEach(input => {
                 input.addEventListener('input', clearErrors);
                 if (isHeader) input.addEventListener('change', () => { if (fromInput?.value && toInput?.value && canSubmit()) form.requestSubmit(); });
             });
-            plantSelect?.addEventListener('change', () => {
-                clearErrors();
-                if (isHeader && canSubmit()) form.requestSubmit();
-            });
+
             soInput?.addEventListener('input', () => {
                 soInput.value = soInput.value.replace(/\D/g, '');
                 clearErrors();
             });
 
-            // Back / forward cache restores the fields disabled on submit
-            window.addEventListener('pageshow', () => {
-                [plantSelect, select, soInput, ...radios].forEach(field => { if (field) field.disabled = false; });
+            window.addEventListener('pageshow', (e) => {
+                [plantInput, select, soInput, ...dateInputs].forEach(field => { if (field) field.disabled = false; });
                 showCustom(currentPreset() === 'custom');
-                showSpinner(false);
+                if (e && e.persisted) {
+                    showSpinner(false);
+                }
             });
 
             form.addEventListener('submit', (e) => {
                 clearErrors();
                 const preset = currentPreset();
+                const plantVal = (plantInput?.value || '').trim().toUpperCase();
                 const so = (soInput?.value || '').trim();
                 const from = fromInput?.value || '';
                 const to = toInput?.value || '';
                 let message = '';
                 let target = null;
                 let alsoMark = [];
-                if (plantSelect && !plantSelect.value) {
+
+                if (!plantVal) {
                     message = 'Plant is required.';
-                    target = plantSelect;
+                    target = plantInput;
+                } else if (plantVal.length < 2) {
+                    message = 'Plant code must be at least 2 characters (e.g. P002).';
+                    target = plantInput;
                 } else if (!preset && !so) {
-                    message = 'Choose an SO created date (From / To) or enter a sales order.';
-                    target = soInput;
-                    alsoMark = [chips || select];
+                    message = 'Choose an SO creation date range or enter a sales order.';
+                    target = select || soInput;
+                    alsoMark = [select, soInput].filter(Boolean);
                 } else if (preset === 'custom') {
                     if (!from || !to) message = 'Choose both a From and a To date.';
                     else if (from > to) message = 'The From date must be on or before the To date.';
                     else if ((Date.parse(to) - Date.parse(from)) / 86400000 + 1 > maxRangeDays) message = `Choose a range of ${maxRangeDays} days or less.`;
                     target = !from ? fromInput : toInput;
                 }
+
                 if (message) {
                     e.preventDefault();
                     showError(message, target, alsoMark);
                     return;
                 }
-                // Leave unused fields out of the URL (presets resolve their own dates on the server)
+
                 if (preset !== 'custom') dateInputs.forEach(input => { input.disabled = true; });
-                if (!preset) {
-                    if (select) select.disabled = true;
-                    radios.forEach(r => { r.disabled = true; });
-                }
+                if (!preset && select) select.disabled = true;
                 if (soInput && !so) soInput.disabled = true;
                 showSpinner(true);
             });
@@ -198,11 +198,6 @@
         ['Shipped', 'shipment', '#7c3aed'],
     ];
     const statKeys = ['total_so_qty', 'cut_made', 'sew_made', 'wash_received', 'fin_made', 'shipment', 'pending_delivery'];
-
-    let items = [];
-    let currentSort = { col: null, dir: null };
-    let totalsChart = null;
-    let mixChart = null;
 
     function escapeHtml(value) {
         return String(value ?? '')
@@ -251,28 +246,113 @@
         }
     }
 
+    /*
+     * Build in-memory representations of all rows without bloating the DOM
+     */
     function renderRows(records) {
-        tbody.querySelectorAll('tr.rpt-table-loading, tr[data-orig-sno]').forEach(tr => tr.remove());
-        const frag = document.createDocumentFragment();
         items = records.map((rec, index) => {
+            const texts = columns.map(col => displayValue(col, rec, index));
+            return {
+                rec,
+                origIndex: index,
+                texts,
+                searchText: texts.slice(1).join(' ').toLowerCase(),
+            };
+        });
+        filteredIndices = items.map((_, i) => i);
+    }
+
+    /*
+     * Render only the current page of filtered rows into the DOM
+     */
+    function renderCurrentPage() {
+        tbody.querySelectorAll('tr.rpt-table-loading, tr[data-orig-sno]').forEach(tr => tr.remove());
+        const total = filteredIndices.length;
+        const totalPages = pageSize === 'all' ? 1 : Math.max(1, Math.ceil(total / (pageSize || 100)));
+        if (currentPage > totalPages) currentPage = totalPages;
+        if (currentPage < 1) currentPage = 1;
+
+        if (total === 0) {
+            if (noMatchRow) noMatchRow.style.display = items.length > 0 ? '' : 'none';
+            if (pgWrap) pgWrap.style.display = 'none';
+            return;
+        }
+
+        if (noMatchRow) noMatchRow.style.display = 'none';
+
+        const start = pageSize === 'all' ? 0 : (currentPage - 1) * pageSize;
+        const end = pageSize === 'all' ? total : Math.min(start + pageSize, total);
+        const slice = filteredIndices.slice(start, end);
+
+        const frag = document.createDocumentFragment();
+        slice.forEach((idx, pageOffset) => {
+            const item = items[idx];
+            const displaySno = start + pageOffset + 1;
             const tr = document.createElement('tr');
-            tr.setAttribute('data-orig-sno', String(index + 1));
-            const texts = [];
-            tr.innerHTML = columns.map(col => {
-                const text = displayValue(col, rec, index);
-                texts.push(text);
+            tr.setAttribute('data-orig-sno', String(item.origIndex + 1));
+            tr.innerHTML = columns.map((col, colIdx) => {
+                const text = col.key === 'sno' ? String(displaySno) : item.texts[colIdx];
                 if (col.key === 'sno') return `<td class="num sno">${text}</td>`;
                 if (col.type === 'num') {
-                    const neg = isQty(col) && Number(rec[col.key]) < 0 ? ' is-neg' : '';
+                    const neg = isQty(col) && Number(item.rec[col.key]) < 0 ? ' is-neg' : '';
                     return `<td class="num${neg}">${escapeHtml(text)}</td>`;
                 }
                 return `<td title="${escapeHtml(text)}">${escapeHtml(text)}</td>`;
             }).join('');
             frag.appendChild(tr);
-            return { rec, tr, origIndex: index, texts, searchText: texts.slice(1).join(' ').toLowerCase(), visible: true };
         });
+
         tbody.insertBefore(frag, noMatchRow);
+
+        // Apply saved column ordering and visibility to the newly rendered rows
+        columnFeatures.refresh();
+
+        // Update pagination bar controls
+        if (pgWrap) {
+            pgWrap.style.display = total > 0 ? 'flex' : 'none';
+            if (pgInfo) {
+                pgInfo.textContent = `Showing ${(start + 1).toLocaleString('en-US')} – ${end.toLocaleString('en-US')} of ${total.toLocaleString('en-US')} lines`;
+            }
+            if (pgCurr) {
+                pgCurr.textContent = `Page ${currentPage} of ${totalPages}`;
+            }
+            if (pgFirst) pgFirst.disabled = currentPage <= 1;
+            if (pgPrev) pgPrev.disabled = currentPage <= 1;
+            if (pgNext) pgNext.disabled = currentPage >= totalPages;
+            if (pgLast) pgLast.disabled = currentPage >= totalPages;
+        }
     }
+
+    // Connect pagination buttons
+    pgFirst?.addEventListener('click', () => { if (currentPage > 1) { currentPage = 1; renderCurrentPage(); } });
+    pgPrev?.addEventListener('click', () => { if (currentPage > 1) { currentPage--; renderCurrentPage(); } });
+    pgNext?.addEventListener('click', () => {
+        const totalPages = pageSize === 'all' ? 1 : Math.max(1, Math.ceil(filteredIndices.length / pageSize));
+        if (currentPage < totalPages) { currentPage++; renderCurrentPage(); }
+    });
+    pgLast?.addEventListener('click', () => {
+        const totalPages = pageSize === 'all' ? 1 : Math.max(1, Math.ceil(filteredIndices.length / pageSize));
+        if (currentPage < totalPages) { currentPage = totalPages; renderCurrentPage(); }
+    });
+    pgSizeSelect?.addEventListener('change', () => {
+        pageSize = pgSizeSelect.value === 'all' ? 'all' : parseInt(pgSizeSelect.value, 10);
+        currentPage = 1;
+        renderCurrentPage();
+    });
+
+    // Provide hook for excel-export.js to export all matching records
+    table._getAllExportRows = function (visibleCols, convert) {
+        return filteredIndices.map((idx, displaySno) => {
+            const item = items[idx];
+            return visibleCols.map(({ i }) => {
+                const col = columns[i];
+                if (!col) return '';
+                if (col.key === 'sno') return displaySno + 1;
+                const raw = item.texts[i] ?? '';
+                return convert(raw, col.type === 'num');
+            });
+        });
+    };
 
     function showEmpty(message) {
         tbody.querySelectorAll('tr.rpt-table-loading, tr[data-orig-sno]').forEach(tr => tr.remove());
@@ -281,6 +361,7 @@
         tr.innerHTML = `<td colspan="${columns.length}" class="rpt-table-empty">${escapeHtml(message)}</td>`;
         tbody.insertBefore(tr, noMatchRow);
         if (countBadge) countBadge.textContent = 'Showing 0 lines';
+        if (pgWrap) pgWrap.style.display = 'none';
     }
 
     function showNotice(message) {
@@ -315,6 +396,8 @@
         set('prodInfoPlant', (data.plants || []).join(', '));
         set('prodInfoCustomer', [info.customer_name, info.customer ? `(${info.customer})` : ''].filter(Boolean).join(' '));
         set('prodInfoMaterial', info.header_material);
+        set('prodInfoSeason', info.season);
+        set('prodInfoSeasonYear', info.season_year);
         set('prodInfoDelivery', info.delivery_date ? fmtDate(info.delivery_date) : '');
         set('prodInfoTolerance', info.tolerance);
         if (box) box.hidden = false;
@@ -341,10 +424,6 @@
                 return (res || a.origIndex - b.origIndex) * dir;
             });
         }
-        const frag = document.createDocumentFragment();
-        items.forEach(item => frag.appendChild(item.tr));
-        frag.appendChild(noMatchRow);
-        tbody.appendChild(frag);
     }
 
     function updateSortUI() {
@@ -396,21 +475,21 @@
         const sums = {};
         columns.forEach(c => { if (isQty(c)) sums[c.key] = 0; });
         const colourTotals = {};
-        let visible = 0;
-        items.forEach(item => {
-            item.visible = matches(item, query, filters);
-            item.tr.style.display = item.visible ? '' : 'none';
-            if (!item.visible) return;
-            visible++;
-            const sno = item.tr.querySelector('td.sno');
-            if (sno) sno.textContent = String(visible);
-            Object.keys(sums).forEach(k => { sums[k] += Number(item.rec[k]) || 0; });
-            const colour = String(item.rec.colour || '').trim() || 'Unspecified';
-            colourTotals[colour] = (colourTotals[colour] || 0) + (Number(item.rec.total_so_qty) || 0);
+        const matched = [];
+
+        items.forEach((item, index) => {
+            if (matches(item, query, filters)) {
+                matched.push(index);
+                Object.keys(sums).forEach(k => { sums[k] += Number(item.rec[k]) || 0; });
+                const colour = String(item.rec.colour || '').trim() || 'Unspecified';
+                colourTotals[colour] = (colourTotals[colour] || 0) + (Number(item.rec.total_so_qty) || 0);
+            }
         });
 
+        filteredIndices = matched;
+        const visible = matched.length;
         const isFiltered = query !== '' || filters.length > 0;
-        if (noMatchRow) noMatchRow.style.display = items.length > 0 && visible === 0 ? '' : 'none';
+
         if (countBadge) {
             countBadge.textContent = `Showing ${visible.toLocaleString('en-US')} of ${items.length.toLocaleString('en-US')} lines`;
             countBadge.classList.toggle('is-filtered', isFiltered);
@@ -422,8 +501,8 @@
         if (clearAllBtn) clearAllBtn.style.display = (isFiltered || currentSort.col !== null) ? 'inline-flex' : 'none';
         if (footTotalLabel) {
             footTotalLabel.textContent = isFiltered
-                ? `Total (${visible} of ${items.length} lines)`
-                : `Total (${items.length} lines)`;
+                ? `Total (${visible.toLocaleString('en-US')} of ${items.length.toLocaleString('en-US')} lines)`
+                : `Total (${items.length.toLocaleString('en-US')} lines)`;
         }
         table.querySelectorAll('tfoot [data-foot-col]').forEach(th => {
             const col = columns[parseInt(th.getAttribute('data-foot-col'), 10)];
@@ -439,6 +518,9 @@
             }
         });
         updateCharts(sums, colourTotals);
+
+        currentPage = 1;
+        renderCurrentPage();
     }
 
     function updateCharts(sums, colourTotals) {
@@ -593,7 +675,7 @@
                     return;
                 }
                 renderRows(records);
-                columnFeatures.refresh();
+                sortItems();
                 applyFilterAndSearch();
             })
             .catch(showLoadError)
@@ -609,16 +691,11 @@
     }
 
     /*
-     * Date-range mode: get the sales orders created in the range, then their production in small parallel batches
-     * (SAP needs up to ~20 s per order without production). The dashboard stays behind the loader until every batch is in.
+     * Date-range mode: fetches production records directly from SAP ZPROD_NEWSet
      */
     function loadRange() {
         const unique = (list) => Array.from(new Set(list.filter(Boolean)));
         const bySalesOrder = (a, b) => (Number(a.sales_order) - Number(b.sales_order)) || String(a.plant).localeCompare(String(b.plant)) || (Number(a.so_item) - Number(b.so_item));
-
-        function setProgress(done, total) {
-            window.rptLoader?.progress(done, total, done < total ? 'Fetching production from SAP…' : 'Preparing report…', 'sales orders');
-        }
 
         function summary(records, found, warning) {
             return {
@@ -632,12 +709,32 @@
         }
 
         showSpinner(true);
+        window.rptLoader?.progress(1, 2, 'Fetching production from SAP…', 'production');
         getJson(new URLSearchParams({ range: range.preset, from: range.from, to: range.to, so: cfg.so || '', plant: cfg.plant || '' }))
-            .then((plan) => {
+            .then((data) => {
                 bindControls();
-                const orders = Array.isArray(plan.orders) ? plan.orders : [];
-                const found = Number(plan.orders_found) || 0;
-                fillInfo(summary([], found, plan.warning || ''));
+                if (Array.isArray(data.records)) {
+                    const records = data.records;
+                    const found = Number(data.orders_found) || unique(records.map(r => r.sales_order)).length;
+                    fillInfo(summary(records, found, data.warning || ''));
+                    if (records.length) {
+                        records.sort(bySalesOrder);
+                        renderRows(records);
+                        sortItems();
+                        applyFilterAndSearch();
+                    } else {
+                        const message = `No production data for ${range.filter} in period ${range.text}.`;
+                        showEmpty(message);
+                        showNotice(`${message} Try a wider date range${cfg.so ? ', or clear the sales order' : ' such as This Month or This Week'}.`);
+                        updateCharts({}, {});
+                    }
+                    return;
+                }
+
+                // Fallback for legacy batched response if any
+                const orders = Array.isArray(data.orders) ? data.orders : [];
+                const found = Number(data.orders_found) || 0;
+                fillInfo(summary([], found, data.warning || ''));
                 if (!orders.length) {
                     const message = `No production sales orders for ${range.filter} created ${range.text}.`;
                     showEmpty(message);
@@ -646,7 +743,7 @@
                     return null;
                 }
 
-                const size = Math.max(1, Number(plan.batch_size) || 4);
+                const size = Math.max(1, Number(data.batch_size) || 4);
                 const batches = [];
                 for (let i = 0; i < orders.length; i += size) batches.push(orders.slice(i, i + size));
                 const records = [];
@@ -654,28 +751,26 @@
                 let done = 0;
                 let next = 0;
                 let fatal = null;
-                setProgress(0, orders.length);
 
                 const worker = async () => {
                     while (next < batches.length && !fatal) {
                         const batch = batches[next++];
                         try {
-                            const data = await getJson(new URLSearchParams({ pairs: batch.map(o => `${o.so}-${o.plant}`).join(',') }));
-                            if (Array.isArray(data.records)) records.push(...data.records);
-                            failed.push(...(Array.isArray(data.failed) ? data.failed : []));
+                            const res = await getJson(new URLSearchParams({ pairs: batch.map(o => `${o.so}-${o.plant}`).join(',') }));
+                            if (Array.isArray(res.records)) records.push(...res.records);
+                            failed.push(...(Array.isArray(res.failed) ? res.failed : []));
                         } catch (err) {
                             if (err.fatal) { fatal = err; return; }
                             failed.push(...batch.map(o => o.so));
                         }
                         done += batch.length;
-                        setProgress(Math.min(done, orders.length), orders.length);
                     }
                 };
 
-                return Promise.all(Array.from({ length: Math.min(Math.max(1, Number(plan.batch_parallel) || 3), batches.length) }, worker)).then(() => {
+                return Promise.all(Array.from({ length: Math.min(Math.max(1, Number(data.batch_parallel) || 3), batches.length) }, worker)).then(() => {
                     if (fatal) throw fatal;
                     const failedOrders = unique(failed.map(String));
-                    const warnings = plan.warning ? [plan.warning] : [];
+                    const warnings = data.warning ? [data.warning] : [];
                     if (failedOrders.length) {
                         warnings.push(`Production data could not be loaded for ${failedOrders.length} sales order(s): ${failedOrders.slice(0, 10).join(', ')}${failedOrders.length > 10 ? '…' : ''}. Reload to retry.`);
                     }
@@ -683,12 +778,10 @@
                     if (records.length) {
                         records.sort(bySalesOrder);
                         renderRows(records);
-                        columnFeatures.refresh();
                         sortItems();
                         applyFilterAndSearch();
                     } else {
                         showEmpty(`No production data yet for the ${found} sales order(s) of ${range.filter} created ${range.text}.`);
-                        if (!failedOrders.length && !plan.warning) showNotice(`The ${found} sales order(s) of ${range.filter} created ${range.text} have no cutting, sewing or shipment entries in SAP yet.`);
                         updateCharts({}, {});
                     }
                 });
