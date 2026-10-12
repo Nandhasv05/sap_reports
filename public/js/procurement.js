@@ -7,41 +7,51 @@
     const cfgNode = document.getElementById('rptPageConfig');
     let cfg = {};
     try { cfg = JSON.parse(cfgNode?.textContent || '{}'); } catch (e) { cfg = {}; }
-    const columns = Array.isArray(cfg.columns) ? cfg.columns : [];
-    const isQty = (c) => c.type === 'num' && c.stage !== '';
-
-    const table = document.getElementById('rptDataTable');
-    const tbody = document.getElementById('rptTableBody');
-    const spinner = document.getElementById('rptSpinner');
-    const noMatchRow = document.getElementById('rptNoMatchRow');
-    const searchInput = document.getElementById('rptTableSearch');
-    const searchClear = document.getElementById('rptTableSearchClear');
-    const countBadge = document.getElementById('rptTableCount');
-    const clearAllBtn = document.getElementById('rptClearAllFilters');
-    const resetTableBtn = document.getElementById('rptResetFilterTableBtn');
+    const columns           = Array.isArray(cfg.columns) ? cfg.columns : [];
+    const isQty             = (c) => c.type === 'num' && c.stage !== '';
+    const table             = document.getElementById('rptDataTable');
+    const tbody             = document.getElementById('rptTableBody');
+    const spinner           = document.getElementById('rptSpinner');
+    const noMatchRow        = document.getElementById('rptNoMatchRow');
+    const searchInput       = document.getElementById('rptTableSearch');
+    const searchClear       = document.getElementById('rptTableSearchClear');
+    const countBadge        = document.getElementById('rptTableCount');
+    const clearAllBtn       = document.getElementById('rptClearAllFilters');
+    const resetTableBtn     = document.getElementById('rptResetFilterTableBtn');
     const colFilterResetBtn = document.getElementById('rptColFilterReset');
-    const toggleFiltersBtn = document.getElementById('rptToggleColFilters');
+    const toggleFiltersBtn  = document.getElementById('rptToggleColFilters');
     const activeFilterBadge = document.getElementById('rptActiveFilterBadge');
-    const filterRow = document.getElementById('rptFilterRow');
-    const footTotalLabel = document.getElementById('footTotalLabel');
-    const tableWrap = document.getElementById('rptTableWrap');
-    const toggleStickyBtn = document.getElementById('rptToggleStickyScroll');
+    const filterRow         = document.getElementById('rptFilterRow');
+    const footTotalLabel    = document.getElementById('footTotalLabel');
+    const tableWrap         = document.getElementById('rptTableWrap');
+    const toggleStickyBtn   = document.getElementById('rptToggleStickyScroll');
     const stickyScrollLabel = document.getElementById('rptStickyScrollLabel');
-    const toggleAllPrBtn = document.getElementById('rptToggleAllPr');
-    const toggleAllPrLabel = document.getElementById('rptToggleAllPrLabel');
+    const toggleAllOrdersBtn  = document.getElementById('rptToggleAllOrders');
+    const toggleAllOrdersLabel  = document.getElementById('rptToggleAllOrdersLabel');
+    const toggleAllPrBtn    = document.getElementById('rptToggleAllPr');
+    const toggleAllPrLabel  = document.getElementById('rptToggleAllPrLabel');
+    const groupByBtn        = document.getElementById('rptGroupByBtn');
+    const groupByDropdown   = document.getElementById('rptGroupByDropdown');
+    const groupByLabel      = document.getElementById('rptGroupByLabel');
+    const groupByMenu = document.getElementById('rptGroupByMenu');
+
     if (!table || !tbody || !cfg.live) return;
 
-    const mixColors = ['#be123c', '#0f766e', '#0284c7', '#d97706', '#6d28d9', '#16a34a', '#0ea5e9', '#94a3b8'];
-    const groupBars = [
-        ['Total PR', 'total_pr_qty', '#4f46e5'],
-        ['Total PO', 'total_po_qty', '#16a34a'],
-        ['Balance PR', 'balance_pr_qty', '#e11d48'],
-    ];
+
+    const groupFieldLabels = {
+        sales_doc: 'Sales Order',
+        component_material: 'Component',
+        material_type: 'Material Type',
+        material_group: 'Material Group',
+        mat_group_desc: 'MatGroupDsc',
+        material: 'Style',
+    };
 
     let items = [];
     let currentSort = { col: null, dir: null };
-    let totalsChart = null;
-    let mixChart = null;
+    let activeGroupBy = 'sales_doc';
+    const collapsedGroups = new Set();
+    let initialExpandConfigured = false;
 
     function escapeHtml(value) {
         return String(value ?? '')
@@ -133,7 +143,16 @@
     }
 
     function renderRows(records) {
-        tbody.querySelectorAll('tr.rpt-table-loading, tr[data-orig-sno], tr.proc-detail').forEach(tr => tr.remove());
+        tbody.querySelectorAll('tr.rpt-table-loading, tr[data-orig-sno], tr.proc-detail, tr.rpt-group-header-row').forEach(tr => tr.remove());
+
+        if (activeGroupBy === 'sales_doc' && !initialExpandConfigured) {
+            initialExpandConfigured = true;
+            records.forEach(r => {
+                const so = String(r.sales_doc || '').trim() || '(Blank)';
+                collapsedGroups.add(so);
+            });
+        }
+
         const frag = document.createDocumentFragment();
         items = records.map((rec, index) => {
             const tr = document.createElement('tr');
@@ -204,7 +223,7 @@
         const coverage = totals.pr > 0 ? (totals.po / totals.pr) * 100 : 0;
         const counts = lines.reduce((c, l) => { c[l.status] = (c[l.status] || 0) + 1; return c; }, {});
         const metric = (label, value, cls = '') => `<div class="proc-metric${cls}"><small>${label}</small><b>${value}</b></div>`;
-        const meta = [rec.material_group, rec.material_type, rec.shade_text1].filter(Boolean).map(escapeHtml).join(' · ');
+        const meta = [rec.material_group, rec.mat_group_desc, rec.material_type, rec.shade_text1].filter(Boolean).map(escapeHtml).join(' · ');
         const chips = [['all', 'All', lines.length], ...prStatuses.map(([k, label]) => [k, label, counts[k] || 0]).filter(([, , n]) => n > 0)]
             .map(([k, label, n]) => `<button type="button" class="proc-chip is-${k}${k === 'all' ? ' is-active' : ''}" data-pr-filter="${k}">${label}<span>${n.toLocaleString('en-US')}</span></button>`)
             .join('');
@@ -334,18 +353,20 @@
     }
 
     function updateToggleAllLabel() {
-        const anyClosed = items.some(i => i.visible && !i.open && (Number(i.rec.pr_count) || 0) > 0);
+        const anyClosed = items.some(i => i.visible
+            && (!activeGroupBy || !collapsedGroups.has(String(i.rec[activeGroupBy] ?? '').trim() || '(Blank)'))
+            && !i.open && (Number(i.rec.pr_count) || 0) > 0);
         if (toggleAllPrLabel) toggleAllPrLabel.textContent = anyClosed ? 'Expand PR Lines' : 'Collapse PR Lines';
         toggleAllPrBtn?.classList.toggle('is-active', !anyClosed && items.some(i => i.open));
     }
 
     function showEmpty(message) {
-        tbody.querySelectorAll('tr.rpt-table-loading, tr[data-orig-sno], tr.proc-detail').forEach(tr => tr.remove());
+        tbody.querySelectorAll('tr.rpt-table-loading, tr[data-orig-sno], tr.proc-detail, tr.rpt-group-header-row').forEach(tr => tr.remove());
         const tr = document.createElement('tr');
         tr.className = 'rpt-table-loading';
         tr.innerHTML = `<td colspan="${columns.length}" class="rpt-table-empty">${escapeHtml(message)}</td>`;
         tbody.insertBefore(tr, noMatchRow);
-        if (countBadge) countBadge.textContent = 'Showing 0 components';
+        if (countBadge) countBadge.textContent = '0 components';
     }
 
     function fillInfo(data) {
@@ -360,7 +381,24 @@
     }
 
     function sortItems() {
-        if (currentSort.col === null) {
+        if (activeGroupBy) {
+            items.sort((a, b) => {
+                const gValA = String(a.rec[activeGroupBy] ?? '').trim() || '(Blank)';
+                const gValB = String(b.rec[activeGroupBy] ?? '').trim() || '(Blank)';
+                const gCmp = gValA.localeCompare(gValB, undefined, { numeric: true, sensitivity: 'base' });
+                if (gCmp !== 0) return gCmp;
+
+                if (currentSort.col !== null) {
+                    const col = columns[currentSort.col];
+                    const dir = currentSort.dir === 'desc' ? -1 : 1;
+                    let res;
+                    if (col.key === 'sno') res = a.origIndex - b.origIndex;
+                    else if (col.type === 'num') res = (Number(a.rec[col.key]) || 0) - (Number(b.rec[col.key]) || 0);
+                    return (res || a.origIndex - b.origIndex) * dir;
+                }
+                return a.origIndex - b.origIndex;
+            });
+        } else if (currentSort.col === null) {
             items.sort((a, b) => a.origIndex - b.origIndex);
         } else {
             const col = columns[currentSort.col];
@@ -430,7 +468,6 @@
 
         const sums = {};
         columns.forEach(c => { if (isQty(c)) sums[c.key] = 0; });
-        const groups = {};
         let visible = 0;
         items.forEach(item => {
             item.visible = matches(item, query, filters);
@@ -441,16 +478,14 @@
             const sno = item.tr.querySelector('td.sno');
             if (sno) sno.textContent = String(visible);
             Object.keys(sums).forEach(k => { sums[k] += Number(item.rec[k]) || 0; });
-            const group = String(item.rec.material_group || '').trim() || 'Unspecified';
-            if (!groups[group]) groups[group] = { count: 0, total_pr_qty: 0, total_po_qty: 0, balance_pr_qty: 0 };
-            groups[group].count++;
-            groupBars.forEach(([, key]) => { groups[group][key] += Number(item.rec[key]) || 0; });
         });
 
-        const isFiltered = query !== '' || filters.length > 0;
+        insertGroupHeaders();
+
+        const isFiltered = query !== '' || filters.length > 0 || activeGroupBy !== '';
         if (noMatchRow) noMatchRow.style.display = items.length > 0 && visible === 0 ? '' : 'none';
         if (countBadge) {
-            countBadge.textContent = `Showing ${visible.toLocaleString('en-US')} of ${items.length.toLocaleString('en-US')} components`;
+            countBadge.textContent = `${visible.toLocaleString('en-US')} of ${items.length.toLocaleString('en-US')} components`;
             countBadge.classList.toggle('is-filtered', isFiltered);
         }
         if (activeFilterBadge) {
@@ -486,67 +521,150 @@
             el.textContent = text;
             el.classList.toggle('is-neg', k in sums && (sums[k] || 0) < 0);
         });
-        updateCharts(groups);
         updateToggleAllLabel();
     }
 
-    function updateCharts(groups) {
-        if (typeof Chart === 'undefined') return;
-        const entries = Object.entries(groups).sort((a, b) => b[1].total_pr_qty - a[1].total_pr_qty);
-        const barLabels = entries.map(([g]) => g);
-        const round = (v) => Math.round(v * 1000) / 1000;
-
-        const byCount = Object.entries(groups).map(([g, v]) => [g, v.count]).sort((a, b) => b[1] - a[1]);
-        const top = byCount.slice(0, 7);
-        const rest = byCount.slice(7).reduce((s, [, v]) => s + v, 0);
-        if (rest > 0) top.push(['Other', rest]);
-        const labels = top.map(([k]) => k);
-        const values = top.map(([, v]) => v);
-
-        const totalsEl = document.getElementById('rptTotalsChart');
-        const mixEl = document.getElementById('rptMixChart');
-        const datasets = groupBars.map(([label, key, color]) => ({
-            label, data: entries.map(([, v]) => round(v[key])), backgroundColor: color, borderRadius: 6, maxBarThickness: 28,
-        }));
-        if (!totalsChart && totalsEl) {
-            totalsChart = new Chart(totalsEl, {
-                type: 'bar',
-                data: { labels: barLabels, datasets },
-                options: {
-                    responsive: true, maintainAspectRatio: false, animation: { duration: 500 },
-                    plugins: { legend: { position: 'top', labels: { boxWidth: 10, font: { size: 11 } } } },
-                    scales: { x: { grid: { display: false } }, y: { beginAtZero: true } },
-                },
-            });
-        } else if (totalsChart) {
-            totalsChart.data.labels = barLabels;
-            datasets.forEach((ds, i) => { totalsChart.data.datasets[i].data = ds.data; });
-            totalsChart.update('none');
-        }
-        const mixData = {
-            labels: labels.length ? labels : ['No data'],
-            data: values.length ? values : [1],
-            colors: values.length ? mixColors.slice(0, values.length) : ['#e2e8e0'],
-        };
-        if (!mixChart && mixEl) {
-            mixChart = new Chart(mixEl, {
-                type: 'doughnut',
-                data: { labels: mixData.labels, datasets: [{ data: mixData.data, backgroundColor: mixData.colors, borderWidth: 0 }] },
-                options: { responsive: true, maintainAspectRatio: false, cutout: '62%', animation: { duration: 500 }, plugins: { legend: { display: values.length > 0, position: 'right', labels: { boxWidth: 10, font: { size: 11 } } } } },
-            });
-        } else if (mixChart) {
-            mixChart.data.labels = mixData.labels;
-            mixChart.data.datasets[0].data = mixData.data;
-            mixChart.data.datasets[0].backgroundColor = mixData.colors;
-            mixChart.options.plugins.legend.display = values.length > 0;
-            mixChart.update('none');
-        }
+    function removeGroupHeaders() {
+        tbody.querySelectorAll('.rpt-group-header-row').forEach(r => r.remove());
     }
+
+    function insertGroupHeaders() {
+        removeGroupHeaders();
+        if (!activeGroupBy) {
+            updateToggleAllOrdersLabel();
+            return;
+        }
+
+        const vis = items.filter(i => i.visible);
+        if (!vis.length) {
+            updateToggleAllOrdersLabel();
+            return;
+        }
+
+        let lastGroup = null;
+        vis.forEach(item => {
+            const groupVal = String(item.rec[activeGroupBy] ?? '').trim() || '(Blank)';
+            if (groupVal !== lastGroup) {
+                lastGroup = groupVal;
+                const groupItems = vis.filter(r => (String(r.rec[activeGroupBy] ?? '').trim() || '(Blank)') === groupVal);
+                let reqSum = 0, prSum = 0, poSum = 0, balSum = 0, stockSum = 0, prCountSum = 0;
+                groupItems.forEach(r => {
+                    reqSum += Number(r.rec.requirement_qty) || 0;
+                    prSum += Number(r.rec.total_pr_qty) || 0;
+                    poSum += Number(r.rec.total_po_qty) || 0;
+                    balSum += Number(r.rec.balance_pr_qty) || 0;
+                    stockSum += Number(r.rec.stock_qty) || 0;
+                    prCountSum += Number(r.rec.pr_count) || 0;
+                });
+
+                let styleText = '';
+                let descText = '';
+                if (activeGroupBy === 'sales_doc') {
+                    const styles = Array.from(new Set(groupItems.map(r => r.rec.material).filter(Boolean)));
+                    const descs = Array.from(new Set(groupItems.map(r => r.rec.material_description).filter(Boolean)));
+                    styleText = styles.join(', ');
+                    descText = descs.join(', ');
+                } else if (activeGroupBy === 'material') {
+                    const descs = Array.from(new Set(groupItems.map(r => r.rec.material_description).filter(Boolean)));
+                    descText = descs.join(', ');
+                } else if (activeGroupBy === 'material_group') {
+                    const descs = Array.from(new Set(groupItems.map(r => r.rec.mat_group_desc).filter(Boolean)));
+                    descText = descs.join(', ');
+                } else if (activeGroupBy === 'component_material') {
+                    const descs = Array.from(new Set(groupItems.map(r => r.rec.component_description).filter(Boolean)));
+                    descText = descs.join(', ');
+                }
+
+                const isCollapsed = collapsedGroups.has(groupVal);
+                const htr = document.createElement('tr');
+                htr.className = 'rpt-group-header-row' + (activeGroupBy === 'sales_doc' ? ' is-so-group' : '') + (isCollapsed ? ' is-collapsed' : '');
+                htr.setAttribute('data-group-key', groupVal);
+
+                const isCodeWithDesc = activeGroupBy === 'material_group' || activeGroupBy === 'component_material';
+                const headerLabel = activeGroupBy === 'sales_doc'
+                    ? `<span class="proc-group-badge"><span class="material-icons-round" style="font-size:16px;">receipt_long</span><span>Sales Order: <b>${escapeHtml(groupVal)}</b></span></span>`
+                    + (styleText ? `<span class="proc-group-style" title="${escapeHtml(styleText + (descText ? ' — ' + descText : ''))}"><span class="material-icons-round" style="font-size:15px; color:#64748b;">checkroom</span><b>${escapeHtml(styleText)}</b>${descText ? `<span class="proc-group-desc">${escapeHtml(descText)}</span>` : ''}</span>` : '')
+                    : `<span class="rpt-group-cat-label">${escapeHtml(groupFieldLabels[activeGroupBy] || 'Group')}: <b>${escapeHtml(groupVal)}</b>`
+                    + (isCodeWithDesc && descText ? ` <span class="proc-group-mg-desc" style="color:#64748b; font-weight:600; font-size:12px; margin-left:4px;">[${escapeHtml(descText)}]</span>` : '')
+                    + `</span>`
+                    + (!isCodeWithDesc && descText ? `<span class="proc-group-style"><span class="proc-group-desc">${escapeHtml(descText)}</span></span>` : '');
+
+                htr.innerHTML = `<td colspan="${columns.length}"><div class="rpt-group-header-inner">`
+                    + headerLabel
+                    + `<span class="rpt-group-cat-count">${groupItems.length.toLocaleString('en-US')} component${groupItems.length !== 1 ? 's' : ''}${prCountSum > 0 ? ` &middot; ${prCountSum.toLocaleString('en-US')} PR lines` : ''}</span>`
+                    + `<span class="rpt-group-subtotals">`
+                    + `Req <b>${fmtQty(reqSum)}</b> &middot; PR <b>${fmtQty(prSum)}</b> &middot; PO <b>${fmtQty(poSum)}</b> &middot; Bal <b>${fmtQty(balSum)}</b> &middot; Stock <b>${fmtQty(stockSum)}</b>`
+                    + `</span>`
+                    + `<span class="proc-group-hint">${isCollapsed ? 'Click to show details' : 'Click to hide'}</span>`
+                    + `<span class="rpt-group-chevron material-icons-round">${isCollapsed ? 'expand_more' : 'expand_less'}</span>`
+                    + `</div></td>`;
+
+                htr.addEventListener('click', () => {
+                    const key = htr.getAttribute('data-group-key');
+                    const wasCollapsed = collapsedGroups.has(key);
+                    if (wasCollapsed) {
+                        collapsedGroups.delete(key);
+                    } else {
+                        collapsedGroups.add(key);
+                    }
+                    const nowCollapsed = !wasCollapsed;
+                    htr.classList.toggle('is-collapsed', nowCollapsed);
+                    const ch = htr.querySelector('.rpt-group-chevron');
+                    if (ch) ch.textContent = nowCollapsed ? 'expand_more' : 'expand_less';
+                    const hint = htr.querySelector('.proc-group-hint');
+                    if (hint) hint.textContent = nowCollapsed ? 'Click to show details' : 'Click to hide';
+                    items.forEach(it => {
+                        const itKey = String(it.rec[activeGroupBy] ?? '').trim() || '(Blank)';
+                        if (itKey === key) {
+                            it.tr.style.display = (!nowCollapsed && it.visible) ? '' : 'none';
+                            if (it.detailTr) it.detailTr.style.display = (!nowCollapsed && it.visible && it.open) ? '' : 'none';
+                        }
+                    });
+                    updateToggleAllOrdersLabel();
+                    updateToggleAllLabel();
+                });
+
+                item.tr.before(htr);
+            }
+
+            const isCollapsed = collapsedGroups.has(groupVal);
+            if (isCollapsed) {
+                item.tr.style.display = 'none';
+                if (item.detailTr) item.detailTr.style.display = 'none';
+            }
+        });
+        updateToggleAllOrdersLabel();
+    }
+
+    function updateToggleAllOrdersLabel() {
+        if (!activeGroupBy) {
+            if (toggleAllOrdersBtn) toggleAllOrdersBtn.style.display = 'none';
+            return;
+        }
+        if (toggleAllOrdersBtn) toggleAllOrdersBtn.style.display = '';
+        const uniqueGroups = Array.from(new Set(items.filter(i => i.visible).map(i => String(i.rec[activeGroupBy] ?? '').trim() || '(Blank)')));
+        const anyCollapsed = uniqueGroups.some(g => collapsedGroups.has(g));
+        if (toggleAllOrdersLabel) {
+            toggleAllOrdersLabel.textContent = anyCollapsed ? 'Expand Orders' : 'Collapse Orders';
+        }
+        toggleAllOrdersBtn?.classList.toggle('is-active', !anyCollapsed && uniqueGroups.length > 0);
+    }
+
 
     function clearAllFilters() {
         if (searchInput) searchInput.value = '';
         table.querySelectorAll('.rpt-col-input').forEach(i => { i.value = ''; });
         currentSort = { col: null, dir: null };
+        activeGroupBy = 'sales_doc';
+        collapsedGroups.clear();
+        items.forEach(it => {
+            collapsedGroups.add(String(it.rec.sales_doc || '').trim() || '(Blank)');
+        });
+        if (groupByLabel) groupByLabel.textContent = 'Group: Sales Order';
+        groupByBtn?.classList.add('is-active');
+        groupByMenu?.querySelectorAll('[data-group-by]').forEach(btn => {
+            btn.classList.toggle('is-active', (btn.getAttribute('data-group-by') || '') === 'sales_doc');
+        });
         updateSortUI();
         sortItems();
         applyFilterAndSearch();
@@ -594,6 +712,8 @@
             return row ? items.find(i => String(i.origIndex) === row.getAttribute('data-item')) : null;
         };
         tbody.addEventListener('click', (e) => {
+            if (e.target.closest('.rpt-group-header-row')) return;
+
             const btn = e.target.closest('.proc-pr-toggle');
             if (btn) {
                 const item = items.find(i => String(i.origIndex) === btn.getAttribute('data-item'));
@@ -602,21 +722,34 @@
                 return;
             }
             const item = panelItem(e.target);
-            if (!item?.panel) return;
-            const chip = e.target.closest('[data-pr-filter]');
-            const sortTh = e.target.closest('th.is-sortable[data-pr-sort]');
-            if (e.target.closest('[data-pr-close]')) {
-                setOpen(item, false);
-                updateToggleAllLabel();
-                item.tr.scrollIntoView({ block: 'nearest' });
-            } else if (chip) {
-                item.panel.filter = chip.getAttribute('data-pr-filter');
-                renderPanel(item);
-            } else if (sortTh) {
-                const key = sortTh.getAttribute('data-pr-sort');
-                const s = item.panel.sort;
-                item.panel.sort = s.key !== key ? { key, dir: 1 } : (s.dir === 1 ? { key, dir: -1 } : { key: null, dir: 1 });
-                renderPanel(item);
+            if (item?.panel) {
+                const chip = e.target.closest('[data-pr-filter]');
+                const sortTh = e.target.closest('th.is-sortable[data-pr-sort]');
+                if (e.target.closest('[data-pr-close]')) {
+                    setOpen(item, false);
+                    updateToggleAllLabel();
+                    item.tr.scrollIntoView({ block: 'nearest' });
+                } else if (chip) {
+                    item.panel.filter = chip.getAttribute('data-pr-filter');
+                    renderPanel(item);
+                } else if (sortTh) {
+                    const key = sortTh.getAttribute('data-pr-sort');
+                    const s = item.panel.sort;
+                    item.panel.sort = s.key !== key ? { key, dir: 1 } : (s.dir === 1 ? { key, dir: -1 } : { key: null, dir: 1 });
+                    renderPanel(item);
+                }
+                return;
+            }
+
+            const compTr = e.target.closest('tr[data-orig-sno]');
+            if (compTr && !e.target.closest('button, input, select, a, .proc-pr-table')) {
+                const sel = window.getSelection();
+                if (sel && sel.toString().length > 0) return;
+                const cItem = items.find(i => i.tr === compTr);
+                if (cItem && (Number(cItem.rec.pr_count) || 0) > 0) {
+                    setOpen(cItem, !cItem.open);
+                    updateToggleAllLabel();
+                }
             }
         });
         tbody.addEventListener('input', (e) => {
@@ -629,11 +762,61 @@
         tbody.addEventListener('keydown', (e) => {
             if (e.target.closest('[data-pr-search]') && e.key === 'Enter') e.preventDefault();
         });
+        toggleAllOrdersBtn?.addEventListener('click', () => {
+            if (!activeGroupBy) return;
+            const uniqueGroups = Array.from(new Set(items.filter(i => i.visible).map(i => String(i.rec[activeGroupBy] ?? '').trim() || '(Blank)')));
+            const anyCollapsed = uniqueGroups.some(g => collapsedGroups.has(g));
+            if (anyCollapsed) {
+                uniqueGroups.forEach(g => collapsedGroups.delete(g));
+            } else {
+                uniqueGroups.forEach(g => collapsedGroups.add(g));
+            }
+            insertGroupHeaders();
+            updateToggleAllOrdersLabel();
+            updateToggleAllLabel();
+        });
         toggleAllPrBtn?.addEventListener('click', () => {
-            const targets = items.filter(i => i.visible && (Number(i.rec.pr_count) || 0) > 0);
+            const targets = items.filter(i => i.visible
+                && (!activeGroupBy || !collapsedGroups.has(String(i.rec[activeGroupBy] ?? '').trim() || '(Blank)'))
+                && (Number(i.rec.pr_count) || 0) > 0);
             const open = targets.some(i => !i.open);
             targets.forEach(i => setOpen(i, open));
             updateToggleAllLabel();
+        });
+
+        groupByBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            groupByDropdown?.classList.toggle('is-open');
+        });
+
+        groupByMenu?.addEventListener('click', (e) => {
+            const itemBtn = e.target.closest('[data-group-by]');
+            if (!itemBtn) return;
+            e.stopPropagation();
+            const field = itemBtn.getAttribute('data-group-by') || '';
+            if (field === activeGroupBy) {
+                groupByDropdown?.classList.remove('is-open');
+                return;
+            }
+            activeGroupBy = field;
+            collapsedGroups.clear();
+            groupByMenu.querySelectorAll('[data-group-by]').forEach(btn => {
+                btn.classList.toggle('is-active', (btn.getAttribute('data-group-by') || '') === activeGroupBy);
+            });
+            const labelText = groupFieldLabels[activeGroupBy] || 'None';
+            if (groupByLabel) {
+                groupByLabel.textContent = `Group: ${labelText}`;
+            }
+            groupByBtn?.classList.toggle('is-active', activeGroupBy !== '');
+            groupByDropdown?.classList.remove('is-open');
+            sortItems();
+            applyFilterAndSearch();
+        });
+
+        document.addEventListener('click', (e) => {
+            if (groupByDropdown && !groupByDropdown.contains(e.target)) {
+                groupByDropdown.classList.remove('is-open');
+            }
         });
 
         colFilterResetBtn?.addEventListener('click', () => { table.querySelectorAll('.rpt-col-input').forEach(i => { i.value = ''; }); applyFilterAndSearch(); });
@@ -651,6 +834,7 @@
         try { const saved = localStorage.getItem('rpt_sticky_scroll'); if (saved !== null) sticky = saved === 'true'; } catch (e) {}
         applyStickyMode(sticky);
         toggleStickyBtn?.addEventListener('click', () => applyStickyMode(!(tableWrap && !tableWrap.classList.contains('is-expanded'))));
+
         window.addEventListener('resize', () => { syncHeaderHeight(); syncDetailWidth(); });
     }
 
@@ -683,8 +867,7 @@
             const records = Array.isArray(data.records) ? data.records : [];
             fillInfo(data);
             if (!records.length) {
-                showEmpty(`No procurement data for sales order ${cfg.so}.`);
-                updateCharts({});
+                showEmpty(`No procurement data for sales order(s) ${cfg.so}.`);
                 bindControls();
                 return;
             }

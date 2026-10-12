@@ -58,7 +58,7 @@
         const filterError = document.querySelector('[data-filter-error]');
 
         document.querySelectorAll('[data-date-filter]').forEach(form => {
-            const plantInput = form.querySelector('[data-plant-input], [data-plant-select], input[name="plant"]');
+            const plantInput = form.querySelector('[data-plant-input], [data-plant-select], select[name="plant"], input[name="plant"]');
             const select = form.querySelector('[data-range-select]');
             const dateInputs = Array.from(form.querySelectorAll('input[type="date"]'));
             const [fromInput, toInput] = dateInputs;
@@ -114,11 +114,15 @@
                 return preset !== 'custom' || !!(fromInput?.value && toInput?.value);
             };
 
-            plantInput?.addEventListener('input', () => {
-                plantInput.value = plantInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+            const onPlantChange = () => {
+                if (plantInput.tagName === 'INPUT') {
+                    plantInput.value = plantInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+                }
                 clearErrors();
                 if (isHeader && canSubmit()) form.requestSubmit();
-            });
+            };
+            plantInput?.addEventListener('input', onPlantChange);
+            plantInput?.addEventListener('change', onPlantChange);
 
             select?.addEventListener('change', () => {
                 applyPreset(select.value);
@@ -155,9 +159,9 @@
                 let alsoMark = [];
 
                 if (!plantVal) {
-                    message = 'Plant is required.';
+                    message = 'Plant is required. Please select a plant.';
                     target = plantInput;
-                } else if (plantVal.length < 2) {
+                } else if (plantInput.tagName === 'INPUT' && plantVal.length < 2) {
                     message = 'Plant code must be at least 2 characters (e.g. P002).';
                     target = plantInput;
                 } else if (!preset && !so) {

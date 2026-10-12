@@ -49,7 +49,7 @@ $cards = [
             <form class="rpt-search" method="get" action="<?= e(url('procurement')) ?>" id="rptFilterForm">
                 <label class="rpt-field">
                     <span class="material-icons-round">receipt_long</span>
-                    <input id="so" name="so" value="<?= e($salesOrder) ?>" placeholder="Sales order" inputmode="numeric" required>
+                    <input id="so" name="so" value="<?= e($salesOrder) ?>" placeholder="Sales order(s) e.g. 4203, 4204" required>
                 </label>
                 <button class="rpt-btn" type="submit" title="Load report">
                     <span class="material-icons-round">sync</span>
@@ -71,13 +71,13 @@ $cards = [
                 <form method="get" action="<?= e(url('procurement')) ?>" id="rptFilterForm" class="lookup-form">
                     <label class="lookup-so">
                         <span class="material-icons-round">receipt_long</span>
-                        <input id="so" name="so" value="" placeholder="Sales order number" inputmode="numeric" autofocus required>
+                        <input id="so" name="so" value="" placeholder="Sales order(s) e.g. 4203, 4204" autofocus required>
                     </label>
                     <button class="rpt-btn lookup-go" type="submit" title="Load report">
                         <span class="material-icons-round">sync</span>
                     </button>
                 </form>
-                <p class="lookup-hint">Example: <b>4203</b></p>
+                <p class="lookup-hint">Single or comma-separated: <b>4203</b> or <b>4203, 4204, 4205</b></p>
             </div>
         </main>
     <?php else: ?>
@@ -101,32 +101,6 @@ $cards = [
                 <?php endforeach; ?>
             </div>
 
-            <div class="rpt-charts">
-                <section class="rpt-chart-card">
-                    <div class="rpt-chart-head">
-                        <span class="material-icons-round">bar_chart</span>
-                        <div>
-                            <h2>PR vs PO By Material Group</h2>
-                            <p>Total PR, total PO and balance PR quantity</p>
-                        </div>
-                    </div>
-                    <div class="rpt-chart-body">
-                        <canvas id="rptTotalsChart"></canvas>
-                    </div>
-                </section>
-                <section class="rpt-chart-card">
-                    <div class="rpt-chart-head">
-                        <span class="material-icons-round">donut_large</span>
-                        <div>
-                            <h2>Components By Material Group</h2>
-                            <p>Number of components</p>
-                        </div>
-                    </div>
-                    <div class="rpt-chart-body rpt-chart-donut">
-                        <canvas id="rptMixChart"></canvas>
-                    </div>
-                </section>
-            </div>
 
             <div class="rpt-table-toolbar">
                 <div class="rpt-tb-search">
@@ -139,11 +113,55 @@ $cards = [
 
                 <div class="rpt-tb-actions">
                     <span class="rpt-tb-count" id="rptTableCount">Loading…</span>
+                    <button type="button" class="rpt-tb-btn" id="rptToggleAllOrders" title="Expand or collapse all sales orders">
+                        <i class="fas fa-layer-group"></i>
+                        <span id="rptToggleAllOrdersLabel">Expand Orders</span>
+                    </button>
 
                     <button type="button" class="rpt-tb-btn" id="rptToggleAllPr" title="Show or hide the PR lines of every visible component">
                         <i class="fas fa-list-ul"></i>
                         <span id="rptToggleAllPrLabel">Expand PR Lines</span>
                     </button>
+
+                    <!-- Group By Dropdown -->
+                    <div class="rpt-cat-dropdown" id="rptGroupByDropdown">
+                        <button type="button" class="rpt-tb-btn is-active" id="rptGroupByBtn" title="Group report rows by field" aria-haspopup="true" aria-expanded="false">
+                            <i class="fas fa-folder-tree"></i>
+                            <span id="rptGroupByLabel">Group: Sales Order</span>
+                            <span class="material-icons-round rpt-cat-dd-arrow" style="font-size: 14px;">expand_more</span>
+                        </button>
+                        <div class="rpt-cat-dd-menu" id="rptGroupByMenu" role="menu" style="right:0; left:auto; min-width:190px;">
+                            <div class="rpt-cat-dd-header">Group Report By</div>
+                            <button type="button" class="rpt-cat-dd-item is-active" data-group-by="sales_doc" role="menuitem">
+                                <span class="material-icons-round" style="font-size:16px;">receipt_long</span>
+                                <span class="rpt-cat-dd-item-text">Sales Order (Default)</span>
+                            </button>
+                            <button type="button" class="rpt-cat-dd-item" data-group-by="component_material" role="menuitem">
+                                <span class="material-icons-round" style="font-size:16px;">widgets</span>
+                                <span class="rpt-cat-dd-item-text">Component</span>
+                            </button>
+                            <button type="button" class="rpt-cat-dd-item" data-group-by="material_type" role="menuitem">
+                                <span class="material-icons-round" style="font-size:16px;">category</span>
+                                <span class="rpt-cat-dd-item-text">Material Type</span>
+                            </button>
+                            <button type="button" class="rpt-cat-dd-item" data-group-by="material_group" role="menuitem">
+                                <span class="material-icons-round" style="font-size:16px;">grid_view</span>
+                                <span class="rpt-cat-dd-item-text">Material Group</span>
+                            </button>
+                            <button type="button" class="rpt-cat-dd-item" data-group-by="mat_group_desc" role="menuitem">
+                                <span class="material-icons-round" style="font-size:16px;">subtitles</span>
+                                <span class="rpt-cat-dd-item-text">MatGroupDsc</span>
+                            </button>
+                            <button type="button" class="rpt-cat-dd-item" data-group-by="material" role="menuitem">
+                                <span class="material-icons-round" style="font-size:16px;">checkroom</span>
+                                <span class="rpt-cat-dd-item-text">Style</span>
+                            </button>
+                            <button type="button" class="rpt-cat-dd-item" data-group-by="" role="menuitem">
+                                <span class="material-icons-round" style="font-size:16px;">clear_all</span>
+                                <span class="rpt-cat-dd-item-text">None (Flat List)</span>
+                            </button>
+                        </div>
+                    </div>
 
                     <button type="button" class="rpt-tb-btn is-active" id="rptToggleStickyScroll" title="Keep table header fixed and scroll body only">
                         <i class="fas fa-arrows-up-down"></i>
@@ -159,11 +177,13 @@ $cards = [
                         <div class="rpt-cat-dd-menu" id="rptColumnToggleMenu" role="menu" style="right:0; left:auto; max-height:400px; overflow-y:auto;"></div>
                     </div>
 
-                    <button type="button" class="rpt-tb-btn rpt-tb-btn-excel" data-excel-export="rptDataTable"
+                    <?php $safeSoFile = preg_replace('/[^\w\-]+/', '-', $salesOrder); ?>
+                    <button type="button" class="rpt-tb-btn rpt-tb-btn-excel" id="prExcelExportBtn"
+                            data-excel-export="rptDataTable"
                             data-excel-title="<?= e('Procurement Report — Sales Order ' . $salesOrder) ?>"
-                            data-excel-file="<?= e('procurement-SO' . $salesOrder) ?>"
-                            data-excel-sheet="<?= e('Procurement ' . $salesOrder) ?>"
-                            title="Download the table as an Excel file (visible columns and filtered rows)">
+                            data-excel-file="<?= e('procurement-SO' . $safeSoFile) ?>"
+                            data-excel-sheet="<?= e('Procurement ' . substr($safeSoFile, 0, 20)) ?>"
+                            title="Download the report as an Excel file">
                         <i class="fas fa-file-excel"></i>
                         <span>Excel</span>
                     </button>

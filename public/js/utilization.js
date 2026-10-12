@@ -253,7 +253,6 @@
             }
             const tr = document.createElement('tr');
             tr.setAttribute('data-orig-sno', String(i + 1));
-            if (isTrims && row.category) tr.setAttribute('data-category', row.category);
             tr.setAttribute('data-r-bom', String(bom));
             tr.setAttribute('data-r-plan', String(plan));
             tr.setAttribute('data-r-prod', String(prod));
@@ -473,7 +472,7 @@
             const colNums = colTexts.map(val => parseNum(val));
             const clean = (v) => (v && v !== '\u2014' && v !== '-') ? v : '';
             const groupCode = isTrims ? clean(colTexts[6]) : '';
-            const category = isTrims ? (tr.getAttribute('data-category') || 'Unassigned') : '';
+            const category = isTrims ? (clean(colTexts[7]) || groupCode || 'Unassigned') : '';
             return { tr, origIndex: index, origSno: parseInt(tr.getAttribute('data-orig-sno') || (index + 1), 10),  colTexts, colNums, category, groupCode, fullSearchText: colTexts.slice(1).join(' ').toLowerCase(), visible: true };
         });
 

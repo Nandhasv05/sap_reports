@@ -180,8 +180,8 @@ class ReportsController extends Controller
         if ($plant === '') {
             return ['plant' => '', 'error' => 'Plant is required.'];
         }
-        if (!$service->validPlant($plant) && !in_array($plant, $service->plants(), true)) {
-            return ['plant' => $plant, 'error' => 'Plant must be a valid 4-character code (e.g. P002).'];
+        if (!in_array($plant, $service->plants(), true)) {
+            return ['plant' => $plant, 'error' => 'Please select a valid plant (' . implode(', ', $service->plants()) . ').'];
         }
         return ['plant' => $plant, 'error' => null];
     }
@@ -247,7 +247,12 @@ class ReportsController extends Controller
      */
     private function showProcurement(ReportsModel $model, array $item): void
     {
-        $salesOrder = preg_replace('/\D/', '', (string) ($_GET['so'] ?? '')) ?? '';
+        $soParam = trim((string) ($_GET['so'] ?? ''));
+        $rawSos = array_filter(
+            array_map('trim', preg_split('/[,\s]+/', $soParam)),
+            static fn (string $s): bool => $s !== ''
+        );
+        $salesOrder = implode(', ', $rawSos);
 
         if (strtolower((string) ($_GET['export'] ?? '')) === 'csv') {
             $records = [];
@@ -268,7 +273,6 @@ class ReportsController extends Controller
             'report'     => 'procurement',
             'salesOrder' => $salesOrder,
             'columns'    => SapProcurementService::columns(),
-            'extraHead'  => '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>',
         ]);
     }
 
@@ -279,7 +283,8 @@ class ReportsController extends Controller
     {
         $columns = array_values(array_filter(SapProcurementService::columns(), static fn (array $c): bool => $c['key'] !== 'pr_count'));
         $prColumns = SapProcurementService::prColumns();
-        $filename = 'sap-procurement-' . ($salesOrder !== '' ? $salesOrder . '-' : '') . date('Ymd-His') . '.csv';
+        $safeSo = preg_replace('/[^\w\-]+/', '-', $salesOrder);
+        $filename = 'sap-procurement-' . ($safeSo !== '' ? $safeSo . '-' : '') . date('Ymd-His') . '.csv';
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="' . $filename . '"');
         $out = fopen('php://output', 'w');

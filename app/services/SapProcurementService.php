@@ -38,6 +38,7 @@ class SapProcurementService
             ['key' => 'component_material',    'label' => 'Component',             'type' => 'text', 'stage' => ''],
             ['key' => 'component_description', 'label' => 'Component Description', 'type' => 'text', 'stage' => ''],
             ['key' => 'material_group',        'label' => 'Material Group',        'type' => 'text', 'stage' => ''],
+            ['key' => 'mat_group_desc',        'label' => 'MatGroupDsc',           'type' => 'text', 'stage' => ''],
             ['key' => 'material_type',         'label' => 'Material Type',         'type' => 'text', 'stage' => ''],
             ['key' => 'shade_text1',           'label' => 'Shade 1',               'type' => 'text', 'stage' => ''],
             ['key' => 'shade_text2',           'label' => 'Shade 2',               'type' => 'text', 'stage' => ''],
@@ -79,30 +80,42 @@ class SapProcurementService
      */
     public function report(string $salesOrder): array
     {
-        $so = $this->padSalesOrder($salesOrder);
+        $rawSos = array_filter(
+            array_map('trim', preg_split('/[,\s]+/', $salesOrder)),
+            static fn (string $s): bool => $s !== ''
+        );
+        $displaySos = array_values(array_unique(array_map([$this, 'displayNumber'], $rawSos)));
+        $soJoined = implode(', ', $displaySos);
+
         $out = [
             'records'     => [],
             'total'       => 0,
             'page'        => 1,
             'pages'       => 1,
             'per_page'    => 0,
-            'sales_order' => $this->displayNumber($so),
+            'sales_order' => $soJoined,
             'info'        => [],
             'pr_total'    => 0,
             'error'       => null,
         ];
-        if ($so === '') {
+        if ($displaySos === []) {
             return $out;
         }
-        if (!preg_match('/^\d{1,10}$/', $so)) {
-            $out['error'] = 'Sales order must be a number.';
-            return $out;
+
+        foreach ($displaySos as $so) {
+            if (!preg_match('/^\d{1,10}$/', $so)) {
+                $out['error'] = 'Sales order(s) must be numeric.';
+                return $out;
+            }
         }
 
         $service = (string) ($this->cfg['procurement_service'] ?? self::DEFAULT_SERVICE);
         // ProcurementPRSet cannot be filtered on its own; it only returns rows when expanded from the dashboard set.
+        $filterParts = array_map(static fn (string $s): string => "SalesDoc eq '{$s}'", $displaySos);
+        $filter = implode(' or ', $filterParts);
+
         $result = $this->client->fetchResults($service, [
-            '$filter' => "SalesDoc eq '{$so}'",
+            '$filter' => $filter,
             '$expand' => 'ProcurementPRSet',
         ]);
         if (($result['error'] ?? null) !== null) {
@@ -119,16 +132,18 @@ class SapProcurementService
                 $rows[] = $mapped;
             }
         }
-        usort($rows, static fn (array $a, array $b): int => [$a['material_group'], $a['component_material']] <=> [$b['material_group'], $b['component_material']]);
+        usort($rows, static fn (array $a, array $b): int => [$a['sales_doc'], $a['material_group'], $a['component_material']] <=> [$b['sales_doc'], $b['material_group'], $b['component_material']]);
 
-        $first = $rows[0] ?? [];
+        $styles = array_values(array_unique(array_filter(array_column($rows, 'material'))));
+        $styleDescs = array_values(array_unique(array_filter(array_column($rows, 'material_description'))));
         $out['records'] = $rows;
         $out['total'] = count($rows);
         $out['per_page'] = count($rows);
         $out['pr_total'] = $prTotal;
         $out['info'] = [
-            'style'             => (string) ($first['material'] ?? ''),
-            'style_description' => (string) ($first['material_description'] ?? ''),
+            'sales_orders'      => $displaySos,
+            'style'             => count($styles) > 1 ? implode(', ', $styles) : (string) ($styles[0] ?? ''),
+            'style_description' => count($styleDescs) > 1 ? implode(', ', $styleDescs) : (string) ($styleDescs[0] ?? ''),
             'material_types'    => array_values(array_unique(array_filter(array_column($rows, 'material_type')))),
         ];
         return $out;
@@ -152,6 +167,7 @@ class SapProcurementService
             'component_material'    => trim((string) ($row['ComponentMaterial'] ?? '')),
             'component_description' => trim((string) ($row['ComponentDescription'] ?? '')),
             'material_group'        => trim((string) ($row['MaterialGroup'] ?? '')),
+            'mat_group_desc'        => trim((string) ($row['MatGroupDsc'] ?? '')),
             'material_type'         => trim((string) ($row['MaterialType'] ?? '')),
             'shade_text1'           => trim((string) ($row['ShadeText1'] ?? '')),
             'shade_text2'           => trim((string) ($row['ShadeText2'] ?? '')),
@@ -160,6 +176,9 @@ class SapProcurementService
             'total_po_qty'          => $q('TotalPOQty'),
             'balance_pr_qty'        => $q('BalancePRQty'),
             'stock_qty'             => $q('StockQty'),
+            'unit'                  => trim((string) ($row['BaseUnit'] ?? $row['Unit'] ?? $row['Meins'] ?? '')),
+            'customer'              => trim((string) ($row['CustomerName'] ?? $row['Customer'] ?? $row['Name1'] ?? $row['Kunnr'] ?? '')),
+            'plant'                 => trim((string) ($row['Plant'] ?? $row['Werks'] ?? '')),
             'pr_count'              => count($prLines),
             'pr_lines'              => $prLines,
         ];
@@ -175,6 +194,9 @@ class SapProcurementService
             'po_qty'          => $this->sapNumber($pr['POQty'] ?? ''),
             'balance_pr_qty'  => $this->sapNumber($pr['BalancePRQty'] ?? ''),
             'delivery_date'   => $this->sapDate((string) ($pr['DeliveryDate'] ?? '')),
+            'uom'             => trim((string) ($pr['Unit'] ?? $pr['Uom'] ?? $pr['BaseUnit'] ?? $pr['Meins'] ?? '')),
+            'department'      => trim((string) ($pr['Department'] ?? $pr['PlanDept'] ?? '')),
+            'created_date'    => $this->sapDate((string) ($pr['CreatedDate'] ?? $pr['PRDate'] ?? $pr['DocDate'] ?? $pr['Erdat'] ?? '')),
         ];
     }
 }

@@ -38,10 +38,18 @@ $soInput = static function (string $class, string $placeholder) use ($soInputVal
         . '<input id="so" name="so" value="' . e($soInputValue) . '" placeholder="' . e($placeholder) . '" inputmode="numeric" autocomplete="off"></label>';
 };
 
-$plantInput = static function (string $class, string $placeholder = 'Plant *') use ($plant): string {
-    return '<label class="' . e($class) . '" title="Plant code (e.g. P002)">'
+$plantInput = static function (string $class, string $placeholder = 'Select Plant *') use ($plant, $plants): string {
+    $plantList = !empty($plants) ? $plants : ['P002', 'P003', 'P004'];
+    $options = '<option value=""' . ($plant === '' ? ' selected' : '') . ' disabled>' . e($placeholder) . '</option>';
+    foreach ($plantList as $p) {
+        $sel = (strtoupper($plant) === strtoupper($p)) ? ' selected' : '';
+        $options .= '<option value="' . e($p) . '"' . $sel . '>' . e($p) . '</option>';
+    }
+    return '<label class="' . e($class) . '" title="Production Plant (Mandatory)">'
         . '<span class="material-icons-round">factory</span>'
-        . '<input type="text" name="plant" id="plant" value="' . e($plant) . '" placeholder="' . e($placeholder) . '" required maxlength="4" autocomplete="off" data-plant-input style="text-transform:uppercase"></label>';
+        . '<select name="plant" id="plant" required data-plant-select aria-label="Plant">'
+        . $options
+        . '</select></label>';
 };
 
 $isCustom = $datePreset === 'custom';
@@ -100,7 +108,7 @@ $cards = [
 
         <?php if (!$isLookup): ?>
             <form class="rpt-search prod-filters" method="get" action="<?= e(url('production')) ?>" id="rptFilterForm" data-date-filter novalidate>
-                <?= $plantInput('rpt-field rpt-field-plant', 'Plant (e.g. P002)') ?>
+                <?= $plantInput('rpt-field rpt-field-plant', 'Plant *') ?>
                 <label class="rpt-field rpt-field-range" title="SO creation date">
                     <span class="material-icons-round">date_range</span>
                     <select name="range" data-range-select aria-label="SO creation date">
@@ -131,7 +139,7 @@ $cards = [
                 <p class="lookup-lede">Pull cutting, sewing, washing, finishing and shipment quantities from SAP.</p>
                 <form method="get" action="<?= e(url('production')) ?>" id="rptFilterForm" class="lookup-filters" data-date-filter novalidate>
                     <div class="lookup-form">
-                        <?= $plantInput('lookup-so lookup-plant', 'Plant * (e.g. P002)') ?>
+                        <?= $plantInput('lookup-so lookup-plant', 'Select Plant *') ?>
                         <?= $soInput('lookup-so', 'Sales order number') ?>
                     </div>
 

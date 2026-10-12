@@ -254,7 +254,7 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                     <div class="rpt-chart-head">
                         <span class="material-icons-round">donut_large</span>
                         <div>
-                            <h2>Sales Order BOM Quantity By Material<?= !$isFabric ? ' Group' : '' ?></h2>
+                            <h2>Sales Order BOM Quantity By Material</h2>
                             <p>Share of BOM quantity</p>
                         </div>
                     </div>

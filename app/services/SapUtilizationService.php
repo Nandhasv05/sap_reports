@@ -203,7 +203,6 @@ class SapUtilizationService
             'color'            => (string) ($row['COLOR'] ?? $row['Color'] ?? $row['Colour'] ?? ''),
             'size1'            => (string) ($row['SIZE1'] ?? $row['Size1'] ?? ''),
             'size2'            => (string) ($row['SIZE2'] ?? $row['Size2'] ?? ''),
-            'category'         => $kind === 'trims' ? $this->categorizeTrim($material, (string) ($row['Description'] ?? '')) : '',
         ];
     }
 
