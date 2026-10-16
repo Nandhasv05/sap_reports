@@ -3,7 +3,7 @@
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 28/09/2026
  * DESCRIPTION : SAP procurement (requirement / PR / PO / stock per component) from ZBUSINESS_API_SRV/ProcurementDashboardSet
- */
+*/
 require_once base_path('app/core/SapODataClient.php');
 require_once base_path('app/services/SapValueFormat.php');
 
@@ -32,22 +32,23 @@ class SapProcurementService
     {
         return [
             ['key' => 'sno',                   'label' => 'S.No',                  'type' => 'num',  'stage' => ''],
-            ['key' => 'sales_doc',             'label' => 'Sales Order',           'type' => 'text', 'stage' => ''],
-            ['key' => 'material',              'label' => 'Style',                 'type' => 'text', 'stage' => ''],
-            ['key' => 'material_description',  'label' => 'Style Description',     'type' => 'text', 'stage' => ''],
             ['key' => 'component_material',    'label' => 'Component',             'type' => 'text', 'stage' => ''],
-            ['key' => 'component_description', 'label' => 'Component Description', 'type' => 'text', 'stage' => ''],
             ['key' => 'material_group',        'label' => 'Material Group',        'type' => 'text', 'stage' => ''],
-            ['key' => 'mat_group_desc',        'label' => 'MatGroupDsc',           'type' => 'text', 'stage' => ''],
-            ['key' => 'material_type',         'label' => 'Material Type',         'type' => 'text', 'stage' => ''],
-            ['key' => 'shade_text1',           'label' => 'Shade 1',               'type' => 'text', 'stage' => ''],
-            ['key' => 'shade_text2',           'label' => 'Shade 2',               'type' => 'text', 'stage' => ''],
+            ['key' => 'shade_text1',           'label' => 'Shade',                 'type' => 'text', 'stage' => ''],
             ['key' => 'requirement_qty',       'label' => 'Requirement Qty',       'type' => 'num',  'stage' => 'req'],
+            ['key' => 'stock_qty',             'label' => 'Stock Qty',             'type' => 'num',  'stage' => 'stock'],
+            ['key' => 'stock_status',          'label' => 'Status',                'type' => 'text', 'stage' => ''],
             ['key' => 'total_pr_qty',          'label' => 'Total PR Qty',          'type' => 'num',  'stage' => 'pr'],
             ['key' => 'total_po_qty',          'label' => 'Total PO Qty',          'type' => 'num',  'stage' => 'po'],
             ['key' => 'balance_pr_qty',        'label' => 'Balance PR Qty',        'type' => 'num',  'stage' => 'bal'],
-            ['key' => 'stock_qty',             'label' => 'Stock Qty',             'type' => 'num',  'stage' => 'stock'],
             ['key' => 'pr_count',              'label' => 'PR Lines',              'type' => 'num',  'stage' => 'lines'],
+            ['key' => 'sales_doc',             'label' => 'Sales Order',           'type' => 'text', 'stage' => ''],
+            ['key' => 'material',              'label' => 'Style',                 'type' => 'text', 'stage' => ''],
+            ['key' => 'material_description',  'label' => 'Style Description',     'type' => 'text', 'stage' => ''],
+            ['key' => 'component_description', 'label' => 'Component Description', 'type' => 'text', 'stage' => ''],
+            ['key' => 'mat_group_desc',        'label' => 'MatGroupDsc',           'type' => 'text', 'stage' => ''],
+            ['key' => 'material_type',         'label' => 'Material Type',         'type' => 'text', 'stage' => ''],
+            ['key' => 'shade_text2',           'label' => 'Shade 2',               'type' => 'text', 'stage' => ''],
         ];
     }
 
@@ -56,7 +57,15 @@ class SapProcurementService
      */
     public static function defaultHiddenColumns(): array
     {
-        return ['sales_doc', 'material', 'material_description', 'shade_text2'];
+        return [
+            'sales_doc',
+            'material',
+            'material_description',
+            'component_description',
+            'mat_group_desc',
+            'material_type',
+            'shade_text2',
+        ];
     }
 
     /*
@@ -158,7 +167,45 @@ class SapProcurementService
                 $prLines[] = $this->mapPrLine($pr);
             }
         }
-        usort($prLines, static fn (array $a, array $b): int => [$a['delivery_date'], $a['pr_number'], (int) $a['pr_item']] <=> [$b['delivery_date'], $b['pr_number'], (int) $b['pr_item']]);
+        usort($prLines, static function (array $a, array $b): int {
+            $dateA = (string) ($a['delivery_date'] ?? '');
+            $dateB = (string) ($b['delivery_date'] ?? '');
+
+            // Empty delivery dates placed at the end
+            if ($dateA === '' && $dateB !== '') {
+                return 1;
+            }
+            if ($dateA !== '' && $dateB === '') {
+                return -1;
+            }
+
+            // 1. Current / latest delivery date first (descending)
+            if ($dateA !== $dateB) {
+                return strcmp($dateB, $dateA);
+            }
+
+            // 2. Quantity high first (PR Qty descending)
+            $qtyA = (float) ($a['pr_qty'] ?? 0);
+            $qtyB = (float) ($b['pr_qty'] ?? 0);
+            if ($qtyA !== $qtyB) {
+                return $qtyB <=> $qtyA;
+            }
+
+            // 3. Balance Qty descending
+            $balA = (float) ($a['balance_pr_qty'] ?? 0);
+            $balB = (float) ($b['balance_pr_qty'] ?? 0);
+            if ($balA !== $balB) {
+                return $balB <=> $balA;
+            }
+
+            // 4. Stable tie-breaker: PR number desc, PR item asc
+            $prCmp = strcmp((string) ($b['pr_number'] ?? ''), (string) ($a['pr_number'] ?? ''));
+            if ($prCmp !== 0) {
+                return $prCmp;
+            }
+
+            return (int) ($a['pr_item'] ?? 0) <=> (int) ($b['pr_item'] ?? 0);
+        });
 
         return [
             'sales_doc'             => $this->displayNumber((string) ($row['SalesDoc'] ?? '')),
@@ -176,6 +223,11 @@ class SapProcurementService
             'total_po_qty'          => $q('TotalPOQty'),
             'balance_pr_qty'        => $q('BalancePRQty'),
             'stock_qty'             => $q('StockQty'),
+            'stock_status'          => ($q('StockQty') >= $q('RequirementQty') && $q('RequirementQty') > 0)
+                ? 'In Stock'
+                : ((($q('StockQty') + $q('TotalPOQty')) >= $q('RequirementQty') && $q('RequirementQty') > 0)
+                    ? 'PO Pipeline'
+                    : (($q('BalancePRQty') > 0 || ($q('StockQty') + $q('TotalPOQty')) < $q('RequirementQty')) ? 'Shortage' : 'Available')),
             'unit'                  => trim((string) ($row['BaseUnit'] ?? $row['Unit'] ?? $row['Meins'] ?? '')),
             'customer'              => trim((string) ($row['CustomerName'] ?? $row['Customer'] ?? $row['Name1'] ?? $row['Kunnr'] ?? '')),
             'plant'                 => trim((string) ($row['Plant'] ?? $row['Werks'] ?? '')),
@@ -200,3 +252,4 @@ class SapProcurementService
         ];
     }
 }
+?>

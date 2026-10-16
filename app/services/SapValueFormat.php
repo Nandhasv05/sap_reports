@@ -3,7 +3,7 @@
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 28/09/2026
  * DESCRIPTION : SAP OData value helpers shared by the report services
- */
+*/
 trait SapValueFormat
 {
     /*

@@ -38,6 +38,12 @@ class Controller
         require $layoutFile;
     }
 
+    protected function redirect(string $to): void
+    {
+        header('Location: ' . $to);
+        exit;
+    }
+
     /*
      * Not found
      */

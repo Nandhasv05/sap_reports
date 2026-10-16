@@ -3,7 +3,7 @@
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 29/09/2026
  * DESCRIPTION : User table column preferences - validation, normalization against the column registry, persistence
- */
+*/
 require_once base_path('app/services/TableColumnRegistry.php');
 require_once base_path('app/services/TablePreferenceException.php');
 require_once base_path('app/models/UserTablePreferenceModel.php');

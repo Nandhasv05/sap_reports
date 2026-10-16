@@ -136,6 +136,8 @@ $listCards = [
                 </form>
             </div>
         <?php endif; ?>
+
+        <?php require base_path('app/views/partials/header_nav_right.php'); ?>
     </header>
 
     <main class="rpt-main">
@@ -334,6 +336,8 @@ $listCards = [
             </table>
         </div>
     </main>
+
+    <?php require base_path('app/views/partials/footer.php'); ?>
 </div>
 
 <script type="application/json" id="poConfig"><?= json_encode([

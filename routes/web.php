@@ -13,7 +13,6 @@ $router->get('/', [ReportsController::class, 'index']);
 $router->get('sales', function () {
     (new ReportsController())->show('sales');
 });
-
 $router->get('open', function () {
     (new ReportsController())->show('open');
 });
@@ -41,13 +40,14 @@ $router->get('production', function () {
 $router->get('procurement/data', function () {
     (new ReportsController())->data('procurement');
 });
+$router->get('procurement/pr-details', function () {
+    (new ReportsController())->prDetails();
+});
 $router->get('procurement', function () {
     (new ReportsController())->show('procurement');
 });
-
 $router->get('purchase-order/data', [ReportsController::class, 'purchaseOrderData']);
 $router->get('purchase-order', [ReportsController::class, 'showPurchaseOrder']);
-
 $router->get('api/user/table-preferences/{tableKey}', [TablePreferencesController::class, 'show']);
 $router->put('api/user/table-preferences/{tableKey}', [TablePreferencesController::class, 'update']);
 $router->delete('api/user/table-preferences/{tableKey}', [TablePreferencesController::class, 'destroy']);

@@ -170,6 +170,8 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                 <?php endif; ?>
             </form>
         <?php endif; ?>
+
+        <?php require base_path('app/views/partials/header_nav_right.php'); ?>
     </header>
 
     <?php if ($loadError !== ''): ?>
@@ -827,6 +829,8 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
             </div>
         </main>
     <?php endif; ?>
+
+    <?php require base_path('app/views/partials/footer.php'); ?>
 </div>
 <script type="application/json" id="rptChartData"><?= json_encode($chart, JSON_UNESCAPED_UNICODE) ?></script>
 <script type="application/json" id="rptPageConfig"><?= json_encode([

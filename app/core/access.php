@@ -50,3 +50,80 @@ function sap_reports_require_access(): void
         exit;
     }
 }
+
+/**
+ * Check if the current user has access to a specific report module
+ */
+function sap_reports_user_can_access(string $module, ?array $user = null): bool
+{
+    if ($user === null && function_exists('portal_user')) {
+        $user = portal_user();
+    }
+    if (!$user) {
+        $user = [
+            'username'   => $_SESSION['username'] ?? '',
+            'role'       => $_SESSION['role'] ?? '',
+            'department' => $_SESSION['department'] ?? '',
+            'is_admin'   => $_SESSION['is_admin'] ?? 0,
+        ];
+    }
+
+    $role = strtolower(trim((string) ($user['role'] ?? '')));
+    $dept = strtolower(trim((string) ($user['department'] ?? '')));
+    $isAdmin = !empty($user['is_admin']) || in_array($role, ['admin', 'it_admin', 'super_admin', 'administrator', 'director', 'management'], true);
+
+    if ($isAdmin) {
+        return true;
+    }
+
+    $username = strtolower(trim((string) ($user['username'] ?? '')));
+    if (function_exists('portal_normalize_username')) {
+        $username = portal_normalize_username((string) ($user['username'] ?? ''));
+    }
+    if ($username !== '' && function_exists('portal_sap_reports_usernames') && in_array($username, portal_sap_reports_usernames(), true)) {
+        return true;
+    }
+
+    $mod = strtolower(trim($module));
+    if ($mod === 'po') {
+        $mod = 'purchase-order';
+    }
+
+    if (function_exists('portal_module_granted')) {
+        $portalModuleMap = [
+            'fabric'         => 'SAP Fabric Report',
+            'trims'          => 'SAP Trims Report',
+            'production'     => 'SAP Production Report',
+            'procurement'    => 'SAP Procurement Report',
+            'purchase-order' => 'SAP Purchase Order Report',
+            'utilization'    => 'SAP Utilization Report',
+        ];
+        if (isset($portalModuleMap[$mod]) && portal_module_granted($portalModuleMap[$mod], false)) {
+            return true;
+        }
+    }
+
+    switch ($mod) {
+        case 'fabric':
+            return (bool) preg_match('/fabric|cutting|textile|merchandis|sampling|quality|store|plan/i', $role . ' ' . $dept);
+
+        case 'trims':
+            return (bool) preg_match('/trim|accessor|merchandis|procure|purchase|sourcing|store|inventory/i', $role . ' ' . $dept);
+
+        case 'production':
+            return (bool) preg_match('/product|sew|cut|wash|finish|operat|merchandis|line|plan|manufact/i', $role . ' ' . $dept);
+
+        case 'procurement':
+            return (bool) preg_match('/procure|purchase|sourcing|merchandis|store|supply|material/i', $role . ' ' . $dept);
+
+        case 'purchase-order':
+            return (bool) preg_match('/purchase|procure|account|finance|commercial|audit|bill|store/i', $role . ' ' . $dept);
+
+        case 'utilization':
+            return sap_reports_user_can_access('fabric', $user) || sap_reports_user_can_access('trims', $user);
+
+        default:
+            return true;
+    }
+}
+

@@ -3,7 +3,7 @@
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 29/09/2026
  * DESCRIPTION : Central column definitions (stable ids in default order) for every table that supports user column preferences
- */
+*/
 require_once base_path('app/services/SapProcurementService.php');
 require_once base_path('app/services/SapProductionService.php');
 require_once base_path('app/services/SapPurchaseOrderService.php');
@@ -42,8 +42,9 @@ final class TableColumnRegistry
         );
 
         $tables = [
-            'procurement_table' => $fromService(SapProcurementService::columns(), SapProcurementService::defaultHiddenColumns()),
-            'production_table'  => $fromService(SapProductionService::columns(), SapProductionService::defaultHiddenColumns()),
+            'procurement_table'    => $fromService(SapProcurementService::columns(), SapProcurementService::defaultHiddenColumns()),
+            'procurement_table_v2' => $fromService(SapProcurementService::columns(), SapProcurementService::defaultHiddenColumns()),
+            'production_table'     => $fromService(SapProductionService::columns(), SapProductionService::defaultHiddenColumns()),
             'production_range_table' => $fromService(SapProductionService::columns(), SapProductionService::defaultHiddenRangeColumns()),
             'purchase_order_table' => $fromService(SapPurchaseOrderService::columns(), []),
             'purchase_order_list_table' => $fromService(SapPurchaseOrderService::listColumns(), []),

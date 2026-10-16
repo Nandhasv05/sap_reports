@@ -3,7 +3,7 @@
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 28/09/2026
  * DESCRIPTION : Procurement report view (SAP ProcurementDashboardSet) - rows are loaded live by procurement.js
- */
+*/
 $salesOrder = (string) ($salesOrder ?? '');
 $columns = is_array($columns ?? null) ? $columns : [];
 $isLookup = $salesOrder === '';
@@ -59,6 +59,8 @@ $cards = [
                 </a>
             </form>
         <?php endif; ?>
+
+        <?php require base_path('app/views/partials/header_nav_right.php'); ?>
     </header>
 
     <?php if ($isLookup): ?>
@@ -263,6 +265,8 @@ $cards = [
             </div>
         </main>
     <?php endif; ?>
+
+    <?php require base_path('app/views/partials/footer.php'); ?>
 </div>
 <script type="application/json" id="rptPageConfig"><?= json_encode([
     'report'        => 'procurement',
@@ -270,11 +274,12 @@ $cards = [
     'live'          => !$isLookup,
     'dataUrl'       => url('procurement/data'),
     'pageUrl'       => url('procurement'),
+    'prDetailsUrl'  => url('procurement/pr-details'),
     'columns'       => $columns,
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
 <script src="<?= e(asset('js/loader.js')) ?>"></script>
 <?php if (!$isLookup): ?>
-<?php $prefTableKey = 'procurement_table'; require base_path('app/views/partials/table_preferences.php'); ?>
+<?php $prefTableKey = 'procurement_table_v2'; require base_path('app/views/partials/table_preferences.php'); ?>
 <script src="<?= e(asset('js/table-columns.js')) ?>"></script>
 <script src="<?= e(asset('js/excel-export.js')) ?>"></script>
 <script src="<?= e(asset('js/procurement.js')) ?>"></script>

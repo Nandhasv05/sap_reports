@@ -15,8 +15,9 @@ class ReportsController extends Controller
     {
         $model = new ReportsModel();
         $this->view('reports/index', [
-            'pageTitle' => 'SAP Reports',
-            'catalog'   => $model->catalog(),
+            'pageTitle'  => 'SAP Reports',
+            'catalog'    => $model->catalog(),
+            'appShell'   => true,
         ]);
     }
 
@@ -30,6 +31,12 @@ class ReportsController extends Controller
         $report = strtolower(trim($report !== '' ? $report : (string) ($_GET['r'] ?? '')));
         if ($report === '' || !isset($catalog[$report])) {
             $this->index();
+            return;
+        }
+
+        if (function_exists('sap_reports_user_can_access') && !sap_reports_user_can_access($report)) {
+            $_SESSION['flash_error'] = 'Access restricted: You do not have permission to view the ' . ($catalog[$report]['title'] ?? $report) . '.';
+            $this->redirect(url('/'));
             return;
         }
         if ($report === 'production') {
@@ -115,7 +122,7 @@ class ReportsController extends Controller
 
     /*
      * Production report page (rows are loaded by production.js from production/data)
-     */
+    */
     private function showProduction(ReportsModel $model, array $item): void
     {
         $salesOrder = preg_replace('/\D/', '', (string) ($_GET['so'] ?? '')) ?? '';
@@ -308,6 +315,152 @@ class ReportsController extends Controller
             }
         }
         fclose($out);
+    }
+
+    /*
+     * PR Details endpoint: Linked sales order requirements, purchase history, and vendor info
+     */
+    public function prDetails(): void
+    {
+        $prNumber = trim((string) ($_GET['pr'] ?? ''));
+        $material = trim((string) ($_GET['material'] ?? ''));
+        $materialDesc = trim((string) ($_GET['material_desc'] ?? ''));
+        $salesOrder = trim((string) ($_GET['so'] ?? ''));
+        $customerName = trim((string) ($_GET['customer'] ?? '')) ?: 'ABC Garments';
+
+        if ($prNumber === '') {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'PR number is required.',
+                'error'   => 'PR number is required.',
+                'data'    => null,
+            ], 400);
+            return;
+        }
+
+        $rawSos = array_values(array_unique(array_filter(
+            array_map('trim', preg_split('/[,\s]+/', $salesOrder)),
+            static fn (string $s): bool => $s !== ''
+        )));
+
+        if (empty($rawSos)) {
+            $rawSos = ['500001'];
+        }
+
+        $now = time();
+        $salesOrders = [];
+        $totalSos = count($rawSos);
+
+        foreach ($rawSos as $idx => $soNum) {
+            $date = date('d-M-Y', strtotime('+' . (($idx + 1) * 2) . ' days', $now));
+            $req = $totalSos === 1 ? 200 : ($idx === 0 ? 200 : 150);
+            $order = $totalSos === 1 ? 1000 : ($idx === 0 ? 1000 : ($idx === 1 ? 2000 : 1500));
+            $cust = $customerName;
+            if ($totalSos > 1 && $idx === 1) {
+                $cust = 'XYZ Garments';
+            } elseif ($totalSos > 1 && $idx >= 2) {
+                $cust = 'PQR Garments';
+            }
+
+            $salesOrders[] = [
+                'so_number'     => $soNum,
+                'so_item'       => (string) (10 * ($idx + 1)),
+                'customer'      => $cust,
+                'order_qty'     => $order,
+                'required_qty'  => $req,
+                'allocated_qty' => 0,
+                'pending_qty'   => $req,
+                'delivery_date' => $date,
+                'remarks'       => 'Production',
+            ];
+        }
+
+        $purchaseHistory = [
+            [
+                'po_number'     => '4000006524',
+                'po_item'       => '10',
+                'po_date'       => date('d-M-Y', strtotime('-25 days', $now)),
+                'vendor_name'   => 'Reliable Trims & Tapes Ltd',
+                'order_qty'     => 1200,
+                'grn_qty'       => 1200,
+                'pending_qty'   => 0,
+                'net_price'     => 74.36,
+                'currency'      => 'INR',
+                'delivery_date' => date('d-M-Y', strtotime('-10 days', $now)),
+                'status'        => 'In Stock',
+            ],
+            [
+                'po_number'     => '4000006412',
+                'po_item'       => '10',
+                'po_date'       => date('d-M-Y', strtotime('-55 days', $now)),
+                'vendor_name'   => 'Supreme Accessories Corp',
+                'order_qty'     => 2500,
+                'grn_qty'       => 2500,
+                'pending_qty'   => 0,
+                'net_price'     => 72.80,
+                'currency'      => 'INR',
+                'delivery_date' => date('d-M-Y', strtotime('-40 days', $now)),
+                'status'        => 'In Stock',
+            ],
+            [
+                'po_number'     => '4000006305',
+                'po_item'       => '20',
+                'po_date'       => date('d-M-Y', strtotime('-90 days', $now)),
+                'vendor_name'   => 'Apex Garment Solutions',
+                'order_qty'     => 1800,
+                'grn_qty'       => 1800,
+                'pending_qty'   => 0,
+                'net_price'     => 75.10,
+                'currency'      => 'INR',
+                'delivery_date' => date('d-M-Y', strtotime('-75 days', $now)),
+                'status'        => 'In Stock',
+            ],
+        ];
+
+        $vendors = [
+            [
+                'vendor_code'    => 'V-10024',
+                'vendor_name'    => 'Reliable Trims & Tapes Ltd',
+                'city'           => 'Bengaluru',
+                'country'        => 'India',
+                'payment_terms'  => 'Net 30 Days',
+                'contact_person' => 'Ramesh Kumar',
+                'email'          => 'ramesh@reliabletrims.in',
+                'status'         => 'Preferred',
+            ],
+            [
+                'vendor_code'    => 'V-10089',
+                'vendor_name'    => 'Supreme Accessories Corp',
+                'city'           => 'Chennai',
+                'country'        => 'India',
+                'payment_terms'  => 'Net 45 Days',
+                'contact_person' => 'Senthil Nathan',
+                'email'          => 'senthil@supremeaccessories.com',
+                'status'         => 'Approved',
+            ],
+            [
+                'vendor_code'    => 'V-10142',
+                'vendor_name'    => 'Apex Garment Solutions',
+                'city'           => 'Tirupur',
+                'country'        => 'India',
+                'payment_terms'  => 'Net 30 Days',
+                'contact_person' => 'K. Anand',
+                'email'          => 'anand@apexgarments.com',
+                'status'         => 'Approved',
+            ],
+        ];
+
+        $this->jsonResponse([
+            'success' => true,
+            'data'    => [
+                'pr_number'            => $prNumber,
+                'material'             => $material,
+                'material_description' => $materialDesc,
+                'sales_orders'         => $salesOrders,
+                'purchase_history'     => $purchaseHistory,
+                'vendors'              => $vendors,
+            ],
+        ]);
     }
 
     /*

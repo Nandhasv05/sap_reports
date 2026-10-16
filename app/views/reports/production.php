@@ -128,6 +128,8 @@ $cards = [
                 </a>
             </form>
         <?php endif; ?>
+
+        <?php require base_path('app/views/partials/header_nav_right.php'); ?>
     </header>
 
     <?php if ($isLookup): ?>
@@ -369,6 +371,8 @@ $cards = [
             </div>
         </main>
     <?php endif; ?>
+
+    <?php require base_path('app/views/partials/footer.php'); ?>
 </div>
 <script type="application/json" id="rptPageConfig"><?= json_encode([
     'report'        => 'production',
