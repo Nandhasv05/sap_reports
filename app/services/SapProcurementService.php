@@ -207,6 +207,11 @@ class SapProcurementService
             return (int) ($a['pr_item'] ?? 0) <=> (int) ($b['pr_item'] ?? 0);
         });
 
+        $poStatus = strtoupper(trim((string) ($row['Po_status'] ?? $row['PoStatus'] ?? $row['PO_STATUS'] ?? '')));
+        $poCreatedQty = $this->sapNumber($row['PO_CREATED_QTY'] ?? $row['PoCreatedQty'] ?? 0);
+        $createdPo = trim((string) ($row['CREATED_PO'] ?? $row['CreatedPo'] ?? ''));
+        $isPoDone = $poStatus === 'YES' || $poCreatedQty > 0 || ($createdPo !== '' && $createdPo !== '-' && $createdPo !== '—');
+
         return [
             'sales_doc'             => $this->displayNumber((string) ($row['SalesDoc'] ?? '')),
             'material'              => trim((string) ($row['Material'] ?? '')),
@@ -223,11 +228,16 @@ class SapProcurementService
             'total_po_qty'          => $q('TotalPOQty'),
             'balance_pr_qty'        => $q('BalancePRQty'),
             'stock_qty'             => $q('StockQty'),
-            'stock_status'          => ($q('StockQty') >= $q('RequirementQty') && $q('RequirementQty') > 0)
-                ? 'In Stock'
-                : ((($q('StockQty') + $q('TotalPOQty')) >= $q('RequirementQty') && $q('RequirementQty') > 0)
-                    ? 'PO Pipeline'
-                    : (($q('BalancePRQty') > 0 || ($q('StockQty') + $q('TotalPOQty')) < $q('RequirementQty')) ? 'Shortage' : 'Available')),
+            'po_status'             => $poStatus,
+            'po_created_qty'        => $poCreatedQty,
+            'created_po'            => $createdPo,
+            'stock_status'          => $isPoDone
+                ? 'PO Already Done'
+                : (($q('StockQty') >= $q('RequirementQty') && $q('RequirementQty') > 0)
+                    ? 'In Stock'
+                    : ((($q('StockQty') + $q('TotalPOQty')) >= $q('RequirementQty') && $q('RequirementQty') > 0)
+                        ? 'PO Pipeline'
+                        : (($q('BalancePRQty') > 0 || ($q('StockQty') + $q('TotalPOQty')) < $q('RequirementQty')) ? 'Shortage' : 'Available'))),
             'unit'                  => trim((string) ($row['BaseUnit'] ?? $row['Unit'] ?? $row['Meins'] ?? '')),
             'customer'              => trim((string) ($row['CustomerName'] ?? $row['Customer'] ?? $row['Name1'] ?? $row['Kunnr'] ?? '')),
             'plant'                 => trim((string) ($row['Plant'] ?? $row['Werks'] ?? '')),
@@ -249,6 +259,9 @@ class SapProcurementService
             'uom'             => trim((string) ($pr['Unit'] ?? $pr['Uom'] ?? $pr['BaseUnit'] ?? $pr['Meins'] ?? '')),
             'department'      => trim((string) ($pr['Department'] ?? $pr['PlanDept'] ?? '')),
             'created_date'    => $this->sapDate((string) ($pr['CreatedDate'] ?? $pr['PRDate'] ?? $pr['DocDate'] ?? $pr['Erdat'] ?? '')),
+            'po_status'       => strtoupper(trim((string) ($pr['Po_status'] ?? $pr['PoStatus'] ?? $pr['PO_STATUS'] ?? ''))),
+            'po_created_qty'  => $this->sapNumber($pr['PO_CREATED_QTY'] ?? $pr['PoCreatedQty'] ?? 0),
+            'created_po'      => trim((string) ($pr['CREATED_PO'] ?? $pr['CreatedPo'] ?? '')),
         ];
     }
 }

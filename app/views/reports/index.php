@@ -3,7 +3,7 @@
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 03/09/2026
  * DESCRIPTION : Reports index view - Executive Bento Studio UI (Single-Viewport No-Scroll)
- */
+*/
 $user = function_exists('portal_user') ? portal_user() : null;
 $userName = !empty($user['username']) ? $user['username'] : 'admin';
 $userRole = !empty($user['role']) ? $user['role'] : (!empty($user['department']) ? $user['department'] : 'Administrator');
@@ -308,6 +308,45 @@ $currentYear = date('Y');
                     </span>
                 </div>
             </a>
+
+            <!-- Card 7: Sales Dashboard -->
+            <a class="hub-bento-card is-sales animate-card" style="--stagger: 7;" href="<?= e(url('sales')) ?>" data-category="sales" data-keywords="sales dashboard quotations orders sap revenue net value order qty buyers customers pipeline">
+                <div class="hub-bento-ambient-glow"></div>
+                <div class="hub-bento-shine"></div>
+                
+                <!-- Card Header -->
+                <div class="hub-bento-head">
+                    <div class="hub-bento-icon-medallion">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <div class="hub-bento-head-meta">
+                        <div class="hub-bento-kicker">
+                            <span class="hub-bento-dot"></span>
+                            <span>MODULE 07 • LIVE SAP</span>
+                        </div>
+                        <span class="hub-bento-tag">SALES &amp; QUOTATIONS</span>
+                    </div>
+                </div>
+
+                <!-- Card Body -->
+                <div class="hub-bento-body">
+                    <h2 class="hub-bento-title">Sales Dashboard</h2>
+                    <p class="hub-bento-desc">Live SAP sales quotations &amp; orders: quotation value, order qty, buyer intel, conversion &amp; procurement status.</p>
+                    <div class="hub-bento-chips">
+                        <span class="hub-bento-chip"><i class="fas fa-file-invoice-dollar"></i> Quotations</span>
+                        <span class="hub-bento-chip"><i class="fas fa-chart-pie"></i> KPI Analytics</span>
+                        <span class="hub-bento-chip"><i class="fas fa-boxes-packing"></i> Order Drilldown</span>
+                    </div>
+                </div>
+
+                <!-- Card Footer Action -->
+                <div class="hub-bento-footer">
+                    <span class="hub-bento-action-label">Launch Sales Dashboard</span>
+                    <span class="hub-bento-arrow">
+                        <i class="fas fa-arrow-right"></i>
+                    </span>
+                </div>
+            </a>
         </div>
 
         <!-- Empty search state -->
@@ -330,14 +369,6 @@ $currentYear = date('Y');
             </div>
             <div class="hub-footer-center">
                 <span class="hub-footer-text">SAP ERP Operational Analytics Hub</span>
-            </div>
-            <div class="hub-footer-right">
-                <span class="hub-footer-status">
-                    <span class="hub-status-heartbeat-mini"></span>
-                    <span>RFC Online</span>
-                </span>
-                <span class="hub-footer-divider">•</span>
-                <span class="hub-footer-ver"><i class="fas fa-code-branch"></i> v2.4.0</span>
             </div>
         </div>
     </footer>
@@ -399,22 +430,22 @@ $currentYear = date('Y');
 html, body {
     margin: 0 !important;
     padding: 0 !important;
-    height: 100vh !important;
-    overflow: hidden !important;
+    min-height: 100vh !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
     background: #f8fafc !important;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
     color: #0f172a !important;
     -webkit-font-smoothing: antialiased;
 }
 
-/* Full Viewport App Wrapper */
+/* App Wrapper */
 .hub-wrapper {
-    height: 100vh;
-    width: 100vw;
+    min-height: 100vh;
+    width: 100%;
     display: flex;
     flex-direction: column;
     position: relative;
-    overflow: hidden;
     background-color: #f8fafc;
 }
 
@@ -848,27 +879,26 @@ html, body {
 }
 
 /* ==========================================================================
-   CARDS GRID CONTAINER (NO SUBHEADER - 100% SINGLE VIEWPORT)
+   CARDS GRID CONTAINER (RESPONSIVE GRID)
    ========================================================================== */
 .hub-main-container {
-    flex: 1;
-    min-height: 0;
-    padding: 14px 20px 12px;
+    flex: 1 0 auto;
+    padding: 24px 28px 36px;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
     position: relative;
     z-index: 10;
+    max-width: 1680px;
+    width: 100%;
+    margin: 0 auto;
+    box-sizing: border-box;
 }
 
 .hub-cards-grid {
-    flex: 1;
-    min-height: 0;
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    grid-template-rows: repeat(2, minmax(0, 1fr));
-    gap: 14px;
-    height: 100%;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 18px;
+    width: 100%;
 }
 
 /* ==========================================================================
@@ -879,10 +909,10 @@ html, body {
     border-radius: 16px;
     background: #ffffff;
     border: 1.5px solid rgba(226, 232, 240, 0.95);
-    padding: 16px 18px;
+    padding: 20px 20px 18px;
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    min-height: 236px;
     text-decoration: none;
     color: inherit;
     cursor: pointer;
@@ -942,7 +972,8 @@ html, body {
     gap: 12px;
     position: relative;
     z-index: 2;
-    margin-bottom: 6px;
+    margin-bottom: 14px;
+    flex-shrink: 0;
 }
 
 /* Medallion Icon Box */
@@ -1011,24 +1042,22 @@ html, body {
 
 /* Card Body */
 .hub-bento-body {
-    flex: 1;
-    min-height: 0;
+    flex: 1 1 auto;
     display: flex;
     flex-direction: column;
-    justify-content: center;
     position: relative;
     z-index: 2;
-    margin: 4px 0;
+    margin: 0 0 14px;
 }
 
 .hub-bento-title {
     font-family: Outfit, sans-serif;
-    font-size: 16px;
+    font-size: 17px;
     font-weight: 700;
     color: #0f172a;
-    margin: 0 0 4px;
+    margin: 0 0 6px;
     letter-spacing: -0.018em;
-    line-height: 1.25;
+    line-height: 1.3;
     transition: color 0.2s ease;
 }
 
@@ -1037,10 +1066,10 @@ html, body {
 }
 
 .hub-bento-desc {
-    font-size: 11.5px;
+    font-size: 12px;
     color: #64748b;
-    line-height: 1.45;
-    margin: 0 0 10px;
+    line-height: 1.5;
+    margin: 0 0 12px;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -1054,6 +1083,7 @@ html, body {
     gap: 5px;
     flex-wrap: wrap;
     margin-top: auto;
+    padding-top: 2px;
 }
 
 .hub-bento-chip {
@@ -1087,13 +1117,14 @@ html, body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 12px;
+    padding: 9px 12px;
     border-radius: 10px;
     background: #f8fafc;
     border: 1px solid #f1f5f9;
-    margin-top: 8px;
+    margin-top: auto;
     position: relative;
     z-index: 2;
+    flex-shrink: 0;
     transition: all 0.25s ease;
 }
 
@@ -1209,6 +1240,19 @@ html, body {
     --card-tag-color: #3730a3;
     --card-tag-border: #c7d2fe;
     --card-footer-hover-bg: rgba(224, 231, 255, 0.45);
+}
+
+.is-sales {
+    --card-color: #059669;
+    --card-gradient: linear-gradient(135deg, #059669, #10b981);
+    --card-glow: rgba(5, 150, 105, 0.4);
+    --card-glow-soft: rgba(5, 150, 105, 0.16);
+    --card-glow-shadow: rgba(5, 150, 105, 0.15);
+    --card-border-soft: rgba(5, 150, 105, 0.3);
+    --card-tag-bg: #d1fae5;
+    --card-tag-color: #047857;
+    --card-tag-border: #a7f3d0;
+    --card-footer-hover-bg: rgba(209, 250, 229, 0.45);
 }
 
 /* Staggered entrance animations */
@@ -1576,35 +1620,45 @@ html, body {
 }
 
 /* ==========================================================================
-   RESPONSIVE DESIGN (TABLET & MOBILE)
+   RESPONSIVE DESIGN (DESKTOP, LAPTOP, TABLET & MOBILE)
    ========================================================================== */
-@media (max-width: 900px) {
-    html, body {
-        height: auto !important;
-        overflow-y: auto !important;
-    }
-    .hub-wrapper {
-        height: auto !important;
-        min-height: 100vh;
-        overflow: visible !important;
-    }
-    .hub-main-container {
-        height: auto !important;
-        overflow: visible !important;
-    }
+@media (max-width: 1400px) {
     .hub-cards-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        grid-template-rows: auto;
-        height: auto !important;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
     }
 }
 
-@media (max-width: 600px) {
+@media (max-width: 1040px) {
+    .hub-cards-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+    }
+    .hub-main-container {
+        padding: 20px 18px 28px;
+    }
+}
+
+@media (max-width: 680px) {
     .hub-cards-grid {
         grid-template-columns: 1fr;
+        gap: 14px;
     }
     .hub-modal-grid {
         grid-template-columns: 1fr;
+    }
+    .hub-main-container {
+        padding: 16px 14px 24px;
+    }
+    .hub-header-container {
+        padding: 0 12px;
+        gap: 8px;
+    }
+    .hub-header-center {
+        max-width: 180px;
+    }
+    .hub-search-kbd {
+        display: none;
     }
     .hub-header-right .hub-btn span,
     .hub-user-meta {

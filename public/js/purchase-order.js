@@ -72,6 +72,162 @@
     /* ==============================================================
      * LIST MODE HANDLING
      * ============================================================== */
+    function bindDocTypeDropdown(form) {
+        const dd = $('poDocTypeDropdown');
+        if (!dd) return;
+
+        const trigger = $('poDocTypeTrigger');
+        const menu = $('poDocTypeMenu');
+        const hiddenInput = $('poTypeInput');
+        const labelEl = $('poDocTypeLabel');
+        const badgeEl = $('poDocTypeBadge');
+        const countInfoEl = $('poDocTypeCountInfo');
+        const searchInput = $('poDocTypeSearch');
+        const searchClear = $('poDocTypeSearchClear');
+        const selectAllBtn = $('poDocTypeSelectAll');
+        const clearAllBtn = $('poDocTypeClearAll');
+        const applyBtn = $('poDocTypeApply');
+        const cancelBtn = $('poDocTypeCancel');
+        const items = Array.from(dd.querySelectorAll('.po-multi-item'));
+        const checkboxes = Array.from(dd.querySelectorAll('.po-multi-checkbox'));
+
+        let initialChecked = checkboxes.filter((c) => c.checked).map((c) => c.value);
+
+        function updateItemHighlight() {
+            items.forEach((item) => {
+                const cb = item.querySelector('.po-multi-checkbox');
+                item.classList.toggle('is-checked', !!cb?.checked);
+            });
+        }
+
+        function updateCountInfo() {
+            const checkedCount = checkboxes.filter((c) => c.checked).length;
+            if (countInfoEl) {
+                countInfoEl.textContent = `${checkedCount} of ${checkboxes.length} selected`;
+            }
+            updateItemHighlight();
+        }
+
+        function updateTriggerUI(selected) {
+            if (selected.length === 0) {
+                if (labelEl) labelEl.textContent = 'All Doc Types';
+                if (badgeEl) { badgeEl.style.display = 'none'; badgeEl.textContent = '0'; }
+            } else if (selected.length === 1) {
+                const checkedCb = checkboxes.find((c) => c.value === selected[0]);
+                const name = checkedCb ? checkedCb.closest('.po-multi-item')?.querySelector('.po-multi-item-name')?.textContent : selected[0];
+                if (labelEl) labelEl.textContent = name || selected[0];
+                if (badgeEl) { badgeEl.style.display = 'inline-flex'; badgeEl.textContent = '1'; }
+            } else {
+                if (labelEl) labelEl.textContent = `${selected.length} Doc Types Selected`;
+                if (badgeEl) { badgeEl.style.display = 'inline-flex'; badgeEl.textContent = String(selected.length); }
+            }
+        }
+
+        function openDropdown(open) {
+            dd.classList.toggle('is-open', open);
+            trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+            if (open) {
+                initialChecked = checkboxes.filter((c) => c.checked).map((c) => c.value);
+                if (searchInput) {
+                    searchInput.value = '';
+                    filterList('');
+                    setTimeout(() => searchInput.focus(), 60);
+                }
+            }
+        }
+
+        function filterList(q) {
+            const query = q.trim().toLowerCase();
+            if (searchClear) searchClear.style.display = query ? 'flex' : 'none';
+            items.forEach((item) => {
+                const code = (item.getAttribute('data-code') || '').toLowerCase();
+                const name = (item.getAttribute('data-name') || '').toLowerCase();
+                const match = !query || code.includes(query) || name.includes(query);
+                item.style.display = match ? 'flex' : 'none';
+            });
+        }
+
+        trigger?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openDropdown(!dd.classList.contains('is-open'));
+        });
+
+        menu?.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+
+        checkboxes.forEach((cb) => {
+            cb.addEventListener('change', updateCountInfo);
+        });
+
+        searchInput?.addEventListener('input', () => {
+            filterList(searchInput.value);
+        });
+
+        searchClear?.addEventListener('click', () => {
+            if (searchInput) searchInput.value = '';
+            filterList('');
+            searchInput?.focus();
+        });
+
+        selectAllBtn?.addEventListener('click', () => {
+            items.forEach((item) => {
+                if (item.style.display !== 'none') {
+                    const cb = item.querySelector('.po-multi-checkbox');
+                    if (cb) cb.checked = true;
+                }
+            });
+            updateCountInfo();
+        });
+
+        clearAllBtn?.addEventListener('click', () => {
+            items.forEach((item) => {
+                if (item.style.display !== 'none') {
+                    const cb = item.querySelector('.po-multi-checkbox');
+                    if (cb) cb.checked = false;
+                }
+            });
+            updateCountInfo();
+        });
+
+        cancelBtn?.addEventListener('click', () => {
+            checkboxes.forEach((c) => { c.checked = initialChecked.includes(c.value); });
+            updateCountInfo();
+            openDropdown(false);
+        });
+
+        applyBtn?.addEventListener('click', () => {
+            const selected = checkboxes.filter((c) => c.checked).map((c) => c.value);
+            const val = selected.join(',');
+            const oldVal = hiddenInput ? hiddenInput.value : '';
+            if (hiddenInput) hiddenInput.value = val;
+            updateTriggerUI(selected);
+            openDropdown(false);
+            if (val !== oldVal) {
+                showSpinner(true);
+                form.submit();
+            }
+        });
+
+        document.addEventListener('click', (e) => {
+            if (dd.classList.contains('is-open') && !dd.contains(e.target)) {
+                checkboxes.forEach((c) => { c.checked = initialChecked.includes(c.value); });
+                updateCountInfo();
+                openDropdown(false);
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && dd.classList.contains('is-open')) {
+                checkboxes.forEach((c) => { c.checked = initialChecked.includes(c.value); });
+                updateCountInfo();
+                openDropdown(false);
+            }
+        });
+
+        updateCountInfo();
+    }
+
     function bindListFilterControls() {
         const form = $('poFilterForm');
         if (!form) return;
@@ -96,6 +252,8 @@
                 }
             });
         }
+
+        bindDocTypeDropdown(form);
 
         form.addEventListener('submit', (e) => {
             const typedPo = P.cleanPo(poSearchInput ? poSearchInput.value : '');
@@ -670,6 +828,7 @@
             plant: cfg.plant || '',
             supplier: cfg.supplier || '',
             so: cfg.salesOrder || '',
+            po_type: cfg.poType || '',
             _: String(Date.now()),
         });
 

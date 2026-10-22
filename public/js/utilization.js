@@ -200,6 +200,261 @@
         return (text === '' || text === '-') ? '—' : text;
     }
 
+    function formatUnit(unit) {
+        if (!unit || unit === '-' || unit === '—') return '';
+        return String(unit).trim();
+    }
+
+    function initQtyHoverCard() {
+        let card = document.getElementById('rptQtyHoverCard');
+        if (!card) {
+            card = document.createElement('div');
+            card.id = 'rptQtyHoverCard';
+            card.className = 'qty-hover-card';
+            card.setAttribute('role', 'tooltip');
+            card.innerHTML = '<div class="qty-hover-arrow"></div><div class="qty-hover-card-content"></div>';
+            document.body.appendChild(card);
+        }
+
+        let activeCell = null;
+
+        function buildCardHtml(cell) {
+            const type = cell.getAttribute('data-hover-type');
+            const qty = cell.getAttribute('data-qty') || '—';
+            const unit = cell.getAttribute('data-unit') || '';
+            const convQty = cell.getAttribute('data-conv-qty') || '';
+            const convUnit = cell.getAttribute('data-conv-unit') || '';
+
+            let icon = 'fas fa-circle-info';
+            let title = 'Quantity Details';
+            let rowsHtml = '';
+
+            if (type === 'so') {
+                icon = 'fas fa-file-invoice';
+                title = 'Sales Order Quantity';
+                rowsHtml = `
+                    <div class="qty-hover-row">
+                        <span class="qty-hover-lbl">SO_QTY:</span>
+                        <span class="qty-hover-val">${escapeHtml(qty)}</span>
+                    </div>
+                    <div class="qty-hover-row">
+                        <span class="qty-hover-lbl">SO_UNIT:</span>
+                        <span class="qty-hover-val"><span class="qty-hover-tag">${escapeHtml(unit || '—')}</span></span>
+                    </div>
+                `;
+            } else if (type === 'bom') {
+                icon = 'fas fa-layer-group';
+                title = 'BOM Quantity';
+                rowsHtml = `
+                    <div class="qty-hover-row">
+                        <span class="qty-hover-lbl">BOM_QTY:</span>
+                        <span class="qty-hover-val">${escapeHtml(qty)}</span>
+                    </div>
+                    <div class="qty-hover-row">
+                        <span class="qty-hover-lbl">BOM_UNIT:</span>
+                        <span class="qty-hover-val"><span class="qty-hover-tag">${escapeHtml(unit || '—')}</span></span>
+                    </div>
+                `;
+            } else if (type === 'total_bom') {
+                icon = 'fas fa-calculator';
+                title = 'Total Add SO BOM Qty';
+                rowsHtml = `
+                    <div class="qty-hover-row">
+                        <span class="qty-hover-lbl">Total BOM:</span>
+                        <span class="qty-hover-val">${escapeHtml(qty)}</span>
+                    </div>
+                    <div class="qty-hover-row">
+                        <span class="qty-hover-lbl">BOM_UNIT:</span>
+                        <span class="qty-hover-val"><span class="qty-hover-tag">${escapeHtml(unit || '—')}</span></span>
+                    </div>
+                `;
+            } else if (type === 'plan') {
+                icon = 'fas fa-calendar-check';
+                title = 'Planned Quantity';
+                rowsHtml = `
+                    <div class="qty-hover-row">
+                        <span class="qty-hover-lbl">Planned:</span>
+                        <span class="qty-hover-val">${escapeHtml(qty)}</span>
+                    </div>
+                    <div class="qty-hover-row">
+                        <span class="qty-hover-lbl">BOM_UNIT:</span>
+                        <span class="qty-hover-val"><span class="qty-hover-tag">${escapeHtml(unit || '—')}</span></span>
+                    </div>
+                `;
+            } else if (type === 'prod') {
+                icon = 'fas fa-industry';
+                title = 'Production Quantity';
+                rowsHtml = `
+                    <div class="qty-hover-row">
+                        <span class="qty-hover-lbl">Production:</span>
+                        <span class="qty-hover-val">${escapeHtml(qty)}</span>
+                    </div>
+                    <div class="qty-hover-row">
+                        <span class="qty-hover-lbl">BOM_UNIT:</span>
+                        <span class="qty-hover-val"><span class="qty-hover-tag">${escapeHtml(unit || '—')}</span></span>
+                    </div>
+                `;
+            } else if (type === 'po') {
+                icon = 'fas fa-cart-shopping';
+                title = 'Purchase Order Quantity';
+                const hasConv = convQty && convQty !== '—' && convQty !== '-' && convQty !== '0';
+                rowsHtml = `
+                    <div class="qty-hover-row">
+                        <span class="qty-hover-lbl">PO_QTY:</span>
+                        <span class="qty-hover-val">${escapeHtml(qty)} ${unit ? `<span class="qty-hover-tag">${escapeHtml(unit)}</span>` : ''}</span>
+                    </div>
+                    ${unit ? `
+                    <div class="qty-hover-row">
+                        <span class="qty-hover-lbl">PO_UNIT:</span>
+                        <span class="qty-hover-val"><span class="qty-hover-tag">${escapeHtml(unit)}</span></span>
+                    </div>
+                    ` : ''}
+                    ${hasConv ? `
+                    <div class="qty-hover-divider"></div>
+                    <div class="qty-hover-row is-conv">
+                        <span class="qty-hover-lbl">PO_Conv_QTY:</span>
+                        <span class="qty-hover-val"><b>${escapeHtml(convQty)}</b> <span class="qty-hover-tag">${escapeHtml(convUnit || unit || '—')}</span></span>
+                    </div>
+                    <div class="qty-hover-row is-conv">
+                        <span class="qty-hover-lbl">PO_Conv_Unit:</span>
+                        <span class="qty-hover-val"><span class="qty-hover-tag">${escapeHtml(convUnit || unit || '—')}</span></span>
+                    </div>
+                    ` : (convUnit ? `
+                    <div class="qty-hover-row">
+                        <span class="qty-hover-lbl">PO_Conv_Unit:</span>
+                        <span class="qty-hover-val"><span class="qty-hover-tag">${escapeHtml(convUnit)}</span></span>
+                    </div>
+                    ` : '')}
+                `;
+            } else if (type === 'grn') {
+                icon = 'fas fa-boxes-stacked';
+                title = 'GRN Quantity';
+                const hasConv = convQty && convQty !== '—' && convQty !== '-' && convQty !== '0';
+                rowsHtml = `
+                    <div class="qty-hover-row">
+                        <span class="qty-hover-lbl">GRN_QTY:</span>
+                        <span class="qty-hover-val">${escapeHtml(qty)}</span>
+                    </div>
+                    <div class="qty-hover-row">
+                        <span class="qty-hover-lbl">GRN_UNIT:</span>
+                        <span class="qty-hover-val"><span class="qty-hover-tag">${escapeHtml(unit || '—')}</span></span>
+                    </div>
+                    ${hasConv ? `
+                    <div class="qty-hover-divider"></div>
+                    <div class="qty-hover-row is-conv">
+                        <span class="qty-hover-lbl">GRN_Conv_QTY:</span>
+                        <span class="qty-hover-val"><b>${escapeHtml(convQty)}</b> <span class="qty-hover-tag">${escapeHtml(convUnit || unit || '—')}</span></span>
+                    </div>
+                    <div class="qty-hover-row is-conv">
+                        <span class="qty-hover-lbl">GRN_Conv_Unit:</span>
+                        <span class="qty-hover-val"><span class="qty-hover-tag">${escapeHtml(convUnit || unit || '—')}</span></span>
+                    </div>
+                    ` : (convUnit ? `
+                    <div class="qty-hover-row">
+                        <span class="qty-hover-lbl">GRN_Conv_Unit:</span>
+                        <span class="qty-hover-val"><span class="qty-hover-tag">${escapeHtml(convUnit)}</span></span>
+                    </div>
+                    ` : '')}
+                `;
+            } else if (type === 'issue') {
+                icon = 'fas fa-share-from-square';
+                title = 'Issue Quantity';
+                rowsHtml = `
+                    <div class="qty-hover-row">
+                        <span class="qty-hover-lbl">Issue Qty:</span>
+                        <span class="qty-hover-val">${escapeHtml(qty)}</span>
+                    </div>
+                    <div class="qty-hover-row">
+                        <span class="qty-hover-lbl">GI_UNIT:</span>
+                        <span class="qty-hover-val"><span class="qty-hover-tag">${escapeHtml(unit || '—')}</span></span>
+                    </div>
+                `;
+            } else {
+                return '';
+            }
+
+            return `
+                <div class="qty-hover-card-hdr">
+                    <i class="${icon}"></i>
+                    <span>${escapeHtml(title)}</span>
+                </div>
+                <div class="qty-hover-card-body">
+                    ${rowsHtml}
+                </div>
+            `;
+        }
+
+        function positionCard(cell) {
+            const content = card.querySelector('.qty-hover-card-content');
+            const html = buildCardHtml(cell);
+            if (!html) {
+                hideCard();
+                return;
+            }
+            content.innerHTML = html;
+
+            card.style.display = 'block';
+            card.style.visibility = 'hidden';
+            const cardRect = card.getBoundingClientRect();
+            const rect = cell.getBoundingClientRect();
+
+            let top = rect.top - cardRect.height - 8;
+            let placeBelow = false;
+            if (top < 10) {
+                top = rect.bottom + 8;
+                placeBelow = true;
+            }
+
+            let left = rect.left + (rect.width / 2) - (cardRect.width / 2);
+            if (left < 10) left = 10;
+            if (left + cardRect.width > window.innerWidth - 10) {
+                left = window.innerWidth - cardRect.width - 10;
+            }
+
+            card.classList.toggle('pos-bottom', placeBelow);
+            card.classList.toggle('pos-top', !placeBelow);
+            card.style.top = `${Math.round(top)}px`;
+            card.style.left = `${Math.round(left)}px`;
+            card.style.visibility = 'visible';
+            card.classList.add('is-visible');
+
+            const arrow = card.querySelector('.qty-hover-arrow');
+            if (arrow) {
+                const arrowLeft = rect.left + (rect.width / 2) - left - 5;
+                arrow.style.left = `${Math.round(Math.max(14, Math.min(cardRect.width - 24, arrowLeft)))}px`;
+            }
+        }
+
+        function hideCard() {
+            activeCell = null;
+            card.classList.remove('is-visible');
+            card.style.display = 'none';
+        }
+
+        document.addEventListener('mouseover', function (e) {
+            const cell = e.target.closest('td[data-hover-type]');
+            if (!cell) return;
+            if (cell === activeCell) return;
+            activeCell = cell;
+            positionCard(cell);
+        });
+
+        document.addEventListener('mouseout', function (e) {
+            const cell = e.target.closest('td[data-hover-type]');
+            if (!cell) return;
+            const related = e.relatedTarget;
+            if (related && cell.contains(related)) return;
+            if (cell === activeCell) {
+                hideCard();
+            }
+        });
+
+        window.addEventListener('scroll', hideCard, { passive: true });
+        document.addEventListener('scroll', hideCard, { passive: true, capture: true });
+    }
+    initQtyHoverCard();
+
+
     // [{ so, qty }] — qty is null when SAP sends a plain SO number without "-quantity".
     function soListFromRow(row) {
         if (Array.isArray(row.grn_so_qty) && row.grn_so_qty.length) return row.grn_so_qty;
@@ -269,7 +524,44 @@
             const fabricSeasonHtml = isFabric ? [row.season, row.season_year].map(textCell).join('') : '';
             const attrHtml = isFabric ? [row.attribute1_text, row.attribute2_text, row.attribute3_text, row.colour].map(textCell).join('') : '';
             const trimMetaHtml = isTrims ? [row.colour, row.size1, row.size2].map(textCell).join('') : '';
-            const totalBomHtml = `<td class="num bom-qty-cell total-bom-cell"><span class="bom-val">${escapeHtml(dashCell(row.total_bom_qty))}</span></td>`;
+
+            const soUnit = formatUnit(row.so_unit) || formatUnit(row.bom_unit);
+            const bomUnit = formatUnit(row.bom_unit);
+            const poUnit = formatUnit(row.po_unit) || bomUnit;
+            const grnUnit = formatUnit(row.grn_unit) || bomUnit;
+            const giUnit = formatUnit(row.gi_unit) || bomUnit;
+            const poConvQty = parseFloat(String(row.po_conv_qty ?? 0).replace(/,/g, '')) || 0;
+            const poConvUnit = formatUnit(row.po_conv_unit);
+            const grnConvQty = parseFloat(String(row.grn_conv_qty ?? 0).replace(/,/g, '')) || 0;
+            const grnConvUnit = formatUnit(row.grn_conv_unit);
+
+            const soTitle = soUnit ? `SO_UNIT: ${soUnit}` : '';
+            const bomTitle = bomUnit ? `BOM_UNIT: ${bomUnit}` : '';
+
+            const poTitleParts = [];
+            if (dashCell(poConvQty) !== '—') poTitleParts.push(`PO_Conv_QTY: ${dashCell(poConvQty)}`);
+            if (poConvUnit) poTitleParts.push(`PO_Conv_Unit: ${poConvUnit}`);
+            else if (poUnit) poTitleParts.push(`PO_Conv_Unit: ${poUnit}`);
+            if (poUnit) poTitleParts.push(`PO_UNIT: ${poUnit}`);
+            const poTitle = poTitleParts.join('  ');
+
+            const grnTitleParts = [];
+            if (grnUnit) grnTitleParts.push(`GRN_UNIT: ${grnUnit}`);
+            if (dashCell(grnConvQty) !== '—') grnTitleParts.push(`GRN_Conv_QTY: ${dashCell(grnConvQty)}`);
+            if (grnConvUnit) grnTitleParts.push(`GRN_Conv_Unit: ${grnConvUnit}`);
+            const grnTitle = grnTitleParts.join('  ');
+
+            const giTitle = giUnit ? `GI_UNIT: ${giUnit}` : '';
+
+            const soCell = `<td class="num qty-cell" data-qty-type="so" data-hover-type="so" data-qty="${escapeHtml(dashCell(row.so_qty))}" data-unit="${escapeHtml(soUnit)}"><span class="qty-val">${escapeHtml(dashCell(row.so_qty))}</span></td>`;
+            const bomCell = `<td class="num bom-qty-cell" data-hover-type="bom" data-qty="${escapeHtml(dashCell(row.bom_qty))}" data-unit="${escapeHtml(bomUnit)}"><span class="bom-val">${escapeHtml(dashCell(row.bom_qty))}</span></td>`;
+            const totalBomCell = `<td class="num bom-qty-cell total-bom-cell" data-hover-type="total_bom" data-qty="${escapeHtml(dashCell(row.total_bom_qty))}" data-unit="${escapeHtml(bomUnit)}"><span class="bom-val">${escapeHtml(dashCell(row.total_bom_qty))}</span></td>`;
+            const planCell = `<td class="num qty-cell" data-qty-type="plan" data-hover-type="plan" data-qty="${escapeHtml(dashCell(row.planned_qty))}" data-unit="${escapeHtml(bomUnit)}"><span class="qty-val">${escapeHtml(dashCell(row.planned_qty))}</span></td>`;
+            const prodCell = `<td class="num qty-cell" data-qty-type="prod" data-hover-type="prod" data-qty="${escapeHtml(dashCell(row.production_qty))}" data-unit="${escapeHtml(bomUnit)}"><span class="qty-val">${escapeHtml(dashCell(row.production_qty))}</span></td>`;
+            const poCell = `<td class="num qty-cell" data-qty-type="po" data-hover-type="po" data-qty="${escapeHtml(dashCell(row.po_qty))}" data-unit="${escapeHtml(poUnit)}" data-conv-qty="${escapeHtml(dashCell(poConvQty))}" data-conv-unit="${escapeHtml(poConvUnit)}" data-base-unit="${escapeHtml(bomUnit)}"><span class="qty-val">${escapeHtml(dashCell(row.po_qty))}</span></td>`;
+            const grnCell = `<td class="num qty-cell" data-qty-type="grn" data-hover-type="grn" data-qty="${escapeHtml(dashCell(row.grn_qty))}" data-unit="${escapeHtml(grnUnit)}" data-conv-qty="${escapeHtml(dashCell(grnConvQty))}" data-conv-unit="${escapeHtml(grnConvUnit)}" data-base-unit="${escapeHtml(bomUnit)}"><span class="qty-val">${escapeHtml(dashCell(row.grn_qty))}</span></td>`;
+            const issueCell = `<td class="num qty-cell" data-qty-type="issue" data-hover-type="issue" data-qty="${escapeHtml(dashCell(row.issue_qty))}" data-unit="${escapeHtml(giUnit)}"><span class="qty-val">${escapeHtml(dashCell(row.issue_qty))}</span></td>`;
+
             // Cell order must match the <thead> in app/views/reports/material.php.
             tr.innerHTML = `
                 <td class="num sno">${i + 1}</td>
@@ -279,14 +571,14 @@
                 ${isFabric ? fabricSeasonHtml : matInfoHtml}
                 <td>${poHtml}</td>
                 <td>${escapeHtml(poItem)}</td>
-                <td class="num qty-cell" data-qty-type="so"><span class="qty-val">${escapeHtml(dashCell(row.so_qty))}</span></td>
-                <td class="num bom-qty-cell"><span class="bom-val">${escapeHtml(dashCell(row.bom_qty))}</span></td>
-                ${totalBomHtml}
-                <td class="num qty-cell" data-qty-type="plan"><span class="qty-val">${escapeHtml(dashCell(row.planned_qty))}</span></td>
-                <td class="num qty-cell" data-qty-type="prod"><span class="qty-val">${escapeHtml(dashCell(row.production_qty))}</span></td>
-                <td class="num qty-cell" data-qty-type="po"><span class="qty-val">${escapeHtml(dashCell(row.po_qty))}</span></td>
-                <td class="num qty-cell" data-qty-type="grn"><span class="qty-val">${escapeHtml(dashCell(row.grn_qty))}</span></td>
-                <td class="num qty-cell" data-qty-type="issue"><span class="qty-val">${escapeHtml(dashCell(row.issue_qty))}</span></td>
+                ${soCell}
+                ${bomCell}
+                ${totalBomCell}
+                ${planCell}
+                ${prodCell}
+                ${poCell}
+                ${grnCell}
+                ${issueCell}
                 <td class="grn-sos">${extraSo}</td>
                 ${isTrims ? trimMetaHtml : attrHtml}
             `;
@@ -358,7 +650,7 @@
     function loadLiveSapData(cfg) {
         showSpinner();
         const params = new URLSearchParams({
-            so: cfg.so,
+            so: cfg.so || '',
             q: cfg.search || '',
             _: String(Date.now()),
         });

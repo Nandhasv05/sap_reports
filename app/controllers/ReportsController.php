@@ -581,6 +581,13 @@ class ReportsController extends Controller
         $plant = strtoupper(trim((string) ($_GET['plant'] ?? '')));
         $supplier = trim((string) ($_GET['supplier'] ?? ''));
         $salesOrder = preg_replace('/\D/', '', (string) ($_GET['so'] ?? '')) ?? '';
+        $rawPoType = $_GET['po_type'] ?? $_GET['type'] ?? '';
+        if (is_array($rawPoType)) {
+            $poTypes = array_values(array_unique(array_filter(array_map('strtoupper', array_map('trim', $rawPoType)))));
+        } else {
+            $poTypes = array_values(array_unique(array_filter(array_map('strtoupper', array_map('trim', explode(',', (string) $rawPoType))))));
+        }
+        $poType = implode(',', $poTypes);
 
         $listColumns = SapPurchaseOrderService::listColumns();
         $detailColumns = SapPurchaseOrderService::columns();
@@ -597,6 +604,7 @@ class ReportsController extends Controller
                     'plant'    => $plant,
                     'supplier' => $supplier,
                     'so'       => $salesOrder,
+                    'po_type'  => $poTypes,
                 ]);
                 $this->sendPurchaseOrderListCsv($listData['records'] ?? []);
             }
@@ -622,6 +630,9 @@ class ReportsController extends Controller
             'plants'        => $service->plants(),
             'supplier'      => $supplier,
             'salesOrder'    => $salesOrder,
+            'poType'        => $poType,
+            'poTypes'       => $poTypes,
+            'docTypes'      => SapPurchaseOrderService::documentTypes(),
             'columns'       => $mode === 'detail' ? $detailColumns : $listColumns,
             'detailColumns' => $detailColumns,
             'listColumns'   => $listColumns,

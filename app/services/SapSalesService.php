@@ -2,8 +2,12 @@
 /*
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 03/09/2026
- * DESCRIPTION : SAP Sales service
-*/
+ * DESCRIPTION : Sap Sales Service for the sales dashboard
+ */
+
+/*
+ * Sap Sales Service class
+ */
 require_once base_path('app/core/SapODataClient.php');
 
 class SapSalesService
@@ -12,7 +16,7 @@ class SapSalesService
     private array $cfg;
 
     /*
-     * Construct the SAP Sales service
+     * Constructor
      */
     public function __construct(?SapODataClient $client = null)
     {
@@ -21,25 +25,262 @@ class SapSalesService
     }
 
     /*
-     * Build the dashboard payload
-     */
-    /*
-     * @return array{payload: array, error: ?string, row_count: int}
+     * Build dashboard payload method (lightweight view context)
      */
     public function buildDashboardPayload(int $year): array
     {
-        @ini_set('memory_limit', '256M');
+        return [
+            'payload'   => [
+                'currency_symbol' => (string) ($this->cfg['currency_symbol'] ?? '$'),
+            ],
+            'error'     => null,
+            'row_count' => 0,
+        ];
+    }
 
-        $summary = $this->readSummaryCache($year);
-        if ($summary !== null) {
-            return [
-                'payload'   => $summary,
-                'error'     => null,
-                'row_count' => (int) ($summary['row_count'] ?? 0),
+    /*
+     * Paginated records method (delegates directly to getSalesData)
+     */
+    public function paginatedRecords(int $year, int $page, int $perPage, string $search = '', string $from = '', string $to = ''): array
+    {
+        return $this->getSalesData([
+            'year'     => $year,
+            'page'     => $page,
+            'per_page' => $perPage,
+            'search'   => $search,
+            'from'     => $from,
+            'to'       => $to,
+        ]);
+    }
+
+    /**
+     * Get Sales Data directly from SAP on demand without file caching or storage.
+     *
+     * @param array $filters [from_date|from, to_date|to, search|q, page, per_page, year]
+     * @return array
+     */
+    public function getSalesData(array $filters = []): array
+    {
+        $page = max(1, (int) ($filters['page'] ?? 1));
+        $perPage = min(8000, max(1, (int) ($filters['per_page'] ?? 25)));
+        $search = trim((string) ($filters['search'] ?? $filters['q'] ?? ''));
+        $from = trim((string) ($filters['from_date'] ?? $filters['from'] ?? ''));
+        $to = trim((string) ($filters['to_date'] ?? $filters['to'] ?? ''));
+        $year = (int) ($filters['year'] ?? (int) date('Y'));
+
+        @ini_set('memory_limit', '512M');
+        @set_time_limit(45);
+
+        $idSearch = null;
+        $rawSearch = trim((string) ($filters['quotation'] ?? $filters['sales_order'] ?? $filters['so'] ?? $search));
+        if (preg_match('/^(?:(?:so|qt|quo(?:tation)?)\s*#?\s*)?(\d{1,10})$/i', $rawSearch, $m)) {
+            $orderDigits = $m[1];
+            $rawId = ltrim($orderDigits, '0');
+            $idSearch = [
+                'raw'    => $rawId === '' ? '0' : $rawId,
+                'padded' => str_pad($orderDigits, 10, '0', STR_PAD_LEFT),
             ];
         }
 
+        if ($from === '' && $to === '') {
+            $now = new DateTime();
+            $dayOfWeek = (int) $now->format('N');
+            $from = (clone $now)->modify('-' . ($dayOfWeek - 1) . ' days')->format('Y-m-d');
+            $to = (clone $now)->modify('+' . (7 - $dayOfWeek) . ' days')->format('Y-m-d');
+        } elseif ($from === '' && $to !== '') {
+            $from = date('Y-m-01', strtotime($to));
+        } elseif ($from !== '' && $to === '') {
+            $to = date('Y-m-d', strtotime($from . ' +6 days'));
+        }
+
+        $sapError = null;
+        $quoteRows = [];
+        $quoteMeta = [
+            'count'        => 0,
+            'sales_orders' => [],
+            'quotation'    => $idSearch['raw'] ?? '',
+        ];
+
+        try {
+            $quoteResult = $this->fetchQuotationHub($idSearch, $from, $to);
+            $quoteRows = $quoteResult['rows'] ?? [];
+            $sapError = $quoteResult['error'] ?? null;
+            $salesOrders = [];
+            foreach ($quoteRows as $row) {
+                foreach (['SalesOrder', 'FollowOnDocument'] as $key) {
+                    $val = ltrim(trim((string) ($row[$key] ?? '')), '0');
+                    if ($val !== '') {
+                        $salesOrders[$val] = true;
+                    }
+                }
+            }
+            $quoteMeta = [
+                'count'        => count($quoteRows),
+                'sales_orders' => array_keys($salesOrders),
+                'quotation'    => $idSearch['raw'] ?? '',
+            ];
+        } catch (Throwable $e) {
+            $sapError = $e->getMessage();
+        }
+
+        $records = [];
+        foreach ($quoteRows as $row) {
+            $mapped = $this->mapQuotationHubRow($row, $year);
+            if ($mapped !== null) {
+                $records[] = $mapped;
+            }
+        }
+
+        $textSearch = $idSearch !== null ? '' : $search;
+        $filtered = $this->filterRecords($records, $textSearch, $from, $to);
+        unset($records);
+
+        $total = count($filtered);
+        $pages = max(1, (int) ceil($total / $perPage));
+        $page = min(max(1, $page), $pages);
+        $offset = ($page - 1) * $perPage;
+        $slice = array_slice($filtered, $offset, $perPage);
+
+        $pageDetails = [];
+        foreach ($filtered as $r) {
+            if (!empty($r['is_header'])) {
+                continue;
+            }
+            $qKey = trim((string) ($r['quotation'] ?? ''));
+            $soKey = trim((string) ($r['sales_order'] ?? ''));
+            if ($qKey !== '' && $qKey !== '—') {
+                if (!isset($pageDetails[$qKey])) {
+                    $pageDetails[$qKey] = [];
+                }
+                $pageDetails[$qKey][] = $r;
+            }
+            if ($soKey !== '' && $soKey !== '—') {
+                if (!isset($pageDetails[$soKey])) {
+                    $pageDetails[$soKey] = [];
+                }
+                $pageDetails[$soKey][] = $r;
+            }
+        }
+        if ($pageDetails === []) {
+            $pageDetails = new \stdClass();
+        }
+
+        $net = 0.0;
+        $cost = 0.0;
+        $qty = 0.0;
+        $returnQty = 0.0;
+        foreach ($filtered as $r) {
+            $net += (float) ($r['net_amount'] ?? 0);
+            $cost += (float) ($r['cost'] ?? 0);
+            $lineQty = (float) ($r['qty'] ?? 0);
+            $qty += $lineQty;
+            if (!empty($r['is_return'])) {
+                $returnQty += $lineQty;
+            }
+        }
+        $orders = $total;
+        $materials = count(array_unique(array_filter(array_map(
+            static fn($r) => (string) ($r['customer'] ?? ''),
+            $filtered
+        ), static fn($m) => $m !== '' && $m !== '—')));
+
+        $summary = [
+            'net_sales'    => round($net, 2),
+            'cost_amount'  => round($cost, 2),
+            'lines'        => $total,
+            'orders'       => $orders,
+            'avg_line'     => $total > 0 ? round($net / $total, 2) : 0,
+            'avg_order'    => $orders > 0 ? round($net / $orders, 2) : 0,
+            'total_qty'    => round($qty, 3),
+            'return_rate'  => $qty > 0 ? round(($returnQty / $qty) * 100, 2) : 0,
+            'gross_margin' => $net > 0 ? round((($net - $cost) / $net) * 100, 2) : 0,
+            'materials'    => $materials,
+        ];
+
+        $charts = $this->buildChartsFromRecords($filtered);
+
+        if ($sapError !== null && $total === 0) {
+            $payload = [
+                'success' => false,
+                'message' => 'Unable to fetch sales data from SAP: ' . $sapError,
+                'error'   => $sapError,
+                'records' => [],
+                'total'   => 0,
+                'page'    => 1,
+                'pages'   => 1,
+                'per_page'=> $perPage,
+                'summary' => $summary,
+                'charts'  => $charts,
+                'meta'    => [
+                    'source' => 'SAP',
+                    'count'  => 0,
+                    'quotation_hub' => $quoteMeta,
+                ],
+                'data'    => [
+                    'records' => [],
+                    'detail_lines' => new \stdClass(),
+                    'total'   => 0,
+                    'page'    => 1,
+                    'pages'   => 1,
+                    'per_page'=> $perPage,
+                    'summary' => $summary,
+                    'charts'  => $charts,
+                    'meta'    => [
+                        'source' => 'SAP',
+                        'count'  => 0,
+                        'quotation_hub' => $quoteMeta,
+                    ],
+                ],
+            ];
+            return $payload;
+        }
+
+        $payload = [
+            'success'  => true,
+            'message'  => 'Sales data fetched successfully',
+            'records'  => $slice,
+            'detail_lines' => $pageDetails,
+            'total'    => $total,
+            'page'     => $page,
+            'pages'    => $pages,
+            'per_page' => $perPage,
+            'summary'  => $summary,
+            'charts'   => $charts,
+            'meta'     => [
+                'source' => 'SAP',
+                'count'  => $total,
+                'quotation_hub' => $quoteMeta,
+            ],
+            'data'     => [
+                'records'  => $slice,
+                'detail_lines' => $pageDetails,
+                'total'    => $total,
+                'page'     => $page,
+                'pages'    => $pages,
+                'per_page' => $perPage,
+                'summary'  => $summary,
+                'charts'   => $charts,
+                'meta'     => [
+                    'source' => 'SAP',
+                    'count'  => $total,
+                    'quotation_hub' => $quoteMeta,
+                ],
+            ],
+        ];
+        return $payload;
+    }
+
+    /*
+     * Fetch records for range method
+     */
+    private function fetchRecordsForRange(int $year, string $from, string $to): array
+    {
         $state = $this->createState($year);
+        $filter = sprintf(
+            "CreationDate ge datetime'%sT00:00:00' and CreationDate le datetime'%sT23:59:59'",
+            $from,
+            $to
+        );
 
         $result = $this->client->eachPage(function (array $batch) use (&$state, $year): void {
             foreach ($batch as $row) {
@@ -47,73 +288,34 @@ class SapSalesService
                     $this->ingestRow($row, $state, $year);
                 }
             }
-        });
+        }, ['$filter' => $filter]);
 
-        if ($state['row_count'] === 0) {
-            return [
-                'payload'   => [],
-                'error'     => $result['error'],
-                'row_count' => 0,
-            ];
+        return [
+            'records' => $state['records'],
+            'error'   => $state['row_count'] === 0 ? ($result['error'] ?? null) : null,
+        ];
+    }
+
+    /*
+     * Is narrow range method
+     */
+    private function isNarrowRange(string $from, string $to): bool
+    {
+        if ($from === '' || $to === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $from) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
+            return false;
+        }
+        try {
+            $start = new DateTimeImmutable($from);
+            $end = new DateTimeImmutable($to);
+        } catch (Exception $e) {
+            return false;
         }
 
-        $payload = $this->finalizeState($state, $year);
-        $this->writeSplitCache($year, $payload);
-
-        unset($payload['records'], $payload['items'], $payload['monthly_qty']);
-
-        return [
-            'payload'   => $payload,
-            'error'     => null,
-            'row_count' => $state['row_count'],
-        ];
+        return $end >= $start && $start->diff($end)->days <= 31;
     }
 
     /*
-     * Paginated, filtered records for the sales table API.
-     */
-    /*
-     * Paginated, filtered records for the sales table API.
-     */
-    public function paginatedRecords(int $year, int $page, int $perPage, string $search = '', string $from = '', string $to = ''): array
-    {
-        $this->buildDashboardPayload($year);
-
-        $records = $this->loadRecords($year);
-        $filtered = $this->filterRecords($records, $search, $from, $to);
-        $total = count($filtered);
-        $pages = max(1, (int) ceil($total / $perPage));
-        $page = min(max(1, $page), $pages);
-        $offset = ($page - 1) * $perPage;
-        $slice = array_slice($filtered, $offset, $perPage);
-
-        $net = array_sum(array_column($filtered, 'net_amount'));
-        $cost = array_sum(array_column($filtered, 'cost'));
-        $qty = array_sum(array_column($filtered, 'qty'));
-        $returnQty = array_sum(array_map(fn($r) => !empty($r['is_return']) ? ($r['qty'] ?? 0) : 0, $filtered));
-        $orders = count(array_unique(array_filter(array_column($filtered, 'sales_order'))));
-
-        return [
-            'records'  => $slice,
-            'total'    => $total,
-            'page'     => $page,
-            'pages'    => $pages,
-            'per_page' => $perPage,
-            'summary'  => [
-                'net_sales'    => $net,
-                'lines'        => $total,
-                'orders'       => $orders,
-                'avg_line'     => $total > 0 ? $net / $total : 0,
-                'total_qty'    => $qty,
-                'return_rate'  => $qty > 0 ? ($returnQty / $qty) * 100 : 0,
-                'gross_margin' => $net > 0 ? (($net - $cost) / $net) * 100 : 0,
-            ],
-            'charts'   => $this->buildChartsFromRecords($filtered),
-        ];
-    }
-
-    /*
-     * Build the charts from records
+     * Build charts from records method
      */
     public function buildChartsFromRecords(array $filtered): array
     {
@@ -122,6 +324,7 @@ class SapSalesService
         $byStyle = [];
         $byChannel = [];
         $byCategory = [];
+        $byPlant = [];
         $byStatus = [];
         $byOrder = [];
         $byCustomer = [];
@@ -131,21 +334,26 @@ class SapSalesService
 
         foreach ($filtered as $r) {
             $amount = (float) ($r['net_amount'] ?? 0);
+            $qtyVal = (float) ($r['qty'] ?? 0);
+            $weight = abs($amount) > 0.0000001 ? $amount : $qtyVal;
             $cost = (float) ($r['cost'] ?? 0);
             $dateKey = !empty($r['date_iso']) ? $r['date_iso'] : 'N/A';
-            $byDate[$dateKey] = ($byDate[$dateKey] ?? 0) + $amount;
+            $byDate[$dateKey] = ($byDate[$dateKey] ?? 0) + $weight;
 
             $div = (string) ($r['division'] ?? 'General');
-            $byDivision[$div] = ($byDivision[$div] ?? 0) + $amount;
+            $byDivision[$div] = ($byDivision[$div] ?? 0) + $weight;
 
-            $style = (string) ($r['style'] ?? 'Unknown');
+            $style = (string) ($r['material'] ?? $r['style'] ?? 'Unknown');
+            if ($style === '' || $style === '—') {
+                $style = (string) ($r['style'] ?? 'Unknown');
+            }
             if (strlen($style) > 28) {
                 $style = substr($style, 0, 26) . '…';
             }
-            $byStyle[$style] = ($byStyle[$style] ?? 0) + $amount;
+            $byStyle[$style] = ($byStyle[$style] ?? 0) + $weight;
 
             $ch = (string) ($r['channel'] ?? 'Direct');
-            $byChannel[$ch] = ($byChannel[$ch] ?? 0) + $amount;
+            $byChannel[$ch] = ($byChannel[$ch] ?? 0) + $weight;
 
             $cat = trim((string) ($r['item_category'] ?? ''));
             if ($cat === '' || $cat === '—') {
@@ -154,17 +362,22 @@ class SapSalesService
             if ($cat === '' || $cat === '—') {
                 $cat = 'Other';
             }
-            $byCategory[$cat] = ($byCategory[$cat] ?? 0) + $amount;
+            $byCategory[$cat] = ($byCategory[$cat] ?? 0) + $weight;
+
+            $plant = trim((string) ($r['plant'] ?? ''));
+            if ($plant !== '' && $plant !== '—') {
+                $byPlant[$plant] = ($byPlant[$plant] ?? 0) + $weight;
+            }
 
             $st = trim((string) ($r['status'] ?? 'Open'));
             if ($st === '') {
                 $st = 'Open';
             }
-            $byStatus[$st] = ($byStatus[$st] ?? 0) + $amount;
+            $byStatus[$st] = ($byStatus[$st] ?? 0) + $weight;
 
             $orderNo = trim((string) ($r['sales_order'] ?? ''));
             if ($orderNo !== '' && $orderNo !== '—') {
-                $byOrder['SO ' . $orderNo] = ($byOrder['SO ' . $orderNo] ?? 0) + $amount;
+                $byOrder['SO ' . $orderNo] = ($byOrder['SO ' . $orderNo] ?? 0) + $weight;
             }
 
             $cust = trim((string) ($r['customer_ref'] ?? ''));
@@ -172,12 +385,12 @@ class SapSalesService
                 if (strlen($cust) > 22) {
                     $cust = substr($cust, 0, 20) . '…';
                 }
-                $byCustomer[$cust] = ($byCustomer[$cust] ?? 0) + $amount;
+                $byCustomer[$cust] = ($byCustomer[$cust] ?? 0) + $weight;
             }
 
             $creator = trim((string) ($r['created_by'] ?? ''));
             if ($creator !== '' && $creator !== '—') {
-                $byCreator[$creator] = ($byCreator[$creator] ?? 0) + $amount;
+                $byCreator[$creator] = ($byCreator[$creator] ?? 0) + $weight;
             }
 
             $costSum += max(0, $cost);
@@ -206,7 +419,7 @@ class SapSalesService
         }
 
         $topStyles = array_slice($byStyle, 0, 6, true);
-        $mix = $this->pickMixChart($byCategory, $byStatus, $costSum, $profitSum);
+        $mix = $this->pickMixChart($byPlant, $byDivision, $byCategory, $byStatus, $costSum, $profitSum);
         $bar = $this->pickBarChart($byOrder, $byCustomer, $byCreator, $byChannel);
 
         return [
@@ -216,25 +429,51 @@ class SapSalesService
             ],
             'division'   => $mix,
             'mix'        => $mix,
+            'plants'     => $this->chartSeries($byPlant, 8),
+            'divisions'  => $this->chartSeries($byDivision, 8),
+            'statuses'   => $this->chartSeries($byStatus, 8),
+            'categories' => $this->chartSeries($byCategory, 8),
             'top_styles' => [
                 'labels' => array_keys($topStyles),
-                'values' => array_values($topStyles),
+                'values' => array_map(static fn($v) => round((float) $v, 2), array_values($topStyles)),
             ],
             'channels'   => $bar,
             'bar'        => $bar,
         ];
     }
 
-    /*
+    /**
      * Prefer a mix with multiple slices so the donut is not a single 100% ring.
      */
     /*
-     * Prefer a mix with multiple slices so the donut is not a single 100% ring.
+     * Pick mix chart method
      */
-    private function pickMixChart(array $byCategory, array $byStatus, float $costSum, float $profitSum): array
+    private function pickMixChart(array $byPlant, array $byDivision, array $byCategory, array $byStatus, float $costSum, float $profitSum): array
     {
+        arsort($byPlant);
+        arsort($byDivision);
         arsort($byCategory);
         arsort($byStatus);
+
+        if (count($byPlant) >= 2) {
+            $slice = array_slice($byPlant, 0, 6, true);
+            return [
+                'title'    => 'Plant Mix',
+                'subtitle' => 'Net amount by plant',
+                'labels'   => array_keys($slice),
+                'values'   => array_map(static fn($v) => round((float) $v, 2), array_values($slice)),
+            ];
+        }
+
+        if (count($byDivision) >= 2) {
+            $slice = array_slice($byDivision, 0, 6, true);
+            return [
+                'title'    => 'Division Mix',
+                'subtitle' => 'Net amount by division',
+                'labels'   => array_keys($slice),
+                'values'   => array_map(static fn($v) => round((float) $v, 2), array_values($slice)),
+            ];
+        }
 
         if (count($byCategory) >= 2) {
             $slice = array_slice($byCategory, 0, 6, true);
@@ -275,10 +514,27 @@ class SapSalesService
     }
 
     /*
+     * Chart series method
+     */
+    private function chartSeries(array $map, int $limit = 8): array
+    {
+        arsort($map);
+        $slice = array_slice($map, 0, $limit, true);
+        if ($slice === []) {
+            return ['labels' => ['No data'], 'values' => [0]];
+        }
+
+        return [
+            'labels' => array_keys($slice),
+            'values' => array_map(static fn($v) => round((float) $v, 2), array_values($slice)),
+        ];
+    }
+
+    /**
      * Prefer a bar chart with several columns instead of a single district bar.
      */
     /*
-     * Prefer a bar chart with several columns instead of a single district bar.
+     * Pick bar chart method
      */
     private function pickBarChart(array $byOrder, array $byCustomer, array $byCreator, array $byChannel): array
     {
@@ -286,11 +542,11 @@ class SapSalesService
             [$byOrder, 'Top Sales Orders', 'Net amount by sales order'],
             [$byCustomer, 'Top Customers / PO', 'Net amount by customer ref'],
             [$byCreator, 'Sales by Creator', 'Net amount by created-by user'],
-            [$byChannel, 'Sales by Channel', 'Net amount by channel'],
+            [$byChannel, 'Sales by Plant', 'Net amount by plant'],
         ];
 
         foreach ($candidates as [$map, $title, $subtitle]) {
-            if (count($map) < 2 && $title !== 'Sales by Channel') {
+            if (count($map) < 2 && $title !== 'Sales by Plant') {
                 continue;
             }
             arsort($map);
@@ -315,15 +571,24 @@ class SapSalesService
     }
 
     /*
-     * Filter the records
+     * Filter records method
      */
     private function filterRecords(array $records, string $search, string $from, string $to): array
     {
         $search = strtolower(trim($search));
+        $digits = '';
+        if (preg_match('/(\d+)/', $search, $m)) {
+            $digits = ltrim($m[1], '0');
+        }
 
-        return array_values(array_filter($records, function (array $r) use ($search, $from, $to) {
-            if ($from !== '' && $to !== '' && !empty($r['date_iso'])) {
-                if ($r['date_iso'] < $from || $r['date_iso'] > $to) {
+        return array_values(array_filter($records, function (array $r) use ($search, $digits, $from, $to) {
+            if ($from !== '' && $to !== '') {
+                $iso = trim((string) ($r['date_iso'] ?? $r['date'] ?? ''));
+                if (preg_match('/^\d{2}\s+\w{3}\s+\d{4}$/', $iso)) {
+                    $parsed = date_create($iso);
+                    $iso = $parsed ? $parsed->format('Y-m-d') : '';
+                }
+                if ($iso === '' || $iso < $from || $iso > $to) {
                     return false;
                 }
             }
@@ -332,40 +597,39 @@ class SapSalesService
                 return true;
             }
 
+            $orderNo = strtolower((string) ($r['sales_order'] ?? ''));
+            $cleanOrder = ltrim($orderNo, '0');
+            if ($digits !== '' && ($orderNo === $digits || $cleanOrder === $digits || str_contains($cleanOrder, $digits))) {
+                return true;
+            }
+
             $hay = strtolower(implode(' ', [
+                $r['quotation'] ?? '',
                 $r['sales_order'] ?? '',
                 $r['line_item'] ?? '',
                 $r['style'] ?? '',
                 $r['material'] ?? '',
+                $r['plant'] ?? '',
+                $r['shipping_point'] ?? '',
+                $r['material_group'] ?? '',
                 $r['division'] ?? '',
+                $r['customer'] ?? '',
                 $r['customer_ref'] ?? '',
                 $r['channel'] ?? '',
                 $r['status'] ?? '',
                 $r['created_by'] ?? '',
+                $r['item_category'] ?? '',
             ]));
 
-            return str_contains($hay, $search);
+            return str_contains($hay, $search) || ($digits !== '' && str_contains($hay, $digits));
         }));
     }
 
-    /*
-     * Load the records
-     */
-    private function loadRecords(int $year): array
+    private function isTagCategory(array $row): bool
     {
-        $file = $this->recordsCachePath($year);
-        if (!is_file($file)) {
-            return [];
-        }
-
-        $data = json_decode((string) file_get_contents($file), true);
-
-        return is_array($data) ? $data : [];
+        return strtoupper(trim((string) ($row['item_category'] ?? ''))) === 'TAG';
     }
 
-    /*
-     * Create the state
-     */
     private function createState(int $year): array
     {
         $monthly = [];
@@ -391,9 +655,6 @@ class SapSalesService
         ];
     }
 
-    /*
-     * Ingest the row
-     */
     private function ingestRow(array $row, array &$state, int $year): void
     {
         $state['row_count']++;
@@ -441,7 +702,7 @@ class SapSalesService
         $cost = $this->number($this->field($row, ['Costamount'], 0));
         $isReturn = $this->isReturnItem($row);
 
-        $customer = (string) $this->field($row, ['Purchaseorderbycustomer'], '');
+        $customer = (string) $this->field($row, ['Purchaseorderbycustomer', 'Materialbycustomer'], '');
         if ($customer === '') {
             $group = (string) $this->field($row, ['Customergroup'], '');
             $customer = $group !== '' ? 'Customer Group ' . $group : ('SO ' . $orderNo);
@@ -537,9 +798,6 @@ class SapSalesService
         );
     }
 
-    /*
-     * Build the record
-     */
     private function buildRecord(
         array $row,
         string $orderNo,
@@ -558,7 +816,7 @@ class SapSalesService
         bool $isReturn,
         ?DateTime $date
     ): array {
-        $currency = (string) $this->field($row, ['Transactioncurrency'], 'INR');
+        $currency = (string) $this->field($row, ['Transactioncurrency'], (string) ($this->cfg['currency'] ?? 'USD'));
         $dateStr = $date ? $date->format('d M Y') : '—';
         $itemCategory = (string) $this->field($row, ['Salesorderitemcategory'], '');
         $itemType = (string) $this->field($row, ['Salesorderitemtype'], '');
@@ -567,9 +825,55 @@ class SapSalesService
         $createdBy = (string) $this->field($row, ['Createdbyuser'], '');
         $incoterms = (string) $this->field($row, ['Incotermsclassification'], '');
         $paymentTerms = (string) $this->field($row, ['Customerpaymentterms'], '');
-        $deliveryStatus = (string) $this->field($row, ['Deliverystatus'], '');
+        $deliveryStatus = (string) $this->field($row, ['Deliverystatus', 'Totaldeliverystatus'], '');
+        $plant = (string) $this->field($row, ['Plant'], '');
+        $shippingPoint = (string) $this->field($row, ['Shippingpoint'], '');
+        $orderUnit = (string) $this->field($row, ['Orderquantityunit', 'Baseunit'], '');
+        $materialGroup = (string) $this->field($row, ['Materialgroup'], '');
         $billingDate = $this->formatDateField($row, 'Billingdocumentdate');
         $pricingDate = $this->formatDateField($row, 'Pricingdate');
+
+        // Extended ZI_SalesApi_HUB entity fields
+        $storageLocation = (string) $this->field($row, ['Storagelocation'], '');
+        $batch = (string) $this->field($row, ['Batch'], '');
+        $matByCust = (string) $this->field($row, ['Materialbycustomer'], '');
+        $origMat = (string) $this->field($row, ['Originallyrequestedmaterial'], '');
+        $productHierarchy = (string) $this->field($row, ['Producthierarchynode'], '');
+        $requestedQty = $this->number($this->field($row, ['Requestedquantity'], 0));
+        $requestedUnit = (string) $this->field($row, ['Requestedquantityunit'], '');
+        $targetQty = $this->number($this->field($row, ['Targetquantity'], 0));
+        $targetUnit = (string) $this->field($row, ['Targetquantityunit'], '');
+        $confdDelivQty = $this->number($this->field($row, ['Confddelivqtyinorderqtyunit'], 0));
+        $confdBaseQty = $this->number($this->field($row, ['Confddeliveryqtyinbaseunit'], 0));
+        $baseUnit = (string) $this->field($row, ['Baseunit'], '');
+        $netPriceAmount = $this->number($this->field($row, ['Netpriceamount'], 0));
+        $netPriceQty = $this->number($this->field($row, ['Netpricequantity'], 1));
+        $netPriceUnit = (string) $this->field($row, ['Netpricequantityunit'], '');
+        $taxAmount = $this->number($this->field($row, ['Taxamount'], 0));
+        $shippingType = (string) $this->field($row, ['Shippingtype'], '');
+        $deliveryPriority = (string) $this->field($row, ['Deliverypriority'], '');
+        $route = (string) $this->field($row, ['Route'], '');
+        $delivDateQtyFixed = (string) $this->field($row, ['Deliverydatequantityisfixed'], '');
+        $partialDelivAllowed = (string) $this->field($row, ['Partialdeliveryisallowed'], '');
+        $itemIsDelivRelevant = (string) $this->field($row, ['Itemisdeliveryrelevant'], '');
+        $itemIsBillRelevant = (string) $this->field($row, ['Itemisbillingrelevant'], '');
+        $billingBlockReason = (string) $this->field($row, ['Itembillingblockreason'], '');
+        $billingPlan = (string) $this->field($row, ['Billingplan'], '');
+        $sdProcessStatus = (string) $this->field($row, ['Sdprocessstatus'], '');
+        $delivConfStatus = (string) $this->field($row, ['Deliveryconfirmationstatus'], '');
+        $purchConfStatus = (string) $this->field($row, ['Purchaseconfirmationstatus'], '');
+        $totalDelivStatus = (string) $this->field($row, ['Totaldeliverystatus'], '');
+        $delivBlockStatus = (string) $this->field($row, ['Deliveryblockstatus'], '');
+        $orderRelBillingStatus = (string) $this->field($row, ['Orderrelatedbillingstatus'], '');
+        $billingBlockStatus = (string) $this->field($row, ['Billingblockstatus'], '');
+        $itemGenIncompStatus = (string) $this->field($row, ['Itemgeneralincompletionstatus'], '');
+        $itemBillIncompStatus = (string) $this->field($row, ['Itembillingincompletionstatus'], '');
+        $pricingIncompStatus = (string) $this->field($row, ['Pricingincompletionstatus'], '');
+        $itemDelivIncompStatus = (string) $this->field($row, ['Itemdeliveryincompletionstatus'], '');
+        $sdDocRejectStatus = (string) $this->field($row, ['Sddocumentrejectionstatus'], '');
+        $totalSdDocRefStatus = (string) $this->field($row, ['Totalsddocreferencestatus'], '');
+        $creationTime = (string) $this->field($row, ['Creationtime'], '');
+        $lastChangeDate = $this->formatDateField($row, 'Lastchangedate');
 
         $id = ($orderNo !== '' ? $orderNo : 'NA') . '-' . ($lineNo !== '' ? $lineNo : count($row));
 
@@ -581,10 +885,10 @@ class SapSalesService
             'material'      => $material !== '' ? $material : '—',
             'division'      => $division,
             'division_code' => $divisionCode,
-            'qty'           => $qty,
-            'unit_price'    => $price,
-            'net_amount'    => $amount,
-            'cost'          => $cost,
+            'qty'           => round($qty, 3),
+            'unit_price'    => round($price, 2),
+            'net_amount'    => round($amount, 2),
+            'cost'          => round($cost, 2),
             'currency'      => $currency,
             'customer_ref'  => $customer,
             'channel'       => $channel,
@@ -602,12 +906,55 @@ class SapSalesService
             'delivery_status' => $deliveryStatus !== '' ? $deliveryStatus : '—',
             'billing_date'  => $billingDate,
             'pricing_date'  => $pricingDate,
+            'plant'         => $plant !== '' ? $plant : '—',
+            'shipping_point'=> $shippingPoint !== '' ? $shippingPoint : '—',
+            'material_group'=> $materialGroup !== '' ? $materialGroup : '—',
+            'unit'          => $orderUnit !== '' ? $orderUnit : 'EA',
+
+            // Entity ZI_SalesApi_HUB fields
+            'storage_location' => $storageLocation !== '' ? $storageLocation : '—',
+            'batch'            => $batch !== '' ? $batch : '—',
+            'material_by_customer' => $matByCust !== '' ? $matByCust : '—',
+            'originally_requested_material' => $origMat !== '' ? $origMat : '—',
+            'product_hierarchy_node' => $productHierarchy !== '' ? $productHierarchy : '—',
+            'requested_quantity' => round($requestedQty, 3),
+            'requested_quantity_unit' => $requestedUnit !== '' ? $requestedUnit : $orderUnit,
+            'target_quantity' => round($targetQty, 3),
+            'target_quantity_unit' => $targetUnit !== '' ? $targetUnit : $orderUnit,
+            'confd_deliv_qty' => round($confdDelivQty, 3),
+            'confd_delivery_qty_in_base_unit' => round($confdBaseQty, 3),
+            'base_unit'        => $baseUnit !== '' ? $baseUnit : $orderUnit,
+            'net_price_amount' => round($netPriceAmount, 2),
+            'net_price_quantity' => round($netPriceQty, 2),
+            'net_price_quantity_unit' => $netPriceUnit !== '' ? $netPriceUnit : $orderUnit,
+            'tax_amount'       => round($taxAmount, 2),
+            'shipping_type'    => $shippingType !== '' ? $shippingType : '—',
+            'delivery_priority'=> $deliveryPriority !== '' ? $deliveryPriority : '—',
+            'route'            => $route !== '' ? $route : '—',
+            'delivery_date_quantity_is_fixed' => $delivDateQtyFixed,
+            'partial_delivery_is_allowed' => $partialDelivAllowed,
+            'item_is_delivery_relevant' => $itemIsDelivRelevant,
+            'item_is_billing_relevant' => $itemIsBillRelevant,
+            'item_billing_block_reason' => $billingBlockReason !== '' ? $billingBlockReason : '—',
+            'billing_plan'     => $billingPlan !== '' ? $billingPlan : '—',
+            'sd_process_status'=> $sdProcessStatus !== '' ? $sdProcessStatus : '—',
+            'delivery_confirmation_status' => $delivConfStatus !== '' ? $delivConfStatus : '—',
+            'purchase_confirmation_status' => $purchConfStatus !== '' ? $purchConfStatus : '—',
+            'total_delivery_status' => $totalDelivStatus !== '' ? $totalDelivStatus : '—',
+            'delivery_block_status' => $delivBlockStatus !== '' ? $delivBlockStatus : '—',
+            'order_related_billing_status' => $orderRelBillingStatus !== '' ? $orderRelBillingStatus : '—',
+            'billing_block_status' => $billingBlockStatus !== '' ? $billingBlockStatus : '—',
+            'item_general_incompletion_status' => $itemGenIncompStatus !== '' ? $itemGenIncompStatus : '—',
+            'item_billing_incompletion_status' => $itemBillIncompStatus !== '' ? $itemBillIncompStatus : '—',
+            'pricing_incompletion_status' => $pricingIncompStatus !== '' ? $pricingIncompStatus : '—',
+            'item_delivery_incompletion_status' => $itemDelivIncompStatus !== '' ? $itemDelivIncompStatus : '—',
+            'sd_document_rejection_status' => $sdDocRejectStatus !== '' ? $sdDocRejectStatus : '—',
+            'total_sd_doc_reference_status' => $totalSdDocRefStatus !== '' ? $totalSdDocRefStatus : '—',
+            'creation_time'    => $creationTime !== '' ? $creationTime : '—',
+            'last_change_date' => $lastChangeDate,
         ];
     }
 
-    /*
-     * Format the date field
-     */
     private function formatDateField(array $row, string $field): string
     {
         $date = $this->parseDate($this->field($row, [$field], null));
@@ -615,9 +962,6 @@ class SapSalesService
         return $date ? $date->format('d M Y') : '—';
     }
 
-    /*
-     * Finalize the state
-     */
     private function finalizeState(array $state, int $year): array
     {
         $monthly = $state['monthly'];
@@ -639,7 +983,7 @@ class SapSalesService
         $highlights = $this->buildHighlights($items, $channelList, count($orders), $netSales);
         $alerts = $this->buildAlerts($items, $state['row_count'], count($orders));
 
-        $symbol = (string) ($this->cfg['currency_symbol'] ?? '₹');
+        $symbol = (string) ($this->cfg['currency_symbol'] ?? '$');
 
         return [
             'row_count'       => $state['row_count'],
@@ -656,32 +1000,29 @@ class SapSalesService
             ],
             'charts'          => [
                 'main'   => ['icon' => 'show_chart', 'title' => 'Net Sales Trend'],
-                'pie'    => ['icon' => 'donut_large', 'title' => 'Division Share'],
-                'bar'    => ['icon' => 'star', 'title' => 'Top Styles / PO Lines'],
+                'pie'    => ['icon' => 'donut_large', 'title' => 'Plant / Division Mix'],
+                'bar'    => ['icon' => 'star', 'title' => 'Top Materials'],
                 'orders' => ['icon' => 'shopping_cart', 'title' => 'Sales Orders by Period'],
             ],
             'recent'          => [
                 'title'   => 'Recent SAP Sales Orders',
                 'icon'    => 'receipt_long',
-                'headers' => ['Sales Order', 'Style / PO Ref', 'Sales District', 'Lines', 'Net Amount', 'Status'],
+                'headers' => ['Sales Order', 'Material', 'Plant', 'Lines', 'Net Amount', 'Status'],
                 'rows'    => $recentRows,
             ],
             'table'           => [
                 'title'   => 'Sales Order Items',
                 'icon'    => 'inventory_2',
-                'headers' => ['Style / Product', 'Division', 'Unit Price', 'Qty', 'Net Amount', 'Material / Line'],
+                'headers' => ['Material', 'Plant / Division', 'Unit Price', 'Qty', 'Net Amount', 'Category'],
             ],
             'highlights'      => $highlights,
             'alerts'          => $alerts,
-            'data_source'     => 'SAP ZI_SaleOrderItems',
-            'currency'        => (string) ($this->cfg['currency'] ?? 'INR'),
+            'data_source'     => 'SAP ZI_SalesApi_HUB',
+            'currency'        => (string) ($this->cfg['currency'] ?? 'USD'),
             'currency_symbol' => $symbol,
         ];
     }
 
-    /*
-     * Get the division label
-     */
     private function divisionLabel(string $code, array $row): string
     {
         $labels = $this->cfg['division_labels'] ?? [];
@@ -697,11 +1038,13 @@ class SapSalesService
         return $code !== '' ? 'Division ' . $code : 'General';
     }
 
-    /*
-     * Get the channel label
-     */
     private function channelLabel(array $row): string
     {
+        $plant = (string) $this->field($row, ['Plant'], '');
+        if ($plant !== '') {
+            return 'Plant ' . $plant;
+        }
+
         $district = (string) $this->field($row, ['Salesdistrict'], '');
         if ($district !== '' && $district !== '000000') {
             return 'District ' . ltrim($district, '0');
@@ -720,9 +1063,6 @@ class SapSalesService
         return 'Direct';
     }
 
-    /*
-     * Get the status label
-     */
     private function statusLabel(array $row): string
     {
         $labels = $this->cfg['status_labels'] ?? [];
@@ -731,85 +1071,16 @@ class SapSalesService
         return $labels[$code] ?? $code;
     }
 
-    /*
-     * Check if the item is a return item
-     */
     private function isReturnItem(array $row): bool
     {
-        if (!array_key_exists('Isreturnsitem', $this->normalizeRow($row))) {
+        $value = $this->field($row, ['Isreturnsitem'], null);
+        if ($value === null || $value === '') {
             return false;
         }
-
-        $value = $this->normalizeRow($row)['isreturnsitem'];
 
         return $value === true || $value === 1 || $value === 'X' || $value === 'true';
     }
 
-    /*
-     * Read the summary cache
-     */
-    private function readSummaryCache(int $year): ?array
-    {
-        $ttl = (int) ($this->cfg['cache_ttl'] ?? 0);
-        if ($ttl <= 0) {
-            return null;
-        }
-
-        $file = $this->summaryCachePath($year);
-        if (!is_file($file) || filemtime($file) + $ttl < time()) {
-            return null;
-        }
-
-        $data = json_decode((string) file_get_contents($file), true);
-
-        return is_array($data) ? $data : null;
-    }
-
-    /*
-     * Write the split cache
-     */
-    private function writeSplitCache(int $year, array $payload): void
-    {
-        $ttl = (int) ($this->cfg['cache_ttl'] ?? 0);
-        if ($ttl <= 0) {
-            return;
-        }
-
-        $dir = base_path('storage/cache');
-        if (!is_dir($dir)) {
-            @mkdir($dir, 0755, true);
-        }
-
-        $records = $payload['records'] ?? [];
-        unset($payload['records'], $payload['items'], $payload['monthly_qty']);
-
-        file_put_contents($this->recordsCachePath($year), json_encode($records));
-        file_put_contents($this->summaryCachePath($year), json_encode($payload));
-    }
-
-    /*
-     * Get the summary cache path
-     */
-    private function summaryCachePath(int $year): string
-    {
-        $version = (int) ($this->cfg['cache_version'] ?? 1);
-
-        return base_path('storage/cache/sap_sales_summary_v' . $version . '_' . $year . '.json');
-    }
-
-    /*
-     * Get the records cache path
-     */
-    private function recordsCachePath(int $year): string
-    {
-        $version = (int) ($this->cfg['cache_version'] ?? 1);
-
-        return base_path('storage/cache/sap_sales_records_v' . $version . '_' . $year . '.json');
-    }
-
-    /*
-     * Build the channel shares
-     */
     private function buildChannelShares(array $channels): array
     {
         if ($channels === []) {
@@ -830,9 +1101,6 @@ class SapSalesService
         return $list;
     }
 
-    /*
-     * Build the recent orders
-     */
     private function buildRecentOrders(array $orders): array
     {
         uasort($orders, function ($a, $b) {
@@ -845,7 +1113,7 @@ class SapSalesService
             return strcmp($b['order'], $a['order']);
         });
 
-        $symbol = (string) ($this->cfg['currency_symbol'] ?? '₹');
+        $symbol = (string) ($this->cfg['currency_symbol'] ?? '$');
         $rows = [];
 
         foreach (array_slice($orders, 0, 8, true) as $order) {
@@ -862,45 +1130,39 @@ class SapSalesService
         return $rows;
     }
 
-    /*
-     * Build the highlights
-     */
     private function buildHighlights(array $items, array $channels, int $orderCount, float $netSales): array
     {
         $topItem = $items[0] ?? null;
         $topChannel = $channels[0]['name'] ?? 'Direct';
         $topShare = $channels[0]['share'] ?? 0;
-        $symbol = (string) ($this->cfg['currency_symbol'] ?? '₹');
+        $symbol = (string) ($this->cfg['currency_symbol'] ?? '$');
 
         return [
             [
                 'icon'  => 'cloud_done',
-                'title' => 'SAP ZI_SaleOrderItems',
+                'title' => 'SAP ZI_SalesApi_HUB',
                 'text'  => number_format($orderCount) . ' sales orders in the current extract',
             ],
             [
                 'icon'  => 'trending_up',
                 'title' => 'Net sales',
-                'text'  => $symbol . number_format($netSales, 0) . ' total net amount (INR)',
+                'text'  => $symbol . number_format($netSales, 0) . ' total net amount (USD)',
             ],
             [
                 'icon'  => 'workspace_premium',
-                'title' => 'Top style / PO line',
+                'title' => 'Top material',
                 'text'  => $topItem
-                    ? ($topItem['name'] . ' — ' . $symbol . number_format($topItem['revenue'], 0))
-                    : 'No product lines available',
+                    ? ($topItem['material'] . ' — ' . $symbol . number_format($topItem['revenue'], 0))
+                    : 'No material lines available',
             ],
             [
-                'icon'  => 'storefront',
-                'title' => 'Top sales district',
+                'icon'  => 'factory',
+                'title' => 'Top plant',
                 'text'  => $topChannel . ' contributes ' . $topShare . '% of net amount',
             ],
         ];
     }
 
-    /*
-     * Build the alerts
-     */
     private function buildAlerts(array $items, int $rowCount, int $orderCount): array
     {
         $alerts = [
@@ -913,16 +1175,13 @@ class SapSalesService
         if (count($items) > 0) {
             $alerts[] = [
                 'type' => 'info',
-                'text' => count($items) . ' unique style / material lines grouped from Purchaseorderbycustomer & Material',
+                'text' => count($items) . ' unique materials grouped from Material / OriginallyRequestedMaterial',
             ];
         }
 
         return $alerts;
     }
 
-    /*
-     * Normalize the row
-     */
     private function normalizeRow(array $row): array
     {
         $normalized = [];
@@ -935,9 +1194,6 @@ class SapSalesService
         return $normalized;
     }
 
-    /*
-     * Get the field
-     */
     private function field(array $row, array $keys, $default = null)
     {
         $normalized = $this->normalizeRow($row);
@@ -959,9 +1215,6 @@ class SapSalesService
         return $default;
     }
 
-    /*
-     * Get the number
-     */
     private function number($value): float
     {
         if (is_numeric($value)) {
@@ -978,9 +1231,6 @@ class SapSalesService
         return 0.0;
     }
 
-    /*
-     * Parse the date
-     */
     private function parseDate($value): ?DateTime
     {
         if ($value === null || $value === '') {
@@ -1007,5 +1257,351 @@ class SapSalesService
         } catch (Exception $e) {
             return null;
         }
+    }
+
+    /**
+     * Call ZI_QuotationSalesOrder_HUB (quotation first).
+     */
+    private function fetchQuotationHub(?array $idSearch, string $from, string $to): array
+    {
+        $service = (string) ($this->cfg['quotation_service']
+            ?? '/sap/opu/odata/sap/ZI_QUOTATIONSALESORDER_HUB_CDS/ZI_QuotationSalesOrder_HUB');
+
+        if ($idSearch !== null) {
+            $raw = str_replace("'", "''", (string) $idSearch['raw']);
+            $padded = str_replace("'", "''", (string) $idSearch['padded']);
+            $padded8 = str_replace("'", "''", str_pad((string) $idSearch['raw'], 8, '0', STR_PAD_LEFT));
+            if (strlen((string) $idSearch['raw']) >= 8) {
+                $filter = "Quotation eq '{$raw}' or Quotation eq '{$padded8}' or Quotation eq '{$padded}'";
+            } else {
+                $filter = "SalesOrder eq '{$raw}' or SalesOrder eq '{$padded}'"
+                    . " or FollowOnDocument eq '{$raw}' or FollowOnDocument eq '{$padded}'";
+            }
+        } else {
+            $filter = sprintf(
+                "QuotationDate ge datetime'%sT00:00:00' and QuotationDate le datetime'%sT23:59:59'",
+                $from,
+                $to
+            );
+        }
+
+        $rows = [];
+        $result = $this->client->eachPage(function (array $batch) use (&$rows): void {
+            foreach ($batch as $row) {
+                if (is_array($row)) {
+                    $rows[] = $row;
+                }
+            }
+        }, [
+            '$filter' => $filter,
+        ], $service);
+
+        return [
+            'rows'  => $rows,
+            'error' => $rows === [] ? ($result['error'] ?? null) : null,
+        ];
+    }
+
+    /**
+     * Map quotation hub entity. Header item 000000 is kept for the table.
+     */
+    private function mapQuotationHubRow(array $row, int $year): ?array
+    {
+        $item = trim((string) ($row['QuotationItem'] ?? ''));
+        $material = trim((string) ($row['QuotationMaterial'] ?? ''));
+        $isHeader = ($item === '' || $item === '000000') && $material === '';
+
+        $quotation = ltrim(trim((string) ($row['Quotation'] ?? '')), '0');
+        $so = ltrim(trim((string) ($row['FollowOnDocument'] ?? '')), '0');
+        if ($so === '') {
+            $so = ltrim(trim((string) ($row['SalesOrder'] ?? '')), '0');
+        }
+        $desc = trim((string) ($row['QuotationMaterialDescription'] ?? ''));
+        $quoteDate = $this->parseDate($row['QuotationDate'] ?? null);
+        $soDate = $this->parseDate($row['SalesOrderDate'] ?? null);
+        $validFrom = $this->parseDate($row['ValidFromDate'] ?? null);
+        $validTo = $this->parseDate($row['ValidToDate'] ?? null);
+        $reqDate = $this->parseDate($row['RequestedDeliveryDate'] ?? null);
+        $createdDate = $this->parseDate($row['CreatedDate'] ?? null);
+        $qty = $this->number($row['QuotationQuantity'] ?? 0);
+        $net = $this->number($row['QuotationNetValue'] ?? 0);
+        $plant = trim((string) ($row['QuotationPlant'] ?? ''));
+        $category = trim((string) ($row['QuotationItemCategory'] ?? ''));
+        $customerRef = trim((string) ($row['CustomerReference'] ?? ''));
+        $customer = trim((string) ($row['Customer'] ?? ''));
+        $quoteType = trim((string) ($row['QuotationType'] ?? ''));
+        $createdBy = trim((string) ($row['CreatedBy'] ?? ''));
+
+        return [
+            'id'               => ($quotation !== '' ? $quotation : 'QT') . '-' . ($item !== '' ? $item : '000000'),
+            'quotation'        => $quotation !== '' ? $quotation : '—',
+            'sales_order'      => $so !== '' ? $so : '—',
+            'line_item'        => ltrim($item, '0') ?: '0',
+            'material'         => $material !== '' ? $material : '—',
+            'style'            => $desc !== '' ? $desc : ($customerRef !== '' ? $customerRef : '—'),
+            'material_group'   => $desc,
+            'plant'            => $plant !== '' ? $plant : '—',
+            'date'             => $quoteDate ? $quoteDate->format('Y-m-d') : '',
+            'date_iso'         => $quoteDate ? $quoteDate->format('Y-m-d') : '',
+            'sales_order_date' => $soDate ? $soDate->format('Y-m-d') : '',
+            'valid_from'       => $validFrom ? $validFrom->format('Y-m-d') : '',
+            'valid_to'         => $validTo ? $validTo->format('Y-m-d') : '',
+            'requested_delivery_date' => $reqDate ? $reqDate->format('Y-m-d') : '',
+            'created_date'     => $createdDate ? $createdDate->format('Y-m-d') : '',
+            'qty'              => $qty,
+            'net_amount'       => $net,
+            'item_category'    => $category,
+            'customer'         => $customer,
+            'customer_ref'     => $customerRef,
+            'division'         => $customer !== '' ? $customer : trim((string) ($row['Division'] ?? '')),
+            'channel'          => $quoteType !== '' ? $quoteType : trim((string) ($row['DistributionChannel'] ?? '')),
+            'created_by'       => $createdBy,
+            'quotation_type'   => $quoteType,
+            'sales_order_type' => trim((string) ($row['SalesOrderType'] ?? '')),
+            'sales_org'        => trim((string) ($row['SalesOrganization'] ?? '')),
+            'dist_channel'     => trim((string) ($row['DistributionChannel'] ?? '')),
+            'unit'             => trim((string) ($row['QuotationSalesUnit'] ?? '')),
+            'currency'         => trim((string) ($row['QuotationCurrency'] ?? 'USD')),
+            'status'           => 'Active',
+            'is_header'        => $isHeader,
+            'is_return'        => false,
+            'cost'             => 0,
+            'year'             => $year,
+        ];
+    }
+
+    /**
+     * One table row per quotation header, with item qty/net rolled up.
+     *
+     * @return array{0: array<int, array>, 1: array<string, array>}
+     */
+    private function buildQuotationHeaderRecords(array $mappedRows): array
+    {
+        $groups = [];
+        foreach ($mappedRows as $r) {
+            $key = trim((string) ($r['quotation'] ?? ''));
+            if ($key === '' || $key === '—') {
+                continue;
+            }
+            if (!isset($groups[$key])) {
+                $groups[$key] = [
+                    'header' => null,
+                    'items'  => [],
+                    'qty'    => 0.0,
+                    'net'    => 0.0,
+                ];
+            }
+            if (!empty($r['is_header'])) {
+                $groups[$key]['header'] = $r;
+                continue;
+            }
+            $groups[$key]['items'][] = $r;
+            $groups[$key]['qty'] += (float) ($r['qty'] ?? 0);
+            $groups[$key]['net'] += (float) ($r['net_amount'] ?? 0);
+        }
+
+        $headers = [];
+        $details = [];
+        foreach ($groups as $key => $g) {
+            $header = $g['header'];
+            if ($header === null && $g['items'] !== []) {
+                $header = $g['items'][0];
+                $header['is_header'] = true;
+            }
+            if ($header === null) {
+                continue;
+            }
+            $header['id'] = $key;
+            $header['qty'] = $g['qty'];
+            $header['net_amount'] = round($g['net'], 2);
+            $header['item_count'] = count($g['items']);
+            $headers[] = $header;
+            $details[$key] = $g['items'];
+        }
+
+        return [$headers, $details];
+    }
+
+    /**
+     * First SAP hop: quotation hub → unique follow-on sales orders.
+     */
+    private function resolveSalesOrdersFromQuotations(?array $idSearch, string $from, string $to): array
+    {
+        $service = (string) ($this->cfg['quotation_service']
+            ?? '/sap/opu/odata/sap/ZI_QUOTATIONSALESORDER_HUB_CDS/ZI_QuotationSalesOrder_HUB');
+
+        if ($idSearch !== null) {
+            $vals = array_unique(array_filter([
+                $idSearch['raw'],
+                $idSearch['padded'],
+                str_pad((string) $idSearch['raw'], 8, '0', STR_PAD_LEFT),
+            ]));
+            $parts = [];
+            foreach ($vals as $v) {
+                $v = str_replace("'", "''", (string) $v);
+                $parts[] = "Quotation eq '{$v}'";
+                $parts[] = "SalesOrder eq '{$v}'";
+                $parts[] = "FollowOnDocument eq '{$v}'";
+            }
+            $filter = implode(' or ', $parts);
+        } else {
+            $filter = sprintf(
+                "QuotationDate ge datetime'%sT00:00:00' and QuotationDate le datetime'%sT23:59:59'",
+                $from,
+                $to
+            );
+        }
+
+        $rows = [];
+        $result = $this->client->eachPage(function (array $batch) use (&$rows): void {
+            foreach ($batch as $row) {
+                if (is_array($row)) {
+                    $rows[] = $row;
+                }
+            }
+        }, [
+            '$filter' => $filter,
+        ], $service);
+
+        $orders = [];
+        foreach ($rows as $row) {
+            foreach (['SalesOrder', 'FollowOnDocument'] as $key) {
+                $val = ltrim(trim((string) ($row[$key] ?? '')), '0');
+                if ($val !== '') {
+                    $orders[$val] = true;
+                }
+            }
+        }
+
+        return [
+            'row_count'     => count($rows),
+            'sales_orders'  => array_keys($orders),
+            'error'         => $orders === [] ? ($result['error'] ?? null) : null,
+        ];
+    }
+
+    /**
+     * Second SAP hop: ZI_SalesApi_HUB for the resolved sales orders.
+     */
+    private function fetchSalesOrdersIntoState(array $salesOrders, array &$state, int $year, ?string &$sapError): void
+    {
+        foreach (array_chunk($salesOrders, 20) as $chunk) {
+            $parts = [];
+            foreach ($chunk as $so) {
+                $raw = ltrim((string) $so, '0');
+                if ($raw === '') {
+                    continue;
+                }
+                $padded = str_pad($raw, 10, '0', STR_PAD_LEFT);
+                $rawEsc = str_replace("'", "''", $raw);
+                $padEsc = str_replace("'", "''", $padded);
+                $parts[] = "SalesOrder eq '{$padEsc}'";
+                if ($rawEsc !== $padEsc) {
+                    $parts[] = "SalesOrder eq '{$rawEsc}'";
+                }
+            }
+            if ($parts === []) {
+                continue;
+            }
+
+            $queryResult = $this->client->eachPage(function (array $batch) use (&$state, $year): void {
+                foreach ($batch as $row) {
+                    if (is_array($row)) {
+                        $this->ingestRow($row, $state, $year);
+                    }
+                }
+            }, [
+                '$filter'  => implode(' or ', $parts),
+                '$orderby' => 'CreationDate desc',
+            ]);
+
+            if (($state['row_count'] ?? 0) === 0 && !empty($queryResult['error'])) {
+                $sapError = (string) $queryResult['error'];
+            }
+        }
+    }
+
+    /**
+     * Fallback when quotation hub has no match or is unavailable.
+     */
+    private function fetchSalesFallback(?array $idSearch, string $from, string $to, array &$state, int $year, ?string &$sapError): void
+    {
+        if ($idSearch !== null) {
+            $filterExpr = sprintf(
+                "SalesOrder eq '%s' or SalesOrder eq '%s'",
+                str_replace("'", "''", (string) $idSearch['padded']),
+                str_replace("'", "''", (string) $idSearch['raw'])
+            );
+        } else {
+            $filterExpr = sprintf(
+                "CreationDate ge datetime'%sT00:00:00' and CreationDate le datetime'%sT23:59:59'",
+                $from,
+                $to
+            );
+        }
+
+        $queryResult = $this->client->eachPage(function (array $batch) use (&$state, $year): void {
+            foreach ($batch as $row) {
+                if (is_array($row)) {
+                    $this->ingestRow($row, $state, $year);
+                }
+            }
+        }, [
+            '$filter'  => $filterExpr,
+            '$orderby' => 'CreationDate desc',
+        ]);
+
+        if (($state['row_count'] ?? 0) === 0 && !empty($queryResult['error']) && $sapError === null) {
+            $sapError = (string) $queryResult['error'];
+        }
+    }
+
+    /**
+     * Live ZI_SalesApi_HUB lines for one sales order.
+     */
+    public function getSalesApiHubByOrder(string $salesOrder): array
+    {
+        $raw = ltrim(trim($salesOrder), '0');
+        if ($raw === '') {
+            return [
+                'success' => false,
+                'message' => 'Sales order is required',
+                'records' => [],
+            ];
+        }
+
+        $padded = str_pad($raw, 10, '0', STR_PAD_LEFT);
+        $rawEsc = str_replace("'", "''", $raw);
+        $padEsc = str_replace("'", "''", $padded);
+        $filterExpr = $rawEsc === $padEsc
+            ? "SalesOrder eq '{$rawEsc}'"
+            : "SalesOrder eq '{$rawEsc}' or SalesOrder eq '{$padEsc}'";
+
+        $year = (int) date('Y');
+        $state = $this->createState($year);
+        $queryResult = $this->client->eachPage(function (array $batch) use (&$state, $year): void {
+            foreach ($batch as $row) {
+                if (is_array($row)) {
+                    $this->ingestRow($row, $state, $year);
+                }
+            }
+        }, [
+            '$filter'  => $filterExpr,
+            '$orderby' => 'SalesOrderItem',
+        ]);
+
+        $records = $state['records'] ?? [];
+        usort($records, static function ($a, $b) {
+            return (int) ($a['line_item'] ?? 0) <=> (int) ($b['line_item'] ?? 0);
+        });
+
+        return [
+            'success'      => count($records) > 0,
+            'message'      => count($records) > 0 ? 'ZI_SalesApi_HUB lines loaded' : 'No ZI_SalesApi_HUB lines for this sales order',
+            'sales_order'  => $raw,
+            'count'        => count($records),
+            'records'      => $records,
+            'error'        => count($records) > 0 ? null : ($queryResult['error'] ?? null),
+        ];
     }
 }

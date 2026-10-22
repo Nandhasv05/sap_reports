@@ -44,6 +44,50 @@ class SapPurchaseOrderService
         ];
     }
 
+    public const DOCUMENT_TYPES = [
+        ['code' => 'AN',   'name' => 'RFQ'],
+        ['code' => 'DB',   'name' => 'Dummy Purchase Order'],
+        ['code' => 'ENB',  'name' => 'Standard PO DFPS'],
+        ['code' => 'NB',   'name' => 'Purchase Requisition'],
+        ['code' => 'NB',   'name' => 'Standard PO'],
+        ['code' => 'NBXE', 'name' => 'XLO Inter Com PO'],
+        ['code' => 'UB',   'name' => 'Stock Transp. Order'],
+        ['code' => 'ZCAP', 'name' => 'Capital/Asset PO'],
+        ['code' => 'ZDOM', 'name' => 'Domestic Pur Order'],
+        ['code' => 'ZDSS', 'name' => 'Domestic Sub Scrn Cr'],
+        ['code' => 'ZEIS', 'name' => 'Enterprise Intra STO'],
+        ['code' => 'ZIMP', 'name' => 'Import Pur Order'],
+        ['code' => 'ZINT', 'name' => 'Enterprise Inter STO'],
+        ['code' => 'ZRTV', 'name' => 'Return Pur Order'],
+        ['code' => 'ZSCP', 'name' => 'Subcontracting PO'],
+        ['code' => 'ZSER', 'name' => 'Service Purchase Ord'],
+        ['code' => 'ZST1', 'name' => 'Stock Transp. Order'],
+        ['code' => 'ZSTO', 'name' => 'Stock Transp order'],
+    ];
+
+    /*
+     * Purchasing Document Types list for UI dropdown
+     */
+    public static function documentTypes(): array
+    {
+        return self::DOCUMENT_TYPES;
+    }
+
+    /*
+     * Code to Description map for fallback lookup
+     */
+    public static function documentTypeMap(): array
+    {
+        static $map = null;
+        if ($map === null) {
+            $map = [];
+            foreach (self::DOCUMENT_TYPES as $dt) {
+                $map[$dt['code']] = $dt['name'];
+            }
+        }
+        return $map;
+    }
+
     /*
      * Resolve date range preset or custom From/To into Y-m-d format (max 6 months range)
      *
@@ -198,7 +242,16 @@ class SapPurchaseOrderService
         $supplier = trim((string) ($filters['supplier'] ?? ''));
         $so = preg_replace('/\D/', '', (string) ($filters['so'] ?? '')) ?? '';
 
-        $cacheKey = 'po_list_' . md5(json_encode([$range['preset'], $range['from'], $range['to'], $plant, $supplier, $so]));
+        $rawTypes = $filters['po_type'] ?? $filters['type'] ?? '';
+        if (is_array($rawTypes)) {
+            $poTypes = array_values(array_unique(array_filter(array_map('strtoupper', array_map('trim', $rawTypes)))));
+        } else {
+            $poTypes = array_values(array_unique(array_filter(array_map('strtoupper', array_map('trim', explode(',', (string) $rawTypes))))));
+        }
+
+        $typesKey = $poTypes;
+        sort($typesKey);
+        $cacheKey = 'po_list_' . md5(json_encode([$range['preset'], $range['from'], $range['to'], $plant, $supplier, $so, implode(',', $typesKey)]));
         $cached = $this->cacheRead($cacheKey, (int) ($this->cfg['cache_ttl'] ?? 300));
         if ($cached !== null) {
             return $cached;
@@ -214,6 +267,14 @@ class SapPurchaseOrderService
         if ($supplier !== '') {
             $supPadded = $this->padSalesOrder($supplier);
             $filterParts[] = "(Supplier eq '{$supplier}' or Supplier eq '{$supPadded}')";
+        }
+        if (!empty($poTypes)) {
+            if (count($poTypes) === 1) {
+                $filterParts[] = "PurchaseOrderType eq '{$poTypes[0]}'";
+            } else {
+                $typeClauses = array_map(static fn (string $t): string => "PurchaseOrderType eq '{$t}'", $poTypes);
+                $filterParts[] = '(' . implode(' or ', $typeClauses) . ')';
+            }
         }
 
         $query = [
@@ -245,10 +306,16 @@ class SapPurchaseOrderService
 
         $pos = [];
         $currencies = [];
+        $docTypeMap = self::documentTypeMap();
         foreach ($result['rows'] as $row) {
             if (!is_array($row)) continue;
             $poNum = $this->displayNumber((string) ($row['PurchaseOrder'] ?? ''));
             if ($poNum === '') continue;
+
+            $rowPoType = trim((string) ($row['PurchaseOrderType'] ?? ''));
+            if (!empty($poTypes) && !in_array(strtoupper($rowPoType), $poTypes, true)) {
+                continue;
+            }
 
             $soList = [];
             for ($i = 1; $i <= self::SALES_ORDER_FIELDS; $i++) {
@@ -260,11 +327,16 @@ class SapPurchaseOrderService
             }
 
             if (!isset($pos[$poNum])) {
+                $typeName = trim((string) ($row['PurchasingDocumentTypeName'] ?? ''));
+                if ($typeName === '' && isset($docTypeMap[$rowPoType])) {
+                    $typeName = $docTypeMap[$rowPoType];
+                }
+
                 $pos[$poNum] = [
                     'purchase_order'   => $poNum,
                     'purchase_order_category' => trim((string) ($row['PurchaseOrderCategory'] ?? '')),
-                    'purchase_order_type' => trim((string) ($row['PurchaseOrderType'] ?? '')),
-                    'po_type_name'     => trim((string) ($row['PurchasingDocumentTypeName'] ?? '')),
+                    'purchase_order_type' => $rowPoType,
+                    'po_type_name'     => $typeName,
                     'date'             => $this->sapDate((string) ($row['PurchaseOrderDate'] ?? '')),
                     'supplier'         => $this->displayNumber((string) ($row['Supplier'] ?? '')),
                     'supplier_full_name' => trim((string) ($row['SupplierFullName'] ?? '')),
@@ -401,11 +473,17 @@ class SapPurchaseOrderService
         }
 
         $first = $result['rows'][0];
+        $headerPoType = trim((string) ($first['PurchaseOrderType'] ?? ''));
+        $headerTypeName = trim((string) ($first['PurchasingDocumentTypeName'] ?? ''));
+        if ($headerTypeName === '' && isset(self::documentTypeMap()[$headerPoType])) {
+            $headerTypeName = self::documentTypeMap()[$headerPoType];
+        }
+
         $out['header'] = [
             'purchase_order'   => $this->displayNumber((string) ($first['PurchaseOrder'] ?? $po)),
             'purchase_order_category' => trim((string) ($first['PurchaseOrderCategory'] ?? '')),
-            'purchase_order_type' => trim((string) ($first['PurchaseOrderType'] ?? '')),
-            'po_type_name'     => trim((string) ($first['PurchasingDocumentTypeName'] ?? '')),
+            'purchase_order_type' => $headerPoType,
+            'po_type_name'     => $headerTypeName,
             'date'             => $this->sapDate((string) ($first['PurchaseOrderDate'] ?? '')),
             'supplier'         => $this->displayNumber((string) ($first['Supplier'] ?? '')),
             'supplier_full_name' => trim((string) ($first['SupplierFullName'] ?? '')),
@@ -435,11 +513,17 @@ class SapPurchaseOrderService
             }
         }
 
+        $rowPoType = trim((string) ($row['PurchaseOrderType'] ?? ''));
+        $rowTypeName = trim((string) ($row['PurchasingDocumentTypeName'] ?? ''));
+        if ($rowTypeName === '' && isset(self::documentTypeMap()[$rowPoType])) {
+            $rowTypeName = self::documentTypeMap()[$rowPoType];
+        }
+
         return [
             'item'                    => $this->displayNumber((string) ($row['PurchaseOrderItem'] ?? '')),
             'purchase_order_category' => trim((string) ($row['PurchaseOrderCategory'] ?? '')),
-            'purchase_order_type'     => trim((string) ($row['PurchaseOrderType'] ?? '')),
-            'po_type_name'            => trim((string) ($row['PurchasingDocumentTypeName'] ?? '')),
+            'purchase_order_type'     => $rowPoType,
+            'po_type_name'            => $rowTypeName,
             'supplier'                => $this->displayNumber((string) ($row['Supplier'] ?? '')),
             'supplier_full_name'      => trim((string) ($row['SupplierFullName'] ?? '')),
             'material'                => trim((string) ($row['Material'] ?? '')),

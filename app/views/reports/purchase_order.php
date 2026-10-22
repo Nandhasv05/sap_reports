@@ -24,6 +24,9 @@ $presets = is_array($presets ?? null) ? $presets : [];
 $presetDates = is_array($presetDates ?? null) ? $presetDates : [];
 $supplier = (string) ($supplier ?? '');
 $salesOrder = (string) ($salesOrder ?? '');
+$poType = (string) ($poType ?? '');
+$poTypes = is_array($poTypes ?? null) ? $poTypes : array_values(array_filter(array_map('trim', explode(',', $poType))));
+$docTypes = is_array($docTypes ?? null) ? $docTypes : SapPurchaseOrderService::documentTypes();
 $columns = is_array($columns ?? null) ? $columns : [];
 $colCount = count($columns);
 
@@ -35,6 +38,7 @@ $csvUrl = $pageUrl . '?' . http_build_query(array_filter([
     'plant'    => $plant,
     'supplier' => $supplier,
     'so'       => $salesOrder,
+    'po_type'  => $poType,
     'export'   => 'csv',
 ], static fn ($v): bool => $v !== ''));
 
@@ -89,6 +93,66 @@ $listCards = [
                         <?php endforeach; ?>
                     </select>
                 </label>
+
+                <!-- Purchasing Document Type Multi-Select Dropdown -->
+                <div class="po-multi-dropdown" id="poDocTypeDropdown">
+                    <input type="hidden" name="po_type" id="poTypeInput" value="<?= e($poType) ?>">
+                    <button type="button" class="po-multi-trigger" id="poDocTypeTrigger" aria-haspopup="true" aria-expanded="false" title="Filter by Purchasing Document Type">
+                        <span class="material-icons-round po-multi-icon">description</span>
+                        <span class="po-multi-label" id="poDocTypeLabel">
+                            <?php if (empty($poTypes)): ?>
+                                All Doc Types
+                            <?php elseif (count($poTypes) === 1): ?>
+                                <?php
+                                    $firstCode = $poTypes[0];
+                                    $firstName = SapPurchaseOrderService::documentTypeMap()[$firstCode] ?? $firstCode;
+                                ?>
+                                <?= e($firstName) ?>
+                            <?php else: ?>
+                                <?= count($poTypes) ?> Doc Types Selected
+                            <?php endif; ?>
+                        </span>
+                        <span class="po-multi-badge" id="poDocTypeBadge" style="<?= empty($poTypes) ? 'display:none;' : '' ?>">
+                            <?= count($poTypes) ?>
+                        </span>
+                        <span class="material-icons-round po-multi-arrow">expand_more</span>
+                    </button>
+
+                    <div class="po-multi-menu" id="poDocTypeMenu" role="menu">
+                        <div class="po-multi-search-wrap">
+                            <span class="material-icons-round">search</span>
+                            <input type="text" id="poDocTypeSearch" class="po-multi-search" placeholder="Search doc types..." autocomplete="off">
+                            <button type="button" id="poDocTypeSearchClear" class="po-multi-search-clear" style="display:none;" title="Clear search">
+                                <span class="material-icons-round">close</span>
+                            </button>
+                        </div>
+                        <div class="po-multi-actions">
+                            <button type="button" class="po-multi-action-btn" id="poDocTypeSelectAll">Select All</button>
+                            <span class="po-multi-action-dot">·</span>
+                            <button type="button" class="po-multi-action-btn" id="poDocTypeClearAll">Clear</button>
+                            <span class="po-multi-selected-info" id="poDocTypeCountInfo">
+                                <?= count($poTypes) ?> of <?= count($docTypes) ?> selected
+                            </span>
+                        </div>
+                        <div class="po-multi-list" id="poDocTypeList">
+                            <?php foreach ($docTypes as $dt): ?>
+                                <?php $checked = in_array(strtoupper($dt['code']), $poTypes, true); ?>
+                                <label class="po-multi-item" data-code="<?= e($dt['code']) ?>" data-name="<?= e(strtolower($dt['name'])) ?>">
+                                    <input type="checkbox" class="po-multi-checkbox" value="<?= e($dt['code']) ?>"<?= $checked ? ' checked' : '' ?>>
+                                    <span class="po-multi-item-name"><?= e($dt['name']) ?></span>
+                                    <span class="po-multi-item-code"><?= e($dt['code']) ?></span>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+                        <div class="po-multi-footer">
+                            <button type="button" class="po-multi-btn-cancel" id="poDocTypeCancel">Cancel</button>
+                            <button type="button" class="po-multi-btn-apply" id="poDocTypeApply">
+                                <span class="material-icons-round">check</span>
+                                <span>Apply</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
 
                 <!-- Custom Date Inputs (shown only when Custom Date is picked - up to 6 months) -->
                 <div class="date-custom" data-date-custom<?= $rangePreset === 'custom' ? '' : ' hidden' ?> style="display: <?= $rangePreset === 'custom' ? 'flex' : 'none' ?>; gap: 6px;">
@@ -347,6 +411,7 @@ $listCards = [
     'plant'       => $plant,
     'supplier'    => $supplier,
     'salesOrder'  => $salesOrder,
+    'poType'      => $poType,
     'presetDates' => $presetDates,
     'dataUrl'     => url('purchase-order/data'),
     'pageUrl'     => $pageUrl,

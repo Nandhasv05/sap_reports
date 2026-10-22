@@ -43,7 +43,7 @@ return [
     'page_size'        => 500,
     'max_rows'         => 10000,
     'timeout'          => 60,
-    'cache_ttl'        => 300,
+    'cache_ttl'        => 0,
     'cache_version'    => 5,
     'currency'         => 'INR',
     'currency_symbol'  => '₹',

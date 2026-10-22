@@ -35,7 +35,7 @@ class SapODataClient
      * @param callable(array<int, array>):void $onBatch
      * @return array{row_count: int, error: ?string}
      */
-    public function eachPage(callable $onBatch, array $extraQuery = []): array
+    public function eachPage(callable $onBatch, array $extraQuery = [], ?string $servicePath = null): array
     {
         if (!$this->isEnabled()) {
             return ['row_count' => 0, 'error' => 'SAP integration is disabled.'];
@@ -58,7 +58,7 @@ class SapODataClient
                 '$format' => 'json',
             ], $extraQuery);
 
-            $payload = $this->request($this->buildUrl($query));
+            $payload = $this->request($this->buildUrl($query, $servicePath));
 
             if ($payload['error'] !== null) {
                 $lastError = $payload['error'];
@@ -235,6 +235,29 @@ class SapODataClient
         $username = (string) ($this->cfg['username'] ?? '');
         $password = (string) ($this->cfg['password'] ?? '');
         $timeout = (int) ($this->cfg['timeout'] ?? 45);
+
+        if ($username === '' || $password === '') {
+            return ['body' => null, 'error' => 'SAP credentials are not configured.'];
+        }
+
+        if (function_exists('curl_init')) {
+            return $this->requestViaCurl($url, $username, $password, $timeout);
+        }
+
+        return $this->requestViaStream($url, $username, $password, $timeout);
+    }
+
+    /*
+     * Fetch a full URL directly (used by SalesController for BOM, Material API, Procurement endpoints).
+     *
+     * @param string $url     Fully qualified OData URL
+     * @param int    $timeout Optional timeout override (seconds)
+     * @return array{body: ?array, error: ?string}
+     */
+    public function fetchUrl(string $url, int $timeout = 30): array
+    {
+        $username = (string) ($this->cfg['username'] ?? '');
+        $password = (string) ($this->cfg['password'] ?? '');
 
         if ($username === '' || $password === '') {
             return ['body' => null, 'error' => 'SAP credentials are not configured.'];

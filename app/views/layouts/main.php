@@ -34,5 +34,6 @@ $bodyClass = $appShell ? 'rpt-body' : '';
             <?= $content ?>
         </div>
     <?php endif; ?>
+    <?php if (!empty($extraScripts)) echo $extraScripts; ?>
 </body>
 </html>

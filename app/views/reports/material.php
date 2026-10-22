@@ -3,7 +3,7 @@
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 03/09/2026
  * DESCRIPTION : Fabric / Trims utilization view
- */
+*/
 $isFabric = $report === 'fabric';
 $mode = (string) ($_GET['mode'] ?? 'unit');
 $showAllOptions = $mode === 'all';
@@ -158,14 +158,9 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                     <span class="material-icons-round">receipt_long</span>
                     <input id="so" name="so" value="<?= e($salesOrder) ?>" placeholder="Sales order" inputmode="numeric">
                 </label>
-                <!-- <label class="rpt-field rpt-field-filter">
-                    <span class="material-icons-round">search</span>
-                    <input id="q" name="q" value="<?= e($search) ?>" placeholder="Material / PO">
-                </label> -->
                 <?php if ($hasData): ?>
-                    <a class="rpt-btn rpt-btn-ghost" href="<?= e(url($report) . '?' . $qs(['export' => 'csv', 'page' => 1])) ?>">
+                    <a class="rpt-btn rpt-btn-ghost" href="<?= e(url($report) . '?' . $qs(['export' => 'csv', 'page' => 1])) ?>" title="Download CSV">
                         <span class="material-icons-round">file_download</span>
-                        <!-- CSV -->
                     </a>
                 <?php endif; ?>
             </form>
@@ -204,7 +199,6 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                     </label>
                     <button class="rpt-btn lookup-go" type="submit">
                         <span class="material-icons-round">sync</span>
-                        <!-- Load report -->
                     </button>
                 </form>
             </div>
@@ -376,11 +370,11 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                             <th class="is-sortable" data-col="<?= $isFabric ? '7' : '11' ?>" data-type="num" title="Click to sort by PO Line">
                                 <div class="th-content"><span>PO Line</span></div>
                             </th>
-                            <th class="num is-sortable" data-col="<?= $isFabric ? '8' : '12' ?>" data-type="num" title="Click to sort by SO Qty">
-                                <div class="th-content num"><span>SO Qty</span></div>
+                            <th class="num is-sortable" data-col="<?= $isFabric ? '8' : '12' ?>" data-type="num" title="Click to sort by SO_QTY">
+                                <div class="th-content num"><span>SO_QTY</span></div>
                             </th>
-                            <th class="num is-sortable" data-col="<?= $isFabric ? '9' : '13' ?>" data-type="num" title="Click to sort by BOM Qty">
-                                <div class="th-content num"><span>BOM Qty</span></div>
+                            <th class="num is-sortable" data-col="<?= $isFabric ? '9' : '13' ?>" data-type="num" title="Click to sort by BOM_QTY">
+                                <div class="th-content num"><span>BOM_QTY</span></div>
                             </th>
                             <th class="num is-sortable" data-col="<?= $isFabric ? '10' : '14' ?>" data-type="num" title="Click to sort by Total Add SO BOM Qty">
                                 <div class="th-content num"><span>Total Add SO BOM Qty</span></div>
@@ -391,11 +385,11 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                             <th class="num is-sortable" data-col="<?= $isFabric ? '12' : '16' ?>" data-type="num" title="Click to sort by Production Qty">
                                 <div class="th-content num"><span>Production</span></div>
                             </th>
-                            <th class="num is-sortable" data-col="<?= $isFabric ? '13' : '17' ?>" data-type="num" title="Click to sort by PO Qty">
-                                <div class="th-content num"><span>PO Qty</span></div>
+                            <th class="num is-sortable" data-col="<?= $isFabric ? '13' : '17' ?>" data-type="num" title="Click to sort by PO_QTY">
+                                <div class="th-content num"><span>PO_QTY</span></div>
                             </th>
-                            <th class="num is-sortable" data-col="<?= $isFabric ? '14' : '18' ?>" data-type="num" title="Click to sort by GRN Qty">
-                                <div class="th-content num"><span>GRN Qty</span></div>
+                            <th class="num is-sortable" data-col="<?= $isFabric ? '14' : '18' ?>" data-type="num" title="Click to sort by GRN_QTY">
+                                <div class="th-content num"><span>GRN_QTY</span></div>
                             </th>
                             <th class="num is-sortable" data-col="<?= $isFabric ? '15' : '19' ?>" data-type="num" title="Click to sort by Issue Qty">
                                 <div class="th-content num"><span>Issue Qty</span></div>
@@ -524,13 +518,13 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                                 </th>
                                 <th class="num">
                                     <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '8' : '12' ?>" data-numeric="true" placeholder="SO Qty..." title="Filter SO Qty">
+                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '8' : '12' ?>" data-numeric="true" placeholder="SO_QTY..." title="Filter SO_QTY">
                                         <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
                                     </div>
                                 </th>
                                 <th class="num">
                                     <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '9' : '13' ?>" data-numeric="true" placeholder="BOM Qty..." title="Filter BOM Qty">
+                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '9' : '13' ?>" data-numeric="true" placeholder="BOM_QTY..." title="Filter BOM_QTY">
                                         <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
                                     </div>
                                 </th>
@@ -554,13 +548,13 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                                 </th>
                                 <th class="num">
                                     <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '13' : '17' ?>" data-numeric="true" placeholder="PO Qty..." title="Filter PO Qty">
+                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '13' : '17' ?>" data-numeric="true" placeholder="PO_QTY..." title="Filter PO_QTY">
                                         <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
                                     </div>
                                 </th>
                                 <th class="num">
                                     <div class="rpt-col-input-wrap">
-                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '14' : '18' ?>" data-numeric="true" placeholder="GRN Qty..." title="Filter GRN Qty">
+                                        <input type="text" class="rpt-col-input num" data-col="<?= $isFabric ? '14' : '18' ?>" data-numeric="true" placeholder="GRN_QTY..." title="Filter GRN_QTY">
                                         <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
                                     </div>
                                 </th>
@@ -696,29 +690,82 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                                     <td>
                                         <?= e(str_replace(',', '', $model->dash($row['po_item'] ?? ''))) ?>
                                     </td>
-                                    <td class="num qty-cell" data-qty-type="so">
-                                        <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['so_qty'] ?? ''))) ?></span>
+                                    <?php
+                                        $soUnit = trim((string) ($row['so_unit'] ?? ''));
+                                        $bomUnit = trim((string) ($row['bom_unit'] ?? ''));
+                                        $poUnit = trim((string) ($row['po_unit'] ?? '')) ?: $bomUnit;
+                                        $grnUnit = trim((string) ($row['grn_unit'] ?? '')) ?: $bomUnit;
+                                        $giUnit = trim((string) ($row['gi_unit'] ?? '')) ?: $bomUnit;
+                                        $poConvQty = (float) ($row['po_conv_qty'] ?? 0);
+                                        $poConvUnit = trim((string) ($row['po_conv_unit'] ?? ''));
+                                        $grnConvQty = (float) ($row['grn_conv_qty'] ?? 0);
+                                        $grnConvUnit = trim((string) ($row['grn_conv_unit'] ?? ''));
+
+                                        $soVal = str_replace(',', '', $model->dash($row['so_qty'] ?? ''));
+                                        $bomVal = str_replace(',', '', $model->dash($row['bom_qty'] ?? ''));
+                                        $totalBomVal = str_replace(',', '', $model->dash($row['total_bom_qty'] ?? ''));
+                                        $planVal = str_replace(',', '', $model->dash($row['planned_qty'] ?? ''));
+                                        $prodVal = str_replace(',', '', $model->dash($row['production_qty'] ?? ''));
+                                        $poVal = str_replace(',', '', $model->dash($row['po_qty'] ?? ''));
+                                        $poConvVal = str_replace(',', '', $model->dash($poConvQty));
+                                        $grnVal = str_replace(',', '', $model->dash($row['grn_qty'] ?? ''));
+                                        $grnConvVal = str_replace(',', '', $model->dash($grnConvQty));
+                                        $issVal = str_replace(',', '', $model->dash($row['issue_qty'] ?? ''));
+
+                                        $soHoverTitle = $soUnit !== '' ? 'SO_UNIT: ' . $soUnit : '';
+                                        $bomHoverTitle = $bomUnit !== '' ? 'BOM_UNIT: ' . $bomUnit : '';
+
+                                        $poTitleParts = [];
+                                        if ($poConvVal !== '-' && $poConvVal !== '') {
+                                            $poTitleParts[] = 'PO_Conv_QTY: ' . $poConvVal;
+                                        }
+                                        if ($poConvUnit !== '') {
+                                            $poTitleParts[] = 'PO_Conv_Unit: ' . $poConvUnit;
+                                        } elseif ($poUnit !== '') {
+                                            $poTitleParts[] = 'PO_Conv_Unit: ' . $poUnit;
+                                        }
+                                        if ($poUnit !== '') {
+                                            $poTitleParts[] = 'PO_UNIT: ' . $poUnit;
+                                        }
+                                        $poHoverTitle = implode('  ', $poTitleParts);
+
+                                        $grnTitleParts = [];
+                                        if ($grnUnit !== '') {
+                                            $grnTitleParts[] = 'GRN_UNIT: ' . $grnUnit;
+                                        }
+                                        if ($grnConvVal !== '-' && $grnConvVal !== '') {
+                                            $grnTitleParts[] = 'GRN_Conv_QTY: ' . $grnConvVal;
+                                        }
+                                        if ($grnConvUnit !== '') {
+                                            $grnTitleParts[] = 'GRN_Conv_Unit: ' . $grnConvUnit;
+                                        }
+                                        $grnHoverTitle = implode('  ', $grnTitleParts);
+
+                                        $issHoverTitle = $giUnit !== '' ? 'GI_UNIT: ' . $giUnit : '';
+                                    ?>
+                                    <td class="num qty-cell" data-qty-type="so" data-hover-type="so" data-qty="<?= e($soVal) ?>" data-unit="<?= e($soUnit) ?>">
+                                        <span class="qty-val"><?= e($soVal) ?></span>
                                     </td>
-                                    <td class="num bom-qty-cell">
-                                        <span class="bom-val"><?= e(str_replace(',', '', $model->dash($row['bom_qty'] ?? ''))) ?></span>
+                                    <td class="num bom-qty-cell" data-hover-type="bom" data-qty="<?= e($bomVal) ?>" data-unit="<?= e($bomUnit) ?>">
+                                        <span class="bom-val"><?= e($bomVal) ?></span>
                                     </td>
-                                    <td class="num bom-qty-cell total-bom-cell">
-                                        <span class="bom-val"><?= e(str_replace(',', '', $model->dash($row['total_bom_qty'] ?? ''))) ?></span>
+                                    <td class="num bom-qty-cell total-bom-cell" data-hover-type="total_bom" data-qty="<?= e($totalBomVal) ?>" data-unit="<?= e($bomUnit) ?>">
+                                        <span class="bom-val"><?= e($totalBomVal) ?></span>
                                     </td>
-                                    <td class="num qty-cell" data-qty-type="plan">
-                                        <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['planned_qty'] ?? ''))) ?></span>
+                                    <td class="num qty-cell" data-qty-type="plan" data-hover-type="plan" data-qty="<?= e($planVal) ?>" data-unit="<?= e($bomUnit) ?>">
+                                        <span class="qty-val"><?= e($planVal) ?></span>
                                     </td>
-                                    <td class="num qty-cell" data-qty-type="prod">
-                                        <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['production_qty'] ?? ''))) ?></span>
+                                    <td class="num qty-cell" data-qty-type="prod" data-hover-type="prod" data-qty="<?= e($prodVal) ?>" data-unit="<?= e($bomUnit) ?>">
+                                        <span class="qty-val"><?= e($prodVal) ?></span>
                                     </td>
-                                    <td class="num qty-cell" data-qty-type="po">
-                                        <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['po_qty'] ?? ''))) ?></span>
+                                    <td class="num qty-cell" data-qty-type="po" data-hover-type="po" data-qty="<?= e($poVal) ?>" data-unit="<?= e($poUnit) ?>" data-conv-qty="<?= e($poConvVal) ?>" data-conv-unit="<?= e($poConvUnit) ?>" data-base-unit="<?= e($bomUnit) ?>">
+                                        <span class="qty-val"><?= e($poVal) ?></span>
                                     </td>
-                                    <td class="num qty-cell" data-qty-type="grn">
-                                        <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['grn_qty'] ?? ''))) ?></span>
+                                    <td class="num qty-cell" data-qty-type="grn" data-hover-type="grn" data-qty="<?= e($grnVal) ?>" data-unit="<?= e($grnUnit) ?>" data-conv-qty="<?= e($grnConvVal) ?>" data-conv-unit="<?= e($grnConvUnit) ?>" data-base-unit="<?= e($bomUnit) ?>">
+                                        <span class="qty-val"><?= e($grnVal) ?></span>
                                     </td>
-                                    <td class="num qty-cell" data-qty-type="issue">
-                                        <span class="qty-val"><?= e(str_replace(',', '', $model->dash($row['issue_qty'] ?? ''))) ?></span>
+                                    <td class="num qty-cell" data-qty-type="issue" data-hover-type="issue" data-qty="<?= e($issVal) ?>" data-unit="<?= e($giUnit) ?>">
+                                        <span class="qty-val"><?= e($issVal) ?></span>
                                     </td>
                                     
                                     <td class="grn-sos">
@@ -834,16 +881,16 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
 </div>
 <script type="application/json" id="rptChartData"><?= json_encode($chart, JSON_UNESCAPED_UNICODE) ?></script>
 <script type="application/json" id="rptPageConfig"><?= json_encode([
-    'report'    => $report,
-    'isFabric'  => $isFabric,
-    'so'        => $salesOrder,
-    'mode'      => $mode,
-    'search'    => $search,
-    'live'      => $awaitLive,
-    'dataUrl'   => url($report . '/data'),
-    'pageUrl'   => url($report),
-    'catIcons'  => $trimCatIcons ?? [],
-    'catColors' => $trimCatColors ?? [],
+    'report'      => $report,
+    'isFabric'    => $isFabric,
+    'so'          => $salesOrder,
+    'mode'        => $mode,
+    'search'      => $search,
+    'live'        => $awaitLive,
+    'dataUrl'     => url($report . '/data'),
+    'pageUrl'     => url($report),
+    'catIcons'    => $trimCatIcons ?? [],
+    'catColors'   => $trimCatColors ?? [],
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
 <script type="application/json" id="poConfig"><?= json_encode([
     'dataUrl' => url('purchase-order/data'),

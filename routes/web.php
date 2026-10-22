@@ -7,11 +7,23 @@
 require_once base_path('app/controllers/ReportsController.php');
 require_once base_path('app/controllers/ErrorController.php');
 require_once base_path('app/controllers/TablePreferencesController.php');
+require_once base_path('app/controllers/SalesController.php');
 
 /** @var Router $router */
 $router->get('/', [ReportsController::class, 'index']);
-$router->get('sales', function () {
-    (new ReportsController())->show('sales');
+
+// START SALES DASHBOARD ROUTES (Migrated from KPIS)
+$router->get('sales', [SalesController::class, 'index']);
+$router->get('sales/data', [SalesController::class, 'data']);
+$router->get('api/sales', [SalesController::class, 'data']);
+$router->get('sales/procurement', [SalesController::class, 'procurementData']);
+$router->get('sales/procurement-pr', [SalesController::class, 'procurementPrData']);
+$router->get('sales/bom', [SalesController::class, 'bomData']);
+$router->get('sales/material-api', [SalesController::class, 'materialApiData']);
+$router->get('sales/sales-api', [SalesController::class, 'salesApiHubData']);
+$router->get('sale', function () {
+    header('Location: ' . url('sales'));
+    exit;
 });
 $router->get('open', function () {
     (new ReportsController())->show('open');

@@ -20,6 +20,79 @@ class SapUtilizationService
         $this->cfg = config('sap');
     }
 
+    public const RANGE_TIMEZONE = 'Asia/Kolkata';
+
+    /*
+     * Period presets for date filtering
+     */
+    public static function rangePresets(): array
+    {
+        return [
+            'today'      => 'Today',
+            'yesterday'  => 'Yesterday',
+            'this_week'  => 'This Week',
+            'this_month' => 'This Month',
+            'last_week'  => 'Previous Week',
+            'last_month' => 'Previous Month',
+            'custom'     => 'Custom Date',
+        ];
+    }
+
+    public static function resolveRange(string $preset, string $from = '', string $to = ''): array
+    {
+        $tz = new DateTimeZone(self::RANGE_TIMEZONE);
+        $today = new DateTimeImmutable('today', $tz);
+        $preset = array_key_exists($preset, self::rangePresets()) ? $preset : 'this_month';
+        $out = ['preset' => $preset, 'from' => '', 'to' => '', 'label' => self::rangePresets()[$preset], 'error' => null];
+
+        [$start, $end] = match ($preset) {
+            'today'      => [$today, $today],
+            'yesterday'  => [$today->modify('-1 day'), $today->modify('-1 day')],
+            'this_week'  => [$today->modify('monday this week'), $today],
+            'last_week'  => [$today->modify('monday last week'), $today->modify('monday last week')->modify('+6 days')],
+            'this_month' => [$today->modify('first day of this month'), $today],
+            'last_month' => [$today->modify('first day of last month'), $today->modify('last day of last month')],
+            default      => [self::parseDate($from, $tz), self::parseDate($to, $tz)],
+        };
+
+        if ($start === null || $end === null) {
+            $out['error'] = 'Choose both a From and a To date.';
+            return $out;
+        }
+        if ($start > $end) {
+            [$start, $end] = [$end, $start];
+        }
+
+        $out['from'] = $start->format('Y-m-d');
+        $out['to'] = $end->format('Y-m-d');
+        if ($preset === 'custom') {
+            $out['label'] = $out['from'] === $out['to'] ? $start->format('d M Y') : $start->format('d M Y') . ' – ' . $end->format('d M Y');
+        }
+        return $out;
+    }
+
+    public static function presetDates(): array
+    {
+        $out = [];
+        foreach (array_keys(self::rangePresets()) as $key) {
+            if ($key !== 'custom') {
+                $r = self::resolveRange($key);
+                $out[$key] = ['from' => $r['from'], 'to' => $r['to']];
+            }
+        }
+        return $out;
+    }
+
+    private static function parseDate(string $value, DateTimeZone $tz): ?DateTimeImmutable
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+        $dt = DateTimeImmutable::createFromFormat('!Y-m-d', $value, $tz);
+        return $dt instanceof DateTimeImmutable ? $dt : null;
+    }
+
     /*
      * Pad sales order method
      */
@@ -203,6 +276,17 @@ class SapUtilizationService
             'color'            => (string) ($row['COLOR'] ?? $row['Color'] ?? $row['Colour'] ?? ''),
             'size1'            => (string) ($row['SIZE1'] ?? $row['Size1'] ?? ''),
             'size2'            => (string) ($row['SIZE2'] ?? $row['Size2'] ?? ''),
+            'so_unit'          => trim((string) ($row['SO_UNIT'] ?? $row['SO_Unit'] ?? $row['SoUnit'] ?? '')),
+            'bom_unit'         => trim((string) ($row['BOM_UNIT'] ?? $row['BOM_Unit'] ?? $row['BomUnit'] ?? $row['BaseUnit'] ?? '')),
+            'po_unit'          => trim((string) ($row['PO_UNIT'] ?? $row['PO_Unit'] ?? $row['PoUnit'] ?? '')),
+            'po_conv_qty'      => (float) ($row['PO_Conv_QTY'] ?? $row['PO_Conv_Qty'] ?? $row['PO_CONV_QTY'] ?? $row['PoConvQty'] ?? 0),
+            'po_conv_unit'     => trim((string) ($row['PO_Conv_Unit'] ?? $row['PO_CONV_UNIT'] ?? $row['PO_Conv_unit'] ?? $row['PoConvUnit'] ?? '')),
+            'grn_unit'         => trim((string) ($row['GRN_UNIT'] ?? $row['GRN_Unit'] ?? $row['GrnUnit'] ?? '')),
+            'grn_conv_qty'     => (float) ($row['GRN_Conv_QTY'] ?? $row['GRN_Conv_Qty'] ?? $row['GRN_CONV_QTY'] ?? $row['GrnConvQty'] ?? 0),
+            'grn_conv_unit'    => trim((string) ($row['GRN_Conv_Unit'] ?? $row['GRN_CONV_UNIT'] ?? $row['GRN_Conv_unit'] ?? $row['GrnConvUnit'] ?? '')),
+            'gi_unit'          => trim((string) ($row['GI_UNIT'] ?? $row['GI_Unit'] ?? $row['GiUnit'] ?? $row['Issue_Unit'] ?? '')),
+            'doc_date'         => trim((string) ($row['DocDate'] ?? $row['DOC_DATE'] ?? $row['CreationDate'] ?? $row['ERDAT'] ?? $row['Date'] ?? '')),
+            'category'         => $kind === 'trims' ? $this->categorizeTrim($material, (string) ($row['Description'] ?? '')) : '',
         ];
     }
 

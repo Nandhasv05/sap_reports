@@ -95,6 +95,21 @@
         const pr = Number(rec.total_pr_qty) || 0;
         const bal = Number(rec.balance_pr_qty) || 0;
 
+        const poStatus = String(rec.po_status ?? rec.Po_status ?? rec.PO_STATUS ?? '').trim().toUpperCase();
+        const poCreatedQty = Number(rec.po_created_qty ?? rec.PO_CREATED_QTY ?? rec.PoCreatedQty) || 0;
+        const createdPo = String(rec.created_po ?? rec.CREATED_PO ?? rec.CreatedPo ?? '').trim();
+        const isPoDone = poStatus === 'YES' || poCreatedQty > 0 || (createdPo !== '' && createdPo !== '—' && createdPo !== '-');
+
+        if (isPoDone) {
+            return {
+                label: 'PO Already Done',
+                tone: 'po-done',
+                icon: 'fas fa-clipboard-check',
+                poNumber: createdPo,
+                poQty: poCreatedQty,
+            };
+        }
+
         if (stock >= req && req > 0) {
             return { label: 'In Stock', tone: 'success', icon: 'fas fa-circle-check' };
         }
@@ -151,6 +166,12 @@
     const prStatusLabel = Object.fromEntries(prStatuses);
 
     function prStatus(pr) {
+        const poStatus = String(pr.po_status ?? pr.Po_status ?? pr.PO_STATUS ?? '').trim().toUpperCase();
+        const poCreatedQty = Number(pr.po_created_qty ?? pr.PO_CREATED_QTY ?? pr.PoCreatedQty) || 0;
+        const createdPo = String(pr.created_po ?? pr.CREATED_PO ?? pr.CreatedPo ?? '').trim();
+        if (poStatus === 'YES' || poCreatedQty > 0 || (createdPo !== '' && createdPo !== '—' && createdPo !== '-')) {
+            return 'done';
+        }
         const balance = Number(pr.balance_pr_qty) || 0;
         if (balance < -0.0005) return 'over';
         if (balance <= 0.0005) return 'done';
@@ -237,8 +258,9 @@
 
                 if (col.key === 'stock_status') {
                     const st = getStockStatus(rec);
+                    const titleAttr = st.poNumber ? `title="Created PO: ${escapeHtml(st.poNumber)}${st.poQty > 0 ? ` (Qty: ${fmtQty(st.poQty)})` : ''}"` : '';
                     return `<td class="proc-cell-status">`
-                        + `<span class="proc-badge-status is-${st.tone}">`
+                        + `<span class="proc-badge-status is-${st.tone}" ${titleAttr}>`
                         + `<i class="${st.icon}"></i><span>${escapeHtml(st.label)}</span>`
                         + `</span></td>`;
                 }
@@ -275,6 +297,8 @@
                 rec.material_group,
                 rec.mat_group_desc,
                 rec.material_type,
+                rec.created_po,
+                rec.po_status,
                 prNumbers,
             ].filter(Boolean);
             return {
@@ -970,67 +994,86 @@
         if (activePrModalTab === 'so') {
             const rows = data.sales_orders || [];
             const totalSelectPrValue = Number(data.total_selected_pr_qty) || 0;
+            const totalSelectBalanceValue = Number(data.total_selected_balance_qty) || 0;
 
-            let sumReq = 0, sumTotalPr = 0, sumTotalPo = 0, sumBal = 0, sumStock = 0;
-            let runningPr = totalSelectPrValue;
+            let sumReq = 0, sumSelectQty = 0, sumSoBal = 0;
+            let runningBalance = totalSelectBalanceValue;
 
             const computedRows = rows.map(r => {
-                const req = Number(r.requirement_qty) || 0;
+                const req = Number(r.requirement_qty ?? r.required_qty) || 0;
                 sumReq += req;
-                sumTotalPr += Number(r.total_pr_qty) || 0;
-                sumTotalPo += Number(r.total_po_qty) || 0;
-                sumBal += Number(r.balance_pr_qty) || 0;
-                sumStock += Number(r.stock_qty) || 0;
 
-                const soBalancePr = runningPr;
+                // Balance Qty starts with total selected PR balance, then remaining balance is passed down
+                const balanceQty = runningBalance;
 
+                // Total Select Qty is how much requirement is allocated from available balance
+                const totalSelectQty = balanceQty > 0 ? req : 0;
+
+                // SO Balance Qty = Available Balance - Selected Requirement
+                const soBalanceQty = balanceQty - totalSelectQty;
+
+                sumSelectQty += totalSelectQty;
+                sumSoBal += soBalanceQty;
+
+                // Status based on whether requirement is covered by SO Balance PR
                 let statusTone = 'covered';
                 let statusText = 'Covered';
+                let isDanger = false;
 
                 if (req <= 0) {
                     statusTone = 'covered';
                     statusText = 'Covered';
-                } else if (soBalancePr >= req) {
-                    statusTone = 'covered';
-                    statusText = 'Covered';
-                } else if (soBalancePr > 0) {
-                    statusTone = 'partial';
-                    statusText = 'Partial';
-                } else {
+                    isDanger = false;
+                } else if (soBalanceQty < 0) {
                     statusTone = 'shortage';
                     statusText = 'Shortage';
+                    isDanger = true;
+                } else if (balanceQty <= 0) {
+                    statusTone = 'shortage';
+                    statusText = 'Shortage';
+                    isDanger = true;
+                } else if (balanceQty >= req) {
+                    statusTone = 'covered';
+                    statusText = 'Covered';
+                    isDanger = false;
+                } else {
+                    statusTone = 'partial';
+                    statusText = 'Partial';
+                    isDanger = true;
                 }
 
-                runningPr = Math.max(0, runningPr - req);
+                // Deduct allocated requirement for next SO
+                runningBalance = Math.max(0, runningBalance - totalSelectQty);
 
                 return {
                     ...r,
                     req,
-                    so_balance_pr: soBalancePr,
+                    balance_qty: balanceQty,
+                    total_select_qty: totalSelectQty,
+                    so_balance_qty: soBalanceQty,
                     status_tone: statusTone,
                     status_text: statusText,
+                    is_danger: isDanger,
                 };
             });
 
             const rowsHtml = computedRows.length ? computedRows.map(r => `
-                <tr>
-                    <td>
+                <tr class="${r.is_danger ? 'is-danger-row' : ''}" style="${r.is_danger ? 'background:#fef2f2;' : ''}">
+                    <td style="${r.is_danger ? 'background:#fef2f2;' : ''}">
                         <a href="${escapeHtml(cfg.pageUrl || 'procurement')}?so=${encodeURIComponent(r.sales_doc || r.so_number)}" class="pr-modal-so-link" title="Open Sales Order ${escapeHtml(r.sales_doc || r.so_number)}">
                             ${escapeHtml(r.sales_doc || r.so_number)}
                         </a>
                     </td>
-                    <td>${escapeHtml(r.material || '—')}</td>
-                    <td class="num font-semibold" style="color:#0284c7;">${fmtPrNum(r.requirement_qty)}</td>
-                    <td class="num font-semibold">${fmtPrNum(r.total_pr_qty)}</td>
-                    <td class="num font-semibold" style="color:#0f766e;">${fmtPrNum(r.total_po_qty)}</td>
-                    <td class="num font-semibold" style="color:#0f766e;">${fmtPrNum(r.so_balance_pr)}</td>
-                    <td style="text-align:center;white-space:nowrap;">
+                    <td style="${r.is_danger ? 'background:#fef2f2;' : ''}">${escapeHtml(r.material || '—')}</td>
+                    <td class="num font-semibold" style="color:#0284c7;${r.is_danger ? 'background:#fef2f2;' : ''}">${fmtPrNum(r.req)}</td>
+                    <td class="num font-semibold" style="color:#1e293b;${r.is_danger ? 'background:#fef2f2;' : ''}">${fmtPrNum(r.balance_qty)}</td>
+                    <td class="num font-semibold" style="color:#0f766e;${r.is_danger ? 'background:#fef2f2;' : ''}">${fmtPrNum(r.total_select_qty)}</td>
+                    <td class="num font-semibold ${r.so_balance_qty < 0 ? 'is-neg' : ''}" style="color:${r.so_balance_qty < 0 ? '#dc2626' : (r.so_balance_qty > 0 ? '#0f766e' : '#16a34a')};${r.is_danger ? 'background:#fef2f2;' : ''}">${fmtPrNum(r.so_balance_qty)}</td>
+                    <td style="text-align:center;white-space:nowrap;${r.is_danger ? 'background:#fef2f2;' : ''}">
                         <span class="proc-status is-${r.status_tone}">${r.status_text}</span>
                     </td>
-                    <td class="num font-semibold ${r.balance_pr_qty < 0 ? 'is-neg' : ''}" style="color:${r.balance_pr_qty < 0 ? '#dc2626' : (r.balance_pr_qty > 0 ? '#1e293b' : '#16a34a')};">${fmtPrNum(r.balance_pr_qty)}</td>
-                    <td class="num font-semibold" style="color:${r.stock_qty >= r.requirement_qty && r.requirement_qty > 0 ? '#16a34a' : '#d97706'};">${fmtPrNum(r.stock_qty)}</td>
                 </tr>
-            `).join('') : `<tr><td colspan="9" class="pr-modal-empty">No sales orders linked to this component.</td></tr>`;
+            `).join('') : `<tr><td colspan="7" class="pr-modal-empty">No sales orders linked to this component.</td></tr>`;
 
             const diff = Math.round((totalSelectPrValue - sumReq) * 1000) / 1000;
             const coveragePct = sumReq > 0 ? Math.min(999, Math.round((totalSelectPrValue / sumReq) * 100)) : 100;
@@ -1064,12 +1107,10 @@
                                 <th style="min-width:90px;">Sales Doc.</th>
                                 <th style="min-width:95px;">Material</th>
                                 <th class="num" style="min-width:110px;">Requirement Qty</th>
-                                <th class="num" style="min-width:105px;">Total PR Qty</th>
-                                <th class="num" style="min-width:105px;">Total PO Qty</th>
+                                <th class="num" style="min-width:105px;">Balance Qty</th>
+                                <th class="num" style="min-width:110px;color:#0f766e;">Total Select Qty</th>
                                 <th class="num" style="min-width:115px;color:#0f766e;">SO Balance PR</th>
                                 <th style="min-width:90px;text-align:center;">Status</th>
-                                <th class="num" style="min-width:110px;">Balance PR Qty</th>
-                                <th class="num" style="min-width:95px;">Stock QTY</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1080,12 +1121,10 @@
                             <tr style="background:#fef9c3;font-weight:700;border-top:2px solid #cbd5e1;color:#1e293b;">
                                 <th colspan="2" style="font-size:11.5px;color:#334155;">TOTAL (${computedRows.length} ${computedRows.length === 1 ? 'SALES ORDER' : 'SALES ORDERS'})</th>
                                 <th class="num font-bold" style="color:#0284c7;">${fmtPrNum(sumReq)}</th>
-                                <th class="num font-bold">${fmtPrNum(sumTotalPr)}</th>
-                                <th class="num font-bold" style="color:#0f766e;">${fmtPrNum(sumTotalPo)}</th>
+                                <th class="num font-bold" style="color:#1e293b;">${fmtPrNum(totalSelectBalanceValue)}</th>
+                                <th class="num font-bold" style="color:#0f766e;">${fmtPrNum(sumSelectQty)}</th>
+                                <th class="num font-bold ${sumSoBal < 0 ? 'is-neg' : ''}" style="color:${sumSoBal < 0 ? '#dc2626' : '#0f766e'};">${fmtPrNum(sumSoBal)}</th>
                                 <th></th>
-                                <th></th>
-                                <th class="num font-bold ${sumBal < 0 ? 'is-neg' : ''}" style="color:${sumBal < 0 ? '#dc2626' : '#1e293b'};">${fmtPrNum(sumBal)}</th>
-                                <th class="num font-bold">${fmtPrNum(sumStock)}</th>
                             </tr>
                         </tfoot>` : ''}
                     </table>
@@ -1271,6 +1310,7 @@
             material: rec.component_material || rec.material || '',
             material_description: rec.component_description || rec.material_description || '',
             total_selected_pr_qty: Number(prLine.pr_qty) || 0,
+            total_selected_balance_qty: Number(prLine.balance_pr_qty) || 0,
             sales_orders: salesOrders,
             purchase_history: [
                 {
@@ -1527,6 +1567,16 @@
             return acc + (q || 0);
         }, 0);
 
+        const totalSelectedBalanceQty = selectedList.reduce((acc, s) => {
+            let b = Number(s.line?.balance_pr_qty);
+            if (isNaN(b)) {
+                const prLines = Array.isArray(item?.rec?.pr_lines) ? item.rec.pr_lines : [];
+                const found = prLines.find(p => String(p.pr_number || '') === String(s.prNumber || '') && String(p.pr_item || '10') === String(s.prItem || '10'));
+                b = Number(found?.balance_pr_qty) || 0;
+            }
+            return acc + (b || 0);
+        }, 0);
+
         return {
             is_single: isSingle,
             pr_count: count,
@@ -1538,6 +1588,7 @@
             material_description: rec.component_description || rec.material_description || '',
             sales_orders: salesOrders,
             total_selected_pr_qty: totalSelectedPrQty,
+            total_selected_balance_qty: totalSelectedBalanceQty,
         };
     }
 
@@ -1557,70 +1608,86 @@
         if (activeDownTab === 'so') {
             const rows = data.sales_orders || [];
             const totalSelectPrValue = Number(data.total_selected_pr_qty) || 0;
+            const totalSelectBalanceValue = Number(data.total_selected_balance_qty) || 0;
 
-            let sumReq = 0, sumTotalPr = 0, sumTotalPo = 0, sumBal = 0, sumStock = 0;
-            let runningPr = totalSelectPrValue;
+            let sumReq = 0, sumSelectQty = 0, sumSoBal = 0;
+            let runningBalance = totalSelectBalanceValue;
 
             const computedRows = rows.map(r => {
-                const req = Number(r.requirement_qty) || 0;
+                const req = Number(r.requirement_qty ?? r.required_qty) || 0;
                 sumReq += req;
-                sumTotalPr += Number(r.total_pr_qty) || 0;
-                sumTotalPo += Number(r.total_po_qty) || 0;
-                sumBal += Number(r.balance_pr_qty) || 0;
-                sumStock += Number(r.stock_qty) || 0;
 
-                // Running PR Balance: SO 1 starts with total selected PR, SO 2 gets remaining after SO 1 requirement
-                const soBalancePr = runningPr;
+                // Balance Qty starts with total selected PR balance, then remaining balance is passed down
+                const balanceQty = runningBalance;
 
-                // Status based on whether available SO Balance PR covers requirement
+                // Total Select Qty is how much requirement is allocated from available balance
+                const totalSelectQty = balanceQty > 0 ? req : 0;
+
+                // SO Balance Qty = Available Balance - Selected Requirement
+                const soBalanceQty = balanceQty - totalSelectQty;
+
+                sumSelectQty += totalSelectQty;
+                sumSoBal += soBalanceQty;
+
+                // Status based on whether requirement is covered by SO Balance PR
                 let statusTone = 'covered';
                 let statusText = 'Covered';
+                let isDanger = false;
 
                 if (req <= 0) {
                     statusTone = 'covered';
                     statusText = 'Covered';
-                } else if (soBalancePr >= req) {
-                    statusTone = 'covered';
-                    statusText = 'Covered';
-                } else if (soBalancePr > 0) {
-                    statusTone = 'partial';
-                    statusText = 'Partial';
-                } else {
+                    isDanger = false;
+                } else if (soBalanceQty < 0) {
                     statusTone = 'shortage';
                     statusText = 'Shortage';
+                    isDanger = true;
+                } else if (balanceQty <= 0) {
+                    statusTone = 'shortage';
+                    statusText = 'Shortage';
+                    isDanger = true;
+                } else if (balanceQty >= req) {
+                    statusTone = 'covered';
+                    statusText = 'Covered';
+                    isDanger = false;
+                } else {
+                    statusTone = 'partial';
+                    statusText = 'Partial';
+                    isDanger = true;
                 }
 
-                // Deduct requirement for next SO
-                runningPr = Math.max(0, runningPr - req);
+                // Deduct allocated requirement for next SO
+                runningBalance = Math.max(0, runningBalance - totalSelectQty);
 
                 return {
                     ...r,
                     req,
-                    so_balance_pr: soBalancePr,
+                    balance_qty: balanceQty,
+                    total_select_qty: totalSelectQty,
+                    so_balance_qty: soBalanceQty,
                     status_tone: statusTone,
                     status_text: statusText,
+                    is_danger: isDanger,
                 };
             });
 
             const rowsHtml = computedRows.length ? computedRows.map(r => `
-                <tr>
-                    <td>
-                        <a href="${escapeHtml(cfg.pageUrl || 'procurement')}?so=${encodeURIComponent(r.sales_doc)}" class="pr-modal-so-link" title="Open Sales Order ${escapeHtml(r.sales_doc)}">
-                            ${escapeHtml(r.sales_doc)}
+                <tr class="${r.is_danger ? 'is-danger-row' : ''}" style="${r.is_danger ? 'background:#fef2f2;' : ''}">
+                    <td style="${r.is_danger ? 'background:#fef2f2;' : ''}">
+                        <a href="${escapeHtml(cfg.pageUrl || 'procurement')}?so=${encodeURIComponent(r.sales_doc || r.so_number)}" class="pr-modal-so-link" title="Open Sales Order ${escapeHtml(r.sales_doc || r.so_number)}">
+                            ${escapeHtml(r.sales_doc || r.so_number)}
                         </a>
                     </td>
-                    <td>${escapeHtml(r.material)}</td>
-                    <td class="num font-semibold" style="color:#0284c7;">${fmtPrNum(r.requirement_qty)}</td>
-                    <td class="num font-semibold">${fmtPrNum(r.total_pr_qty)}</td>
-                    <td class="num font-semibold" style="color:#0f766e;">${fmtPrNum(r.total_po_qty)}</td>
-                    <td class="num font-semibold" style="color:#0f766e;">${fmtPrNum(r.so_balance_pr)}</td>
-                    <td style="text-align:center;white-space:nowrap;">
+                    <td style="${r.is_danger ? 'background:#fef2f2;' : ''}">${escapeHtml(r.material || '—')}</td>
+                    <td class="num font-semibold" style="color:#0284c7;${r.is_danger ? 'background:#fef2f2;' : ''}">${fmtPrNum(r.req)}</td>
+                    <td class="num font-semibold" style="color:#1e293b;${r.is_danger ? 'background:#fef2f2;' : ''}">${fmtPrNum(r.balance_qty)}</td>
+                    <td class="num font-semibold" style="color:#0f766e;${r.is_danger ? 'background:#fef2f2;' : ''}">${fmtPrNum(r.total_select_qty)}</td>
+                    <td class="num font-semibold ${r.so_balance_qty < 0 ? 'is-neg' : ''}" style="color:${r.so_balance_qty < 0 ? '#dc2626' : (r.so_balance_qty > 0 ? '#0f766e' : '#16a34a')};${r.is_danger ? 'background:#fef2f2;' : ''}">${fmtPrNum(r.so_balance_qty)}</td>
+                    <td style="text-align:center;white-space:nowrap;${r.is_danger ? 'background:#fef2f2;' : ''}">
                         <span class="proc-status is-${r.status_tone}">${r.status_text}</span>
                     </td>
-                    <td class="num font-semibold ${r.balance_pr_qty < 0 ? 'is-neg' : ''}" style="color:${r.balance_pr_qty < 0 ? '#dc2626' : (r.balance_pr_qty > 0 ? '#1e293b' : '#16a34a')};">${fmtPrNum(r.balance_pr_qty)}</td>
-                    <td class="num font-semibold" style="color:${r.stock_qty >= r.requirement_qty && r.requirement_qty > 0 ? '#16a34a' : '#d97706'};">${fmtPrNum(r.stock_qty)}</td>
                 </tr>
-            `).join('') : `<tr><td colspan="9" class="pr-modal-empty">No sales orders linked to this component.</td></tr>`;
+            `).join('') : `<tr><td colspan="7" class="pr-modal-empty">No sales orders linked to this component.</td></tr>`;
 
             const diff = Math.round((totalSelectPrValue - sumReq) * 1000) / 1000;
             const coveragePct = sumReq > 0 ? Math.min(999, Math.round((totalSelectPrValue / sumReq) * 100)) : 100;
@@ -1660,12 +1727,10 @@
                                 <th style="min-width:90px;">Sales Doc.</th>
                                 <th style="min-width:95px;">Material</th>
                                 <th class="num" style="min-width:110px;">Requirement Qty</th>
-                                <th class="num" style="min-width:105px;">Total PR Qty</th>
-                                <th class="num" style="min-width:105px;">Total PO Qty</th>
+                                <th class="num" style="min-width:105px;">Balance Qty</th>
+                                <th class="num" style="min-width:110px;color:#0f766e;">Total Select Qty</th>
                                 <th class="num" style="min-width:115px;color:#0f766e;">SO Balance PR</th>
                                 <th style="min-width:90px;text-align:center;">Status</th>
-                                <th class="num" style="min-width:110px;">Balance PR Qty</th>
-                                <th class="num" style="min-width:95px;">Stock QTY</th>
                             </tr>
                         </thead>
                         <tbody>${rowsHtml}</tbody>
@@ -1673,12 +1738,10 @@
                             <tr style="background:#fef9c3;font-weight:700;border-top:2px solid #cbd5e1;color:#1e293b;">
                                 <th colspan="2" style="font-size:11.5px;color:#334155;">TOTAL (${computedRows.length} ${computedRows.length === 1 ? 'SALES ORDER' : 'SALES ORDERS'})</th>
                                 <th class="num font-bold" style="color:#0284c7;">${fmtPrNum(sumReq)}</th>
-                                <th class="num font-bold">${fmtPrNum(sumTotalPr)}</th>
-                                <th class="num font-bold" style="color:#0f766e;">${fmtPrNum(sumTotalPo)}</th>
+                                <th class="num font-bold" style="color:#1e293b;">${fmtPrNum(totalSelectBalanceValue)}</th>
+                                <th class="num font-bold" style="color:#0f766e;">${fmtPrNum(sumSelectQty)}</th>
+                                <th class="num font-bold ${sumSoBal < 0 ? 'is-neg' : ''}" style="color:${sumSoBal < 0 ? '#dc2626' : '#0f766e'};">${fmtPrNum(sumSoBal)}</th>
                                 <th></th>
-                                <th></th>
-                                <th class="num font-bold ${sumBal < 0 ? 'is-neg' : ''}" style="color:${sumBal < 0 ? '#dc2626' : '#1e293b'};">${fmtPrNum(sumBal)}</th>
-                                <th class="num font-bold">${fmtPrNum(sumStock)}</th>
                             </tr>
                         </tfoot>` : ''}
                     </table>
