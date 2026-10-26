@@ -11,6 +11,7 @@ require_once base_path('app/controllers/SalesController.php');
 
 /** @var Router $router */
 $router->get('/', [ReportsController::class, 'index']);
+$router->get('404', [ErrorController::class, 'notFound']);
 
 // START SALES DASHBOARD ROUTES (Migrated from KPIS)
 $router->get('sales', [SalesController::class, 'index']);

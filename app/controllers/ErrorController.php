@@ -15,3 +15,4 @@ class ErrorController extends Controller
         ]);
     }
 }
+?>

@@ -3,7 +3,7 @@
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 29/09/2026
  * DESCRIPTION : /api/user/table-preferences/{tableKey} - the signed-in user's column order / visibility per table
- */
+*/
 require_once base_path('app/services/TablePreferenceService.php');
 
 class TablePreferencesController extends Controller
@@ -33,7 +33,7 @@ class TablePreferencesController extends Controller
 
     /*
      * The user id always comes from the portal session (already started and validated at boot), never from the request
-     */
+    */
     private function handle(callable $action): void
     {
         $id = (string) ($_SESSION['user_id'] ?? '');
@@ -89,3 +89,5 @@ class TablePreferencesController extends Controller
         ], $e->status);
     }
 }
+
+?>

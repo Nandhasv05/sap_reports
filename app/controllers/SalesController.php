@@ -3,7 +3,7 @@
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 03/09/2026
  * DESCRIPTION : Sales Controller for the sales dashboard
- */
+*/
 require_once base_path('app/models/SalesModel.php');
 require_once base_path('app/models/DashboardModel.php');
 require_once base_path('app/services/SapSalesService.php');
@@ -47,7 +47,7 @@ class SalesController extends Controller
 
         $this->view('sales/index', [
             'pageTitle'        => $cfg['title'],
-            'pageSubtitle'     => $live['data_source'] === 'sap' ? 'SAP live data' : 'Sample data',
+            'pageSubtitle'     => 'Sample data',
             'activeNav'        => 'sales',
             'primaryColor'     => $cfg['primary'],
             'primaryDark'      => $cfg['primary_dark'],
@@ -90,9 +90,7 @@ class SalesController extends Controller
             'quotation' => trim((string) ($_GET['quotation'] ?? '')),
             'sales_order' => trim((string) ($_GET['sales_order'] ?? $_GET['so'] ?? '')),
             'page'      => max(1, (int) ($_GET['page'] ?? 1)),
-            'per_page'  => $export
-                ? min(8000, max(1, (int) ($_GET['per_page'] ?? 8000)))
-                : min(100, max(10, (int) ($_GET['per_page'] ?? 10))),
+            'per_page'  => min(8000, max(1, (int) ($_GET['per_page'] ?? ($export ? 8000 : 25)))),
             'year'      => $year,
         ];
 
@@ -482,3 +480,4 @@ class SalesController extends Controller
     }
 }
 
+?>

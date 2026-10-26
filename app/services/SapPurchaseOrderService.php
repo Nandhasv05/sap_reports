@@ -239,7 +239,13 @@ class SapPurchaseOrderService
         $preset = strtolower(trim((string) ($filters['range'] ?? 'this_month')));
         $range = self::resolveRange($preset, (string) ($filters['from'] ?? ''), (string) ($filters['to'] ?? ''));
         $plant = strtoupper(trim((string) ($filters['plant'] ?? '')));
-        $supplier = trim((string) ($filters['supplier'] ?? ''));
+        $rawSuppliers = $filters['supplier'] ?? $filters['vendor'] ?? '';
+        if (is_array($rawSuppliers)) {
+            $suppliers = array_values(array_unique(array_filter(array_map('trim', $rawSuppliers))));
+        } else {
+            $suppliers = array_values(array_unique(array_filter(array_map('trim', explode(',', (string) $rawSuppliers)))));
+        }
+        $supplier = implode(',', $suppliers);
         $so = preg_replace('/\D/', '', (string) ($filters['so'] ?? '')) ?? '';
 
         $rawTypes = $filters['po_type'] ?? $filters['type'] ?? '';
@@ -251,7 +257,9 @@ class SapPurchaseOrderService
 
         $typesKey = $poTypes;
         sort($typesKey);
-        $cacheKey = 'po_list_' . md5(json_encode([$range['preset'], $range['from'], $range['to'], $plant, $supplier, $so, implode(',', $typesKey)]));
+        $supKey = $suppliers;
+        sort($supKey);
+        $cacheKey = 'po_list_' . md5(json_encode([$range['preset'], $range['from'], $range['to'], $plant, implode(',', $supKey), $so, implode(',', $typesKey)]));
         $cached = $this->cacheRead($cacheKey, (int) ($this->cfg['cache_ttl'] ?? 300));
         if ($cached !== null) {
             return $cached;
@@ -264,9 +272,18 @@ class SapPurchaseOrderService
         if ($plant !== '') {
             $filterParts[] = "Plant eq '{$plant}'";
         }
-        if ($supplier !== '') {
-            $supPadded = $this->padSalesOrder($supplier);
-            $filterParts[] = "(Supplier eq '{$supplier}' or Supplier eq '{$supPadded}')";
+        if (!empty($suppliers)) {
+            if (count($suppliers) === 1) {
+                $supPadded = $this->padSalesOrder($suppliers[0]);
+                $filterParts[] = "(Supplier eq '{$suppliers[0]}' or Supplier eq '{$supPadded}')";
+            } else {
+                $supClauses = [];
+                foreach ($suppliers as $s) {
+                    $supPadded = $this->padSalesOrder($s);
+                    $supClauses[] = "Supplier eq '{$s}' or Supplier eq '{$supPadded}'";
+                }
+                $filterParts[] = '(' . implode(' or ', $supClauses) . ')';
+            }
         }
         if (!empty($poTypes)) {
             if (count($poTypes) === 1) {
@@ -401,10 +418,18 @@ class SapPurchaseOrderService
             $totalQty += $r['total_qty'];
             $totalVal += $r['total_value'];
             $totalItems += $r['items_count'];
-            if ($r['supplier'] !== '') {
-                $uniqueSuppliers[$r['supplier']] = true;
+            $supCode = trim((string) ($r['supplier'] ?? ''));
+            if ($supCode !== '' && $supCode !== '—') {
+                $supName = trim((string) ($r['supplier_full_name'] ?? ''));
+                if (!isset($uniqueSuppliers[$supCode])) {
+                    $uniqueSuppliers[$supCode] = [
+                        'code' => $supCode,
+                        'name' => $supName !== '' ? $supName : ('Supplier ' . $supCode),
+                    ];
+                }
             }
         }
+        usort($uniqueSuppliers, static fn ($a, $b) => strcasecmp($a['name'], $b['name']));
 
         $out = [
             'records' => $records,
@@ -417,6 +442,7 @@ class SapPurchaseOrderService
                 'currency'        => $primaryCurrency,
                 'suppliers_count' => count($uniqueSuppliers),
             ],
+            'suppliers' => array_values($uniqueSuppliers),
             'range'   => $range,
             'error'   => null,
         ];

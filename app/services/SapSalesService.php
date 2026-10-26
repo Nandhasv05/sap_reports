@@ -3,11 +3,11 @@
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 03/09/2026
  * DESCRIPTION : Sap Sales Service for the sales dashboard
- */
+*/
 
 /*
  * Sap Sales Service class
- */
+*/
 require_once base_path('app/core/SapODataClient.php');
 
 class SapSalesService
@@ -71,18 +71,27 @@ class SapSalesService
         @ini_set('memory_limit', '512M');
         @set_time_limit(45);
 
-        $idSearch = null;
+        $idList = [];
         $rawSearch = trim((string) ($filters['quotation'] ?? $filters['sales_order'] ?? $filters['so'] ?? $search));
-        if (preg_match('/^(?:(?:so|qt|quo(?:tation)?)\s*#?\s*)?(\d{1,10})$/i', $rawSearch, $m)) {
-            $orderDigits = $m[1];
-            $rawId = ltrim($orderDigits, '0');
-            $idSearch = [
-                'raw'    => $rawId === '' ? '0' : $rawId,
-                'padded' => str_pad($orderDigits, 10, '0', STR_PAD_LEFT),
-            ];
-        }
+        $cleanedSearch = preg_replace('/(?:so|qt|quo(?:tation)?)\s*#?/i', '', $rawSearch);
+        $tokens = preg_split('/[,;\s|\/]+/', trim($cleanedSearch), -1, PREG_SPLIT_NO_EMPTY);
 
-        if ($from === '' && $to === '') {
+        if (!empty($tokens) && count(array_filter($tokens, fn($t) => preg_match('/^\d{1,10}$/', $t))) === count($tokens)) {
+            foreach ($tokens as $token) {
+                $rawId = ltrim($token, '0');
+                $idList[] = [
+                    'raw'     => $rawId === '' ? '0' : $rawId,
+                    'padded'  => str_pad($token, 10, '0', STR_PAD_LEFT),
+                    'padded8' => str_pad($rawId, 8, '0', STR_PAD_LEFT),
+                ];
+            }
+        }
+        $idSearch = !empty($idList) ? $idList[0] : null;
+
+        if (!empty($idList)) {
+            $from = '';
+            $to = '';
+        } elseif ($from === '' && $to === '') {
             $now = new DateTime();
             $dayOfWeek = (int) $now->format('N');
             $from = (clone $now)->modify('-' . ($dayOfWeek - 1) . ' days')->format('Y-m-d');
@@ -98,11 +107,11 @@ class SapSalesService
         $quoteMeta = [
             'count'        => 0,
             'sales_orders' => [],
-            'quotation'    => $idSearch['raw'] ?? '',
+            'quotation'    => implode(', ', array_unique(array_column($idList, 'raw'))),
         ];
 
         try {
-            $quoteResult = $this->fetchQuotationHub($idSearch, $from, $to);
+            $quoteResult = $this->fetchQuotationHub($idSearch, $from, $to, $idList);
             $quoteRows = $quoteResult['rows'] ?? [];
             $sapError = $quoteResult['error'] ?? null;
             $salesOrders = [];
@@ -117,7 +126,7 @@ class SapSalesService
             $quoteMeta = [
                 'count'        => count($quoteRows),
                 'sales_orders' => array_keys($salesOrders),
-                'quotation'    => $idSearch['raw'] ?? '',
+                'quotation'    => implode(', ', array_unique(array_column($idList, 'raw'))),
             ];
         } catch (Throwable $e) {
             $sapError = $e->getMessage();
@@ -131,7 +140,25 @@ class SapSalesService
             }
         }
 
-        $textSearch = $idSearch !== null ? '' : $search;
+        if (!empty($idList)) {
+            $idSet = [];
+            foreach ($idList as $it) {
+                $idSet[(string) $it['raw']] = true;
+                $idSet[(string) $it['padded']] = true;
+                if (isset($it['padded8'])) {
+                    $idSet[(string) $it['padded8']] = true;
+                }
+            }
+            $records = array_values(array_filter($records, function ($r) use ($idSet) {
+                $q = ltrim(trim((string) ($r['quotation'] ?? '')), '0');
+                $so = ltrim(trim((string) ($r['sales_order'] ?? '')), '0');
+                $qRaw = trim((string) ($r['quotation'] ?? ''));
+                $soRaw = trim((string) ($r['sales_order'] ?? ''));
+                return isset($idSet[$q]) || isset($idSet[$so]) || isset($idSet[$qRaw]) || isset($idSet[$soRaw]);
+            }));
+        }
+
+        $textSearch = !empty($idList) ? '' : $search;
         $filtered = $this->filterRecords($records, $textSearch, $from, $to);
         unset($records);
 
@@ -178,23 +205,62 @@ class SapSalesService
                 $returnQty += $lineQty;
             }
         }
-        $orders = $total;
+        $uniqueQuotations = count(array_unique(array_filter(array_map(
+            static fn($r) => trim((string) ($r['quotation'] ?? '')),
+            $filtered
+        ), static fn($q) => $q !== '' && $q !== '—')));
+
+        $uniqueOrders = count(array_unique(array_filter(array_map(
+            static fn($r) => trim((string) ($r['sales_order'] ?? '')),
+            $filtered
+        ), static fn($s) => $s !== '' && $s !== '—')));
+
+        $quotations = $uniqueQuotations > 0 ? $uniqueQuotations : ($total > 0 ? 1 : 0);
+        $orders = $uniqueOrders > 0 ? $uniqueOrders : ($total > 0 ? 1 : 0);
         $materials = count(array_unique(array_filter(array_map(
             static fn($r) => (string) ($r['customer'] ?? ''),
             $filtered
         ), static fn($m) => $m !== '' && $m !== '—')));
 
+        $convertedLines = 0;
+        $convertedQuotations = [];
+        $allQuotations = [];
+        foreach ($filtered as $r) {
+            $hasSo = !empty($r['sales_order']) && $r['sales_order'] !== '—';
+            $quoteId = trim((string) ($r['quotation'] ?? ''));
+            if ($quoteId !== '' && $quoteId !== '—') {
+                $allQuotations[$quoteId] = true;
+                if ($hasSo) {
+                    $convertedQuotations[$quoteId] = true;
+                }
+            }
+            if ($hasSo) {
+                $convertedLines++;
+            }
+        }
+        $convertedQuotesCount = count($convertedQuotations);
+        $totalQuotesCount = count($allQuotations) ?: $quotations;
+        $pendingQuotesCount = max(0, $totalQuotesCount - $convertedQuotesCount);
+        $conversionRate = $totalQuotesCount > 0 ? round(($convertedQuotesCount / $totalQuotesCount) * 100, 1) : 0;
+        $lineConversionRate = $total > 0 ? round(($convertedLines / $total) * 100, 1) : 0;
+
         $summary = [
-            'net_sales'    => round($net, 2),
-            'cost_amount'  => round($cost, 2),
-            'lines'        => $total,
-            'orders'       => $orders,
-            'avg_line'     => $total > 0 ? round($net / $total, 2) : 0,
-            'avg_order'    => $orders > 0 ? round($net / $orders, 2) : 0,
-            'total_qty'    => round($qty, 3),
-            'return_rate'  => $qty > 0 ? round(($returnQty / $qty) * 100, 2) : 0,
-            'gross_margin' => $net > 0 ? round((($net - $cost) / $net) * 100, 2) : 0,
-            'materials'    => $materials,
+            'net_sales'            => round($net, 2),
+            'cost_amount'          => round($cost, 2),
+            'lines'                => $total,
+            'orders'               => $orders,
+            'quotations'           => $quotations,
+            'converted_quotations' => $convertedQuotesCount,
+            'pending_quotations'   => $pendingQuotesCount,
+            'converted_lines'      => $convertedLines,
+            'conversion_rate'      => $conversionRate,
+            'line_conversion_rate' => $lineConversionRate,
+            'avg_line'             => $total > 0 ? round($net / $total, 2) : 0,
+            'avg_order'            => $orders > 0 ? round($net / $orders, 2) : 0,
+            'total_qty'            => round($qty, 3),
+            'return_rate'          => $qty > 0 ? round(($returnQty / $qty) * 100, 2) : 0,
+            'gross_margin'         => $net > 0 ? round((($net - $cost) / $net) * 100, 2) : 0,
+            'materials'            => $materials,
         ];
 
         $charts = $this->buildChartsFromRecords($filtered);
@@ -329,6 +395,7 @@ class SapSalesService
         $byOrder = [];
         $byCustomer = [];
         $byCreator = [];
+        $itemsBreakdown = [];
         $costSum = 0.0;
         $profitSum = 0.0;
 
@@ -337,6 +404,22 @@ class SapSalesService
             $qtyVal = (float) ($r['qty'] ?? 0);
             $weight = abs($amount) > 0.0000001 ? $amount : $qtyVal;
             $cost = (float) ($r['cost'] ?? 0);
+
+            $line = trim((string) ($r['line_item'] ?? '0'));
+            // Skip zero-value empty header line 0 from items breakdown if other lines exist
+            if (!($line === '0' && $amount <= 0 && $qtyVal <= 0 && count($filtered) > 1)) {
+                $mat = trim((string) ($r['material'] ?? ''));
+                $shortMat = ($mat !== '' && $mat !== '—') ? (strlen($mat) > 12 ? substr($mat, 0, 10) . '..' : $mat) : '';
+                $lbl = 'Item ' . $line . ($shortMat !== '' ? ' (' . $shortMat . ')' : '');
+                $itemsBreakdown[$lbl] = [
+                    'item'      => $line,
+                    'material'  => $mat !== '' ? $mat : '—',
+                    'net_value' => round($amount, 2),
+                    'qty'       => round($qtyVal, 2),
+                    'unit'      => (string) ($r['unit'] ?? 'EA'),
+                ];
+            }
+
             $dateKey = !empty($r['date_iso']) ? $r['date_iso'] : 'N/A';
             $byDate[$dateKey] = ($byDate[$dateKey] ?? 0) + $weight;
 
@@ -380,7 +463,10 @@ class SapSalesService
                 $byOrder['SO ' . $orderNo] = ($byOrder['SO ' . $orderNo] ?? 0) + $weight;
             }
 
-            $cust = trim((string) ($r['customer_ref'] ?? ''));
+            $cust = trim((string) ($r['customer'] ?? ''));
+            if ($cust === '' || $cust === '—') {
+                $cust = trim((string) ($r['customer_ref'] ?? ''));
+            }
             if ($cust !== '' && $cust !== '—') {
                 if (strlen($cust) > 22) {
                     $cust = substr($cust, 0, 20) . '…';
@@ -427,12 +513,24 @@ class SapSalesService
                 'labels' => $trendLabels,
                 'values' => $trendValues,
             ],
+            'items'      => [
+                'labels'     => array_keys($itemsBreakdown),
+                'values'     => array_column(array_values($itemsBreakdown), 'net_value'),
+                'quantities' => array_column(array_values($itemsBreakdown), 'qty'),
+                'units'      => array_column(array_values($itemsBreakdown), 'unit'),
+                'materials'  => array_column(array_values($itemsBreakdown), 'material'),
+            ],
+            'materials'  => [
+                'labels' => array_keys($topStyles),
+                'values' => array_map(static fn($v) => round((float) $v, 2), array_values($topStyles)),
+            ],
             'division'   => $mix,
             'mix'        => $mix,
             'plants'     => $this->chartSeries($byPlant, 8),
             'divisions'  => $this->chartSeries($byDivision, 8),
             'statuses'   => $this->chartSeries($byStatus, 8),
             'categories' => $this->chartSeries($byCategory, 8),
+            'customers'  => $this->chartSeries($byCustomer, 8),
             'top_styles' => [
                 'labels' => array_keys($topStyles),
                 'values' => array_map(static fn($v) => round((float) $v, 2), array_values($topStyles)),
@@ -1262,21 +1360,35 @@ class SapSalesService
     /**
      * Call ZI_QuotationSalesOrder_HUB (quotation first).
      */
-    private function fetchQuotationHub(?array $idSearch, string $from, string $to): array
+    private function fetchQuotationHub(?array $idSearch, string $from, string $to, array $idList = []): array
     {
         $service = (string) ($this->cfg['quotation_service']
             ?? '/sap/opu/odata/sap/ZI_QUOTATIONSALESORDER_HUB_CDS/ZI_QuotationSalesOrder_HUB');
 
-        if ($idSearch !== null) {
-            $raw = str_replace("'", "''", (string) $idSearch['raw']);
-            $padded = str_replace("'", "''", (string) $idSearch['padded']);
-            $padded8 = str_replace("'", "''", str_pad((string) $idSearch['raw'], 8, '0', STR_PAD_LEFT));
-            if (strlen((string) $idSearch['raw']) >= 8) {
-                $filter = "Quotation eq '{$raw}' or Quotation eq '{$padded8}' or Quotation eq '{$padded}'";
-            } else {
-                $filter = "SalesOrder eq '{$raw}' or SalesOrder eq '{$padded}'"
-                    . " or FollowOnDocument eq '{$raw}' or FollowOnDocument eq '{$padded}'";
+        $activeList = !empty($idList) ? $idList : ($idSearch !== null ? [$idSearch] : []);
+
+        if (!empty($activeList)) {
+            $vals = [];
+            foreach ($activeList as $item) {
+                if (isset($item['raw'])) {
+                    $vals[] = (string) $item['raw'];
+                }
+                if (isset($item['padded'])) {
+                    $vals[] = (string) $item['padded'];
+                }
+                if (isset($item['padded8'])) {
+                    $vals[] = (string) $item['padded8'];
+                }
             }
+            $vals = array_unique(array_filter($vals));
+            $parts = [];
+            foreach ($vals as $v) {
+                $v = str_replace("'", "''", (string) $v);
+                $parts[] = "Quotation eq '{$v}'";
+                $parts[] = "SalesOrder eq '{$v}'";
+                $parts[] = "FollowOnDocument eq '{$v}'";
+            }
+            $filter = implode(' or ', $parts);
         } else {
             $filter = sprintf(
                 "QuotationDate ge datetime'%sT00:00:00' and QuotationDate le datetime'%sT23:59:59'",

@@ -579,7 +579,13 @@ class ReportsController extends Controller
         $rangePreset = strtolower(trim((string) ($_GET['range'] ?? 'this_month')));
         $range = SapPurchaseOrderService::resolveRange($rangePreset, (string) ($_GET['from'] ?? ''), (string) ($_GET['to'] ?? ''));
         $plant = strtoupper(trim((string) ($_GET['plant'] ?? '')));
-        $supplier = trim((string) ($_GET['supplier'] ?? ''));
+        $rawSupplier = $_GET['supplier'] ?? $_GET['vendor'] ?? '';
+        if (is_array($rawSupplier)) {
+            $suppliers = array_values(array_unique(array_filter(array_map('trim', $rawSupplier))));
+        } else {
+            $suppliers = array_values(array_unique(array_filter(array_map('trim', explode(',', (string) $rawSupplier)))));
+        }
+        $supplier = implode(',', $suppliers);
         $salesOrder = preg_replace('/\D/', '', (string) ($_GET['so'] ?? '')) ?? '';
         $rawPoType = $_GET['po_type'] ?? $_GET['type'] ?? '';
         if (is_array($rawPoType)) {
@@ -602,7 +608,7 @@ class ReportsController extends Controller
                     'from'     => $range['from'] ?? '',
                     'to'       => $range['to'] ?? '',
                     'plant'    => $plant,
-                    'supplier' => $supplier,
+                    'supplier' => $suppliers,
                     'so'       => $salesOrder,
                     'po_type'  => $poTypes,
                 ]);
@@ -629,6 +635,7 @@ class ReportsController extends Controller
             'plant'         => $plant,
             'plants'        => $service->plants(),
             'supplier'      => $supplier,
+            'suppliers'     => $suppliers,
             'salesOrder'    => $salesOrder,
             'poType'        => $poType,
             'poTypes'       => $poTypes,
@@ -818,3 +825,5 @@ class ReportsController extends Controller
         }
     }
 }
+
+?>

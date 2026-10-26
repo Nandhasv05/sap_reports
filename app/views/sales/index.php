@@ -1,4 +1,4 @@
-    <?php
+<?php
 /**
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 21/09/2026
@@ -13,7 +13,8 @@ $catalogHome = url('/');
 $home = sap_reports_evol_url('portal_dashboard.php');
 $logoUrl = sap_reports_logo_url();
 
-$extraHead = '<link rel="stylesheet" href="' . e(asset('css/sales.css')) . '">';
+$extraHead = '<link rel="stylesheet" href="' . e(asset('css/sales.css')) . '">'
+    . '<link rel="stylesheet" href="' . e(asset('css/sales-dashboard.css')) . '?v=' . time() . '">';
 
 ob_start();
 ?>
@@ -32,10 +33,12 @@ window.SALES_PAGE = {
     defaultFrom: <?= json_encode($defaultFrom ?? '') ?>,
     defaultTo: <?= json_encode($defaultTo ?? '') ?>,
     defaultLabel: 'This Week',
-    pageSize: 10
+    pageSize: 8000
 };
 </script>
-<script src="<?= e(asset('js/sales.js')) ?>"></script>
+<script src="<?= e(asset('js/loader.js')) ?>"></script>
+<script src="<?= e(asset('js/excel-export.js')) ?>"></script>
+<script src="<?= e(asset('js/sales.js')) ?>?v=<?= time() ?>"></script>
 <?php
 $extraScripts = ob_get_clean();
 ?>
@@ -53,8 +56,7 @@ $extraScripts = ob_get_clean();
             <a href="<?= e($catalogHome) ?>" class="hub-brand" aria-label="EVOLV" title="SAP Reports Analytics Hub">
                 <img src="<?= e($logoUrl) ?>" alt="evolv" class="hub-brand-logo">
                 <div class="hub-brand-text">
-                    <span class="hub-brand-title">SAP Reports</span>
-                    <span class="hub-brand-subtitle">Sales Intelligence Studio</span>
+                    <span class="hub-brand-title">Sales Report</span>
                 </div>
             </a>
             
@@ -65,15 +67,6 @@ $extraScripts = ob_get_clean();
                 <a href="<?= e($home) ?>" class="hub-quick-icon-btn" aria-label="Portal home" title="Portal Dashboard">
                     <span class="material-icons-round">home</span>
                 </a>
-            </div>
-
-            <div class="hub-status-pill" title="SAP RFC &amp; OData Services Connected - Heartbeat Pulse Active">
-                <span class="hub-heartbeat-box" aria-hidden="true">
-                    <span class="hub-heartbeat-core"></span>
-                    <span class="hub-heartbeat-radar"></span>
-                </span>
-                <span class="hub-status-label">SAP Live</span>
-                <i class="fas fa-heart-pulse hub-ecg-icon" title="Heartbeat active"></i>
             </div>
         </div>
 
@@ -168,20 +161,14 @@ $extraScripts = ob_get_clean();
 
 <!-- Sales Hub Main Workspace -->
 <section class="sales-hub is-loading" id="salesHub">
-    <div class="sales-loader is-on" id="salesLoader" role="status" aria-live="polite">
-        <div class="sales-loader-panel">
-            <div class="sales-spinner" aria-hidden="true">
-                <span class="sales-spinner-ring sales-spinner-ring--outer"></span>
-                <span class="sales-spinner-ring sales-spinner-ring--inner"></span>
-            </div>
-            <strong>Loading SAP Quotations</strong>
-            <span class="sales-loader-hint" id="salesLoaderNote">Fetching real-time quotations from SAP…</span>
-        </div>
-    </div>
+    <?php
+    $loaderIcon = 'request_quote';
+    $loaderVisible = true;
+    $loaderSteps = ['Connecting to SAP…', 'Fetching quotations…', 'Preparing the table…'];
+    require base_path('app/views/partials/loader.php');
+    ?>
     <script>
     (function () {
-        var el = document.getElementById('salesLoader');
-        if (el) document.documentElement.appendChild(el);
         document.documentElement.classList.add('sales-is-loading');
         document.body && document.body.classList.add('sales-is-loading');
         var splash = document.getElementById('kapisSplash');
@@ -261,51 +248,84 @@ $extraScripts = ob_get_clean();
         <!-- 3. Total Quotations -->
         <div class="kpi-card proj-card tone-amber" role="button" tabindex="0" data-kpi="orders" title="Total Quotations (Click to search in table)">
             <div class="kpi-medallion-wrap">
-                <div class="kpi-icon"><span class="material-icons-round">shopping_bag</span></div>
+                <div class="kpi-icon"><span class="material-icons-round">request_quote</span></div>
             </div>
             <div class="kpi-info">
                 <div class="kpi-kicker">
                     <span class="kpi-kicker-dot"></span>
-                    <span>ACTIVE PIPELINE • ORDERS</span>
+                    <span>ACTIVE PIPELINE • QUOTATIONS</span>
                 </div>
                 <div class="label">Total Quotations</div>
                 <div class="kpi-value-row">
                     <div class="value" id="skOrders">—</div>
+                    <span class="kpi-sub-pill" id="skLinesPill">0 Items</span>
                 </div>
-                <div class="change">Total active lines</div>
+                <div class="change" id="skOrdersSub">0 Quoted Line Items</div>
             </div>
             <div class="kpi-spark" id="skOrdersSpark" aria-hidden="true">
                 <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
             </div>
         </div>
+
     </div>
 
-    <!-- Charts Section: Trend & Customer Distribution -->
-    <div class="sales-charts-main">
+    <!-- Charts Section: Trend / Item Breakdown & Category / Customer / Material Mix -->
+    <div class="sales-charts-main" id="salesChartsMain">
+        <!-- 1. Left Chart: Trend / Items Breakdown -->
         <div class="card chart-panel sales-panel-sky">
             <div class="chart-panel-head">
                 <div class="chart-head-left">
-                    <span class="chart-panel-icon"><span class="material-icons-round">show_chart</span></span>
+                    <span class="chart-panel-icon"><span class="material-icons-round" id="trendChartIcon">show_chart</span></span>
                     <div>
-                        <h2>Quotation Value Trend</h2>
-                        <p>Net value aggregated by quotation date</p>
+                        <h2 id="trendChartTitle">Quotation Value Trend</h2>
+                        <p id="trendChartSubtitle">Net value aggregated by quotation date</p>
                     </div>
                 </div>
-                <div class="chart-header-badge trend-badge" id="trendBadge">
-                    <span class="badge-pulse-dot"></span>
-                    <span class="material-icons-round">trending_up</span>
-                    <span id="trendPeakStat">Daily Activity</span>
+                <div class="chart-header-actions">
+                    <div class="chart-tab-group" role="tablist" aria-label="Trend Mode">
+                        <button type="button" class="chart-tab-btn active" id="btnChartModeTrend" title="Show Quotation Value Trend by Date">
+                            <span class="material-icons-round">show_chart</span>
+                            <span>Trend</span>
+                        </button>
+                        <button type="button" class="chart-tab-btn" id="btnChartModeItems" title="Show Net Value & Quantity per Line Item">
+                            <span class="material-icons-round">bar_chart</span>
+                            <span>Items</span>
+                        </button>
+                    </div>
+                    <div class="chart-header-badge trend-badge" id="trendBadge">
+                        <span class="badge-pulse-dot"></span>
+                        <span class="material-icons-round">trending_up</span>
+                        <span id="trendPeakStat">Daily Activity</span>
+                    </div>
                 </div>
             </div>
             <div class="chart-wrap tall"><canvas id="salesTrendChart"></canvas></div>
         </div>
+
+        <!-- 2. Right Chart: Category / Customer / Material Mix -->
         <div class="card chart-panel sales-panel-violet">
             <div class="chart-panel-head">
                 <div class="chart-head-left">
-                    <span class="chart-panel-icon"><span class="material-icons-round">pie_chart</span></span>
+                    <span class="chart-panel-icon"><span class="material-icons-round">donut_large</span></span>
                     <div>
-                        <h2 id="salesMixTitle">Customer Mix</h2>
-                        <p id="salesMixSubtitle">Net value breakdown by customer</p>
+                        <h2 id="salesMixTitle">Item Category Mix</h2>
+                        <p id="salesMixSubtitle">Net quoted amount by category</p>
+                    </div>
+                </div>
+                <div class="chart-header-actions">
+                    <div class="chart-tab-group" role="tablist" aria-label="Mix Mode">
+                        <button type="button" class="chart-tab-btn active" id="btnMixModeCategory" title="Group by Item Category">
+                            <span class="material-icons-round">category</span>
+                            <span>Category</span>
+                        </button>
+                        <button type="button" class="chart-tab-btn" id="btnMixModeCustomer" title="Group by Customer">
+                            <span class="material-icons-round">groups</span>
+                            <span>Customer</span>
+                        </button>
+                        <button type="button" class="chart-tab-btn" id="btnMixModeMaterial" title="Group by Material">
+                            <span class="material-icons-round">inventory_2</span>
+                            <span>Material</span>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -321,153 +341,171 @@ $extraScripts = ob_get_clean();
 
     <!-- Quotations Master Table Shell -->
     <div class="sales-table-shell card proj-panel" id="salesTableShell">
-        <div class="sales-table-head">
-            <div class="sales-table-head-left">
-                <div class="sales-table-title">
-                    <span class="sales-table-title-icon"><span class="material-icons-round">receipt_long</span></span>
-                    <h2>Quotations</h2>
-                </div>
-                <span class="sales-count-badge" id="salesTableCountBadge">
-                    <span class="badge-pulse-dot"></span>
-                    <span class="sales-count-num" id="salesTableCount">—</span>
-                    <span class="sales-count-label">Total Records</span>
-                </span>
+        <div class="rpt-table-toolbar sales-qt-toolbar">
+            <div class="rpt-tb-search">
+                <i class="fas fa-search rpt-search-ico"></i>
+                <input type="search" id="salesSearch" class="rpt-tb-input" placeholder="Quick search quotation, customer, material…" autocomplete="off" spellcheck="false" aria-label="Search quotations in table">
+                <button type="button" id="salesSearchClear" class="rpt-tb-clear" title="Clear search" aria-label="Clear search" style="display: none;">
+                    <i class="fas fa-times"></i>
+                </button>
             </div>
-            <div class="sales-table-head-right">
-                <div class="sales-table-search">
-                    <div class="sales-search-wrap">
-                        <span class="material-icons-round search-icon">search</span>
-                        <input type="search" id="salesSearch" placeholder="Search quotation or sales order…" autocomplete="off" aria-label="Search quotations in table">
-                        <button type="button" class="sales-search-clear" id="salesSearchClear" hidden aria-label="Clear search">
-                            <span class="material-icons-round">close</span>
-                        </button>
-                        <button type="button" class="sales-search-btn" id="btnSalesSearchSubmit" title="Search">
-                            <span class="material-icons-round">arrow_forward</span>
-                        </button>
-                    </div>
-                </div>
-                <div class="sales-table-tools">
-                    <button type="button" class="sales-tool-btn" id="btnSalesColFilter" aria-pressed="false" title="Show/Hide Column Filters">
-                        <span class="material-icons-round">filter_alt</span>
-                        <span class="sales-tool-btn-label">Filter</span>
+            <div class="rpt-tb-actions">
+                <span class="rpt-tb-count" id="salesRangeInfo">Showing 0 of 0 quotations</span>
+                <span class="sales-count-num" id="salesTableCount" hidden>—</span>
+                <button type="button" class="rpt-tb-btn is-active" id="salesToggleStickyScroll" title="Keep the header fixed and scroll the rows">
+                    <i class="fas fa-arrows-up-down"></i>
+                    <span id="salesStickyScrollLabel">Scroll Body Only</span>
+                </button>
+                <div class="rpt-cat-dropdown" id="salesColumnToggleDropdown">
+                    <button type="button" class="rpt-tb-btn" id="salesColumnToggleBtn" title="Show or hide columns" aria-expanded="false" aria-haspopup="true">
+                        <i class="fas fa-columns"></i>
+                        <span>Columns</span>
+                        <span class="material-icons-round rpt-cat-dd-arrow" style="font-size: 14px;">expand_more</span>
                     </button>
+                    <div class="rpt-cat-dd-menu sales-col-menu" id="salesColumnToggleMenu" role="menu"></div>
                 </div>
-                <div class="sales-table-export" id="salesExport">
-                    <button type="button" class="sales-export-btn" id="salesExportBtn" aria-haspopup="menu" aria-expanded="false" title="Export Quotations">
-                        <span class="material-icons-round">file_download</span>
-                        <span>Export</span>
-                        <span class="material-icons-round chev">expand_more</span>
-                    </button>
-                    <div class="sales-export-menu" id="salesExportMenu" hidden>
-                        <button type="button" data-export="page">
-                            <span class="material-icons-round">table_view</span>
-                            <span>This page (CSV)</span>
-                        </button>
-                        <button type="button" data-export="all">
-                            <span class="material-icons-round">cloud_download</span>
-                            <span>All filtered (CSV)</span>
-                        </button>
-                    </div>
-                </div>
+                <button type="button" class="rpt-tb-btn rpt-tb-btn-excel" data-excel-export="salesDataTable" data-excel-title="Quotations" data-excel-file="quotations" data-excel-sheet="Quotations" title="Download the visible columns as Excel">
+                    <i class="fas fa-file-excel"></i>
+                    <span>Excel</span>
+                </button>
+                <button type="button" class="rpt-tb-btn is-active" id="btnSalesColFilter" aria-pressed="true" title="Show or hide a search box under each column">
+                    <i class="fas fa-filter"></i>
+                    <span>Column Filters</span>
+                    <span class="rpt-tb-badge" id="salesActiveFilterBadge" style="display: none;">0</span>
+                </button>
+                <button type="button" class="rpt-tb-btn rpt-tb-btn-reset" id="salesClearAllFilters" title="Clear all search, filters and sorting" style="display: none;">
+                    <i class="fas fa-rotate-left"></i>
+                    <span>Clear All</span>
+                </button>
             </div>
         </div>
-        <div class="table-responsive table-wrap sales-table-wrap">
-            <table class="sales-data-table" id="salesDataTable">
+        <div class="table-responsive table-wrap sales-table-wrap is-scroll-body" id="salesTableWrap">
+            <table class="sales-data-table rpt-table prod-table po-page-table text-nowrap show-col-filters" id="salesDataTable">
                 <thead>
-                    <tr class="sales-th-row">
-                        <th class="col-sno" style="width: 55px; text-align: center;">S.No</th>
-                        <th class="col-sortable" data-sort="quotation" title="Click to sort by Quotation">
-                            <span>Quotation</span>
-                            <span class="sort-icon material-icons-round">unfold_more</span>
+                    <tr class="sales-th-row rpt-header-row">
+                        <th class="col-sno sno" data-col-id="sno" style="width: 55px; text-align: center;">
+                            <div class="th-content"><span>S.No</span></div>
                         </th>
-                        <th class="col-sortable" data-sort="line_item" title="Click to sort by Item">
-                            <span>Item</span>
-                            <span class="sort-icon material-icons-round">unfold_more</span>
+                        <th class="col-sortable is-sortable" data-col-id="quotation" data-sort="quotation" title="Sort by Quotation">
+                            <div class="th-content"><span>Quotation</span></div>
                         </th>
-                        <th class="col-sortable" data-sort="material" title="Click to sort by Material">
-                            <span>Material</span>
-                            <span class="sort-icon material-icons-round">unfold_more</span>
+                        <th class="col-sortable is-sortable" data-col-id="line_item" data-sort="line_item" title="Sort by Item">
+                            <div class="th-content"><span>Item</span></div>
                         </th>
-                        <th class="col-sortable" data-sort="item_category" title="Click to sort by Category">
-                            <span>Category</span>
-                            <span class="sort-icon material-icons-round">unfold_more</span>
+                        <th class="col-sortable is-sortable" data-col-id="material" data-sort="material" title="Sort by Material">
+                            <div class="th-content"><span>Material</span></div>
                         </th>
-                        <th class="col-sortable" data-sort="customer" title="Click to sort by Customer">
-                            <span>Customer</span>
-                            <span class="sort-icon material-icons-round">unfold_more</span>
+                        <th class="col-sortable is-sortable" data-col-id="item_category" data-sort="item_category" title="Sort by Category">
+                            <div class="th-content"><span>Category</span></div>
                         </th>
-                        <th class="col-sortable" data-sort="customer_ref" title="Click to sort by Customer Reference">
-                            <span>Customer Reference</span>
-                            <span class="sort-icon material-icons-round">unfold_more</span>
+                        <th class="col-sortable is-sortable" data-col-id="customer" data-sort="customer" title="Sort by Customer">
+                            <div class="th-content"><span>Customer</span></div>
                         </th>
-                        <th class="col-sortable" data-sort="date" title="Click to sort by Quotation Date">
-                            <span>Quotation Date</span>
-                            <span class="sort-icon material-icons-round">unfold_more</span>
+                        <th class="col-sortable is-sortable" data-col-id="customer_ref" data-sort="customer_ref" title="Sort by Customer Reference">
+                            <div class="th-content"><span>Customer Reference</span></div>
                         </th>
-                        <th class="col-sortable col-num" data-sort="qty" title="Click to sort by Quantity">
-                            <span>Quantity</span>
-                            <span class="sort-icon material-icons-round">unfold_more</span>
+                        <th class="col-sortable is-sortable" data-col-id="date" data-sort="date" title="Sort by Quotation Date">
+                            <div class="th-content"><span>Quotation Date</span></div>
                         </th>
-                        <th class="col-sortable col-num" data-sort="net_amount" title="Click to sort by Net Value">
-                            <span>Net Value</span>
-                            <span class="sort-icon material-icons-round">unfold_more</span>
+                        <th class="col-sortable is-sortable col-num num" data-col-id="qty" data-sort="qty" title="Sort by Quantity">
+                            <div class="th-content num"><span>Quantity</span></div>
                         </th>
-                        <th class="col-sortable" data-sort="sales_order" title="Click to sort by Sales Order">
-                            <span>Sales Order</span>
-                            <span class="sort-icon material-icons-round">unfold_more</span>
+                        <th class="col-sortable is-sortable col-num num" data-col-id="net_amount" data-sort="net_amount" title="Sort by Net Value">
+                            <div class="th-content num"><span>Net Value</span></div>
+                        </th>
+                        <th class="col-sortable is-sortable" data-col-id="sales_order" data-sort="sales_order" title="Sort by Sales Order">
+                            <div class="th-content"><span>Sales Order</span></div>
                         </th>
                     </tr>
-                    <tr class="sales-col-filter-row">
-                        <th class="col-filter-th" style="text-align:center;"><span class="material-icons-round filter-header-icon" title="Column Filters">filter_alt</span></th>
-                        <th class="col-filter-th"><input type="text" class="col-filter-input" data-filter-col="quotation" placeholder="Quotation..."></th>
-                        <th class="col-filter-th"><input type="text" class="col-filter-input" data-filter-col="line_item" placeholder="Item..."></th>
-                        <th class="col-filter-th"><input type="text" class="col-filter-input" data-filter-col="material" placeholder="Material..."></th>
-                        <th class="col-filter-th"><input type="text" class="col-filter-input" data-filter-col="item_category" placeholder="Cat..."></th>
-                        <th class="col-filter-th"><input type="text" class="col-filter-input" data-filter-col="customer" placeholder="Customer..."></th>
-                        <th class="col-filter-th"><input type="text" class="col-filter-input" data-filter-col="customer_ref" placeholder="Reference..."></th>
-                        <th class="col-filter-th"><input type="text" class="col-filter-input" data-filter-col="date" placeholder="Date..."></th>
-                        <th class="col-filter-th"><input type="text" class="col-filter-input col-num" data-filter-col="qty" placeholder="Min qty..."></th>
-                        <th class="col-filter-th">
-                            <div class="col-filter-net-clear">
-                                <input type="text" class="col-filter-input col-num" data-filter-col="net_amount" placeholder="Min amt...">
-                                <button type="button" class="btn-clear-col-filters" id="btnClearColFilters" title="Clear all column filters">
-                                    <span class="material-icons-round">clear</span>
-                                </button>
+                    <tr class="sales-col-filter-row rpt-filter-row" id="salesFilterRow">
+                        <th class="col-filter-th num sno" data-col-id="sno" style="text-align:center;">
+                            <button type="button" class="rpt-col-filter-reset" id="btnClearColFilters" title="Clear all column filters" aria-label="Clear all column filters">
+                                <i class="fas fa-eraser"></i>
+                            </button>
+                        </th>
+                        <th class="col-filter-th" data-col-id="quotation">
+                            <div class="rpt-col-input-wrap">
+                                <input type="text" class="rpt-col-input col-filter-input" data-filter-col="quotation" placeholder="Filter…" title="Filter Quotation">
+                                <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
                             </div>
                         </th>
-                        <th class="col-filter-th"><input type="text" class="col-filter-input" data-filter-col="sales_order" placeholder="Filter SO..."></th>
+                        <th class="col-filter-th" data-col-id="line_item">
+                            <div class="rpt-col-input-wrap">
+                                <input type="text" class="rpt-col-input col-filter-input" data-filter-col="line_item" placeholder="Filter…" title="Filter Item">
+                                <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                            </div>
+                        </th>
+                        <th class="col-filter-th" data-col-id="material">
+                            <div class="rpt-col-input-wrap">
+                                <input type="text" class="rpt-col-input col-filter-input" data-filter-col="material" placeholder="Filter…" title="Filter Material">
+                                <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                            </div>
+                        </th>
+                        <th class="col-filter-th" data-col-id="item_category">
+                            <div class="rpt-col-input-wrap">
+                                <input type="text" class="rpt-col-input col-filter-input" data-filter-col="item_category" placeholder="Filter…" title="Filter Category">
+                                <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                            </div>
+                        </th>
+                        <th class="col-filter-th" data-col-id="customer">
+                            <div class="rpt-col-input-wrap">
+                                <input type="text" class="rpt-col-input col-filter-input" data-filter-col="customer" placeholder="Filter…" title="Filter Customer">
+                                <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                            </div>
+                        </th>
+                        <th class="col-filter-th" data-col-id="customer_ref">
+                            <div class="rpt-col-input-wrap">
+                                <input type="text" class="rpt-col-input col-filter-input" data-filter-col="customer_ref" placeholder="Filter…" title="Filter Customer Reference">
+                                <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                            </div>
+                        </th>
+                        <th class="col-filter-th" data-col-id="date">
+                            <div class="rpt-col-input-wrap">
+                                <input type="text" class="rpt-col-input col-filter-input" data-filter-col="date" placeholder="Filter…" title="Filter Quotation Date">
+                                <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                            </div>
+                        </th>
+                        <th class="col-filter-th num" data-col-id="qty">
+                            <div class="rpt-col-input-wrap">
+                                <input type="text" class="rpt-col-input col-filter-input" data-filter-col="qty" data-numeric placeholder=">0, <10…" title="Filter Quantity">
+                                <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                            </div>
+                        </th>
+                        <th class="col-filter-th num" data-col-id="net_amount">
+                            <div class="rpt-col-input-wrap">
+                                <input type="text" class="rpt-col-input col-filter-input" data-filter-col="net_amount" data-numeric placeholder=">0, <10…" title="Filter Net Value">
+                                <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                            </div>
+                        </th>
+                        <th class="col-filter-th" data-col-id="sales_order">
+                            <div class="rpt-col-input-wrap">
+                                <input type="text" class="rpt-col-input col-filter-input" data-filter-col="sales_order" placeholder="Filter…" title="Filter Sales Order">
+                                <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                            </div>
+                        </th>
                     </tr>
                 </thead>
                 <tbody id="salesTableBody">
                     <tr><td colspan="11" class="empty-state">Loading…</td></tr>
                 </tbody>
+                <tfoot>
+                    <tr id="salesTableFoot">
+                        <th id="salesFootLabel" data-col-id="sno">Total</th>
+                        <th data-col-id="quotation"></th>
+                        <th data-col-id="line_item"></th>
+                        <th data-col-id="material"></th>
+                        <th data-col-id="item_category"></th>
+                        <th data-col-id="customer"></th>
+                        <th data-col-id="customer_ref"></th>
+                        <th data-col-id="date"></th>
+                        <th id="salesFootQty" class="num" data-col-id="qty"></th>
+                        <th id="salesFootNet" class="num" data-col-id="net_amount"></th>
+                        <th data-col-id="sales_order"></th>
+                    </tr>
+                </tfoot>
             </table>
         </div>
-        <div class="sales-pagination" id="salesPagination">
-            <div class="sales-page-left">
-                <span class="sales-range-info" id="salesRangeInfo">Showing 0–0 of 0</span>
-                <div class="sales-page-nav">
-                    <button type="button" class="sales-page-btn" id="salesPrev" disabled title="Previous page">
-                        <span class="material-icons-round">chevron_left</span> Previous
-                    </button>
-                    <div class="sales-page-numbers" id="salesPageNumbers"></div>
-                    <button type="button" class="sales-page-btn" id="salesNext" disabled title="Next page">
-                        Next <span class="material-icons-round">chevron_right</span>
-                    </button>
-                </div>
-            </div>
-            <div class="sales-page-right">
-                <label for="salesPageSize">Per page</label>
-                <select id="salesPageSize" class="sales-select" aria-label="Rows per page">
-                    <option value="10" selected>10 / page</option>
-                    <option value="25">25 / page</option>
-                    <option value="50">50 / page</option>
-                    <option value="100">100 / page</option>
-                </select>
-            </div>
-        </div>
     </div>
-</section>
 
 <!-- Sales Order Detail Drawer -->
 <div class="sales-detail-backdrop" id="salesDetailBackdrop" hidden></div>
@@ -537,56 +575,76 @@ $extraScripts = ob_get_clean();
     </div>
 
     <div class="so-related-panel" id="soRelatedPanel">
-        <div class="so-related-head">
-            <span class="material-icons-round">view_list</span>
-            <div>
-                <strong>Sales Order table</strong>
+        <div class="rpt-table-toolbar so-related-toolbar">
+            <div class="rpt-tb-search">
+                <i class="fas fa-search rpt-search-ico"></i>
+                <input type="search" id="soRelatedSearch" class="rpt-tb-input" placeholder="Quick search line, material, plant…" autocomplete="off" spellcheck="false" aria-label="Search sales order table">
+                <button type="button" id="soRelatedSearchClear" class="rpt-tb-clear" title="Clear search" aria-label="Clear search" style="display: none;">
+                    <i class="fas fa-times"></i>
+                </button>
             </div>
-            <div class="so-related-tools">
-                <label class="so-related-search">
-                    <span class="material-icons-round">search</span>
-                    <input type="search" id="soRelatedSearch" placeholder="Search table..." autocomplete="off">
-                </label>
-                <button type="button" class="so-related-export" id="soRelatedFilterBtn" aria-pressed="false" title="Column filters">
-                    <span class="material-icons-round">filter_alt</span>
-                    Filter
+            <div class="rpt-tb-actions">
+                <span class="rpt-tb-count" id="soRelatedCount">Showing 0 of 0 items</span>
+                <div class="rpt-cat-dropdown" id="soColumnToggleDropdown">
+                    <button type="button" class="rpt-tb-btn" id="soColumnToggleBtn" title="Show or hide columns" aria-expanded="false" aria-haspopup="true">
+                        <i class="fas fa-columns"></i>
+                        <span>Columns</span>
+                        <span class="material-icons-round rpt-cat-dd-arrow" style="font-size: 14px;">expand_more</span>
+                    </button>
+                    <div class="rpt-cat-dd-menu so-col-menu" id="soColumnToggleMenu" role="menu"></div>
+                </div>
+                <button type="button" class="rpt-tb-btn rpt-tb-btn-excel" data-excel-export="soRelatedTable" data-excel-title="Sales Order" data-excel-file="sales-order" data-excel-sheet="Sales Order" title="Download the visible columns as Excel">
+                    <i class="fas fa-file-excel"></i>
+                    <span>Excel</span>
                 </button>
-                <button type="button" class="so-related-export" id="soRelatedExport">
-                    <span class="material-icons-round">file_download</span>
-                    Export
+                <button type="button" class="rpt-tb-btn" id="soRelatedFilterBtn" aria-pressed="false" title="Show or hide a search box under each column">
+                    <i class="fas fa-filter"></i>
+                    <span>Column Filters</span>
                 </button>
-                <span class="so-related-count" id="soRelatedCount">0 items</span>
             </div>
         </div>
-        <div class="so-related-table-wrap">
-            <table class="so-related-table" id="soRelatedTable">
+        <div class="so-related-table-wrap is-scroll-body">
+            <table class="so-related-table rpt-table po-page-table" id="soRelatedTable">
                 <thead>
-                    <tr>
-                        <th>Line</th>
-                        <th>Category</th>
-                        <th>Material</th>
-                        <th>Plant</th>
-                        <th>Customer</th>
-                        <th>Type</th>
-                        <th class="col-num">Qty</th>
-                        <th class="col-num">Net</th>
-                        <th>Sales Order</th>
+                    <tr class="rpt-header-row">
+                        <th class="is-sortable" data-col-id="line_item" data-sort="line_item" title="Sort by Line"><div class="th-content"><span>Line</span></div></th>
+                        <th class="is-sortable" data-col-id="item_category" data-sort="item_category" title="Sort by Category"><div class="th-content"><span>Category</span></div></th>
+                        <th class="is-sortable" data-col-id="material" data-sort="material" title="Sort by Material"><div class="th-content"><span>Material</span></div></th>
+                        <th class="is-sortable" data-col-id="plant" data-sort="plant" title="Sort by Plant"><div class="th-content"><span>Plant</span></div></th>
+                        <th class="is-sortable" data-col-id="customer" data-sort="customer" title="Sort by Customer"><div class="th-content"><span>Customer</span></div></th>
+                        <th class="is-sortable" data-col-id="type" data-sort="type" title="Sort by Type"><div class="th-content"><span>Type</span></div></th>
+                        <th class="is-sortable num" data-col-id="qty" data-sort="qty" title="Sort by Quantity"><div class="th-content num"><span>Qty</span></div></th>
+                        <th class="is-sortable num" data-col-id="net_amount" data-sort="net_amount" title="Sort by Net Value"><div class="th-content num"><span>Net</span></div></th>
+                        <th class="is-sortable" data-col-id="sales_order" data-sort="sales_order" title="Sort by Sales Order"><div class="th-content"><span>Sales Order</span></div></th>
                     </tr>
-                    <tr class="so-related-filter-row">
-                        <th><input type="text" class="so-col-filter" data-so-filter="line_item" placeholder="Line..."></th>
-                        <th><input type="text" class="so-col-filter" data-so-filter="item_category" placeholder="Cat..."></th>
-                        <th><input type="text" class="so-col-filter" data-so-filter="material" placeholder="Material..."></th>
-                        <th><input type="text" class="so-col-filter" data-so-filter="plant" placeholder="Plant..."></th>
-                        <th><input type="text" class="so-col-filter" data-so-filter="customer" placeholder="Customer..."></th>
-                        <th><input type="text" class="so-col-filter" data-so-filter="type" placeholder="Type..."></th>
-                        <th><input type="text" class="so-col-filter" data-so-filter="qty" placeholder="Qty..."></th>
-                        <th><input type="text" class="so-col-filter" data-so-filter="net_amount" placeholder="Net..."></th>
-                        <th><input type="text" class="so-col-filter" data-so-filter="sales_order" placeholder="SO..."></th>
+                    <tr class="so-related-filter-row rpt-filter-row">
+                        <th data-col-id="line_item"><input type="text" class="so-col-filter rpt-col-input" data-so-filter="line_item" placeholder="Filter…"></th>
+                        <th data-col-id="item_category"><input type="text" class="so-col-filter rpt-col-input" data-so-filter="item_category" placeholder="Filter…"></th>
+                        <th data-col-id="material"><input type="text" class="so-col-filter rpt-col-input" data-so-filter="material" placeholder="Filter…"></th>
+                        <th data-col-id="plant"><input type="text" class="so-col-filter rpt-col-input" data-so-filter="plant" placeholder="Filter…"></th>
+                        <th data-col-id="customer"><input type="text" class="so-col-filter rpt-col-input" data-so-filter="customer" placeholder="Filter…"></th>
+                        <th data-col-id="type"><input type="text" class="so-col-filter rpt-col-input" data-so-filter="type" placeholder="Filter…"></th>
+                        <th data-col-id="qty"><input type="text" class="so-col-filter rpt-col-input" data-so-filter="qty" placeholder="Min…"></th>
+                        <th data-col-id="net_amount"><input type="text" class="so-col-filter rpt-col-input" data-so-filter="net_amount" placeholder="Min…"></th>
+                        <th data-col-id="sales_order"><input type="text" class="so-col-filter rpt-col-input" data-so-filter="sales_order" placeholder="Filter…"></th>
                     </tr>
                 </thead>
                 <tbody id="soRelatedLinesBody">
                     <tr><td colspan="9" class="so-related-empty">Open a quotation to see sales order items.</td></tr>
                 </tbody>
+                <tfoot>
+                    <tr id="soRelatedFoot">
+                        <th id="soFootLabel" data-col-id="line_item">Total</th>
+                        <th data-col-id="item_category"></th>
+                        <th data-col-id="material"></th>
+                        <th data-col-id="plant"></th>
+                        <th data-col-id="customer"></th>
+                        <th data-col-id="type"></th>
+                        <th id="soFootQty" class="num" data-col-id="qty"></th>
+                        <th id="soFootNet" class="num" data-col-id="net_amount"></th>
+                        <th data-col-id="sales_order"></th>
+                    </tr>
+                </tfoot>
             </table>
         </div>
     </div>
@@ -861,4 +919,5 @@ $extraScripts = ob_get_clean();
         </div>
     </div>
 </div>
+    <?php require base_path('app/views/partials/footer.php'); ?>
 </div><!-- /.rpt-app -->

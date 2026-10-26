@@ -2813,6 +2813,80 @@ body.rpt-loading { cursor: wait; }
 .po-multi-btn-apply:hover {
     background: #4338ca;
 }
+/* PO Supplier / Vendor Dropdown Specifics */
+.po-supplier-menu {
+    width: 380px !important;
+}
+.po-supplier-menu .po-multi-item-code {
+    font-size: 11px;
+    font-weight: 700;
+    color: #4f46e5;
+    background: #eef2ff;
+    border-color: #c7d2fe;
+}
+.po-supplier-menu .po-multi-item-name {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+/* Quick dropdown select on table column filters (Supplier & Vendor) */
+.rpt-col-input-wrap .rpt-col-dropdown-toggle {
+    border: none;
+    background: transparent;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 0 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    transition: color 0.15s ease;
+}
+.rpt-col-input-wrap .rpt-col-dropdown-toggle:hover {
+    color: #4f46e5;
+}
+.rpt-col-filter-menu {
+    display: none;
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 1500;
+    min-width: 200px;
+    max-width: 320px;
+    max-height: 220px;
+    overflow-y: auto;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    box-shadow: 0 10px 25px rgba(15, 23, 42, 0.15);
+    padding: 4px;
+    font-size: 12px;
+}
+.rpt-col-filter-menu.is-open {
+    display: block;
+}
+.rpt-col-filter-opt {
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    color: #1e293b;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: background 0.12s ease;
+}
+.rpt-col-filter-opt:hover {
+    background: #f1f5f9;
+    color: #4f46e5;
+}
+.rpt-col-filter-opt.is-all {
+    font-weight: 700;
+    color: #4f46e5;
+    border-bottom: 1px solid #f1f5f9;
+    margin-bottom: 2px;
+}
 /* PO Table single-row text-nowrap & offcanvas hover */
 .po-page-table.text-nowrap th,
 .po-page-table.text-nowrap td {

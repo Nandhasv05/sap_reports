@@ -5,7 +5,7 @@
  * DESCRIPTION : Purchase Order report view (SAP ZI_PurchaseOrderAPI_HUB)
  *               - List mode: condition-wise PO list (date range, plant, supplier, search)
  *               - Detail mode: single PO report (Hero, KPI cards, charts, items table)
- */
+*/
 $mode = (string) ($mode ?? 'list');
 $isList = $mode === 'list';
 $purchaseOrder = (string) ($purchaseOrder ?? '');
@@ -23,6 +23,7 @@ $rangeError = $rangeError ?? null;
 $presets = is_array($presets ?? null) ? $presets : [];
 $presetDates = is_array($presetDates ?? null) ? $presetDates : [];
 $supplier = (string) ($supplier ?? '');
+$suppliers = is_array($suppliers ?? null) ? $suppliers : array_values(array_filter(array_map('trim', explode(',', $supplier))));
 $salesOrder = (string) ($salesOrder ?? '');
 $poType = (string) ($poType ?? '');
 $poTypes = is_array($poTypes ?? null) ? $poTypes : array_values(array_filter(array_map('trim', explode(',', $poType))));
@@ -154,6 +155,58 @@ $listCards = [
                     </div>
                 </div>
 
+                <!-- Supplier / Vendor Multi-Select Dropdown -->
+                <div class="po-multi-dropdown" id="poSupplierDropdown">
+                    <input type="hidden" name="supplier" id="poSupplierInput" value="<?= e($supplier) ?>">
+                    <button type="button" class="po-multi-trigger" id="poSupplierTrigger" aria-haspopup="true" aria-expanded="false" title="Filter by Supplier / Vendor">
+                        <span class="material-icons-round po-multi-icon">storefront</span>
+                        <span class="po-multi-label" id="poSupplierLabel">
+                            <?php if (empty($suppliers)): ?>
+                                All Suppliers
+                            <?php elseif (count($suppliers) === 1): ?>
+                                Supplier <?= e($suppliers[0]) ?>
+                            <?php else: ?>
+                                <?= count($suppliers) ?> Suppliers Selected
+                            <?php endif; ?>
+                        </span>
+                        <span class="po-multi-badge" id="poSupplierBadge" style="<?= empty($suppliers) ? 'display:none;' : '' ?>">
+                            <?= count($suppliers) ?>
+                        </span>
+                        <span class="material-icons-round po-multi-arrow">expand_more</span>
+                    </button>
+
+                    <div class="po-multi-menu po-supplier-menu" id="poSupplierMenu" role="menu">
+                        <div class="po-multi-search-wrap">
+                            <span class="material-icons-round">search</span>
+                            <input type="text" id="poSupplierSearch" class="po-multi-search" placeholder="Search supplier or vendor..." autocomplete="off">
+                            <button type="button" id="poSupplierSearchClear" class="po-multi-search-clear" style="display:none;" title="Clear search">
+                                <span class="material-icons-round">close</span>
+                            </button>
+                        </div>
+                        <div class="po-multi-actions">
+                            <button type="button" class="po-multi-action-btn" id="poSupplierSelectAll">Select All</button>
+                            <span class="po-multi-action-dot">·</span>
+                            <button type="button" class="po-multi-action-btn" id="poSupplierClearAll">Clear</button>
+                            <span class="po-multi-selected-info" id="poSupplierCountInfo">
+                                <?= count($suppliers) ?> selected
+                            </span>
+                        </div>
+                        <div class="po-multi-list" id="poSupplierList">
+                            <div class="po-multi-empty" id="poSupplierEmpty" style="padding: 14px 10px; text-align: center; color: #64748b; font-size: 12px;">
+                                <span class="material-icons-round" style="font-size: 20px; display: block; margin-bottom: 4px; color: #94a3b8;">storefront</span>
+                                Loading suppliers from SAP…
+                            </div>
+                        </div>
+                        <div class="po-multi-footer">
+                            <button type="button" class="po-multi-btn-cancel" id="poSupplierCancel">Cancel</button>
+                            <button type="button" class="po-multi-btn-apply" id="poSupplierApply">
+                                <span class="material-icons-round">check</span>
+                                <span>Apply</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Custom Date Inputs (shown only when Custom Date is picked - up to 6 months) -->
                 <div class="date-custom" data-date-custom<?= $rangePreset === 'custom' ? '' : ' hidden' ?> style="display: <?= $rangePreset === 'custom' ? 'flex' : 'none' ?>; gap: 6px;">
                     <label class="rpt-field rpt-field-date" title="From date (within last 6 months)">
@@ -170,14 +223,6 @@ $listCards = [
                     <span class="material-icons-round">search</span>
                     <input id="po" name="po" value="" placeholder="Search PO #" inputmode="numeric" maxlength="10" autocomplete="off">
                 </label>
-
-                <button class="rpt-btn" type="submit" title="Load report">
-                    <span class="material-icons-round">sync</span>
-                </button>
-
-                <a class="rpt-btn rpt-btn-ghost" href="<?= e($csvUrl) ?>" title="Download CSV of current list">
-                    <span class="material-icons-round">file_download</span>
-                </a>
             </form>
         <?php else: ?>
             <!-- Detail view header with Back to List & PO Search -->
@@ -410,6 +455,7 @@ $listCards = [
     'range'       => $range,
     'plant'       => $plant,
     'supplier'    => $supplier,
+    'suppliers'   => $suppliers,
     'salesOrder'  => $salesOrder,
     'poType'      => $poType,
     'presetDates' => $presetDates,

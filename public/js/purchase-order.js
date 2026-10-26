@@ -228,6 +228,273 @@
         updateCountInfo();
     }
 
+    let supplierDropdownApi = null;
+
+    function bindSupplierDropdown(form) {
+        const dd = $('poSupplierDropdown');
+        if (!dd) return;
+
+        const trigger = $('poSupplierTrigger');
+        const menu = $('poSupplierMenu');
+        const hiddenInput = $('poSupplierInput');
+        const labelEl = $('poSupplierLabel');
+        const badgeEl = $('poSupplierBadge');
+        const countInfoEl = $('poSupplierCountInfo');
+        const searchInput = $('poSupplierSearch');
+        const searchClear = $('poSupplierSearchClear');
+        const selectAllBtn = $('poSupplierSelectAll');
+        const clearAllBtn = $('poSupplierClearAll');
+        const applyBtn = $('poSupplierApply');
+        const cancelBtn = $('poSupplierCancel');
+        const listEl = $('poSupplierList');
+
+        let initialChecked = [];
+        let supplierMap = {};
+
+        function getCheckboxes() {
+            return Array.from(dd.querySelectorAll('.po-multi-checkbox'));
+        }
+
+        function getItems() {
+            return Array.from(dd.querySelectorAll('.po-multi-item'));
+        }
+
+        function updateItemHighlight() {
+            getItems().forEach((item) => {
+                const cb = item.querySelector('.po-multi-checkbox');
+                item.classList.toggle('is-checked', !!cb?.checked);
+            });
+        }
+
+        function updateCountInfo() {
+            const cbs = getCheckboxes();
+            const checkedCount = cbs.filter((c) => c.checked).length;
+            if (countInfoEl) {
+                countInfoEl.textContent = `${checkedCount} of ${cbs.length} selected`;
+            }
+            updateItemHighlight();
+        }
+
+        function updateTriggerUI(selected) {
+            if (selected.length === 0) {
+                if (labelEl) labelEl.textContent = 'All Suppliers';
+                if (badgeEl) { badgeEl.style.display = 'none'; badgeEl.textContent = '0'; }
+            } else if (selected.length === 1) {
+                const name = supplierMap[selected[0]] || `Supplier ${selected[0]}`;
+                if (labelEl) labelEl.textContent = name;
+                if (badgeEl) { badgeEl.style.display = 'inline-flex'; badgeEl.textContent = '1'; }
+            } else {
+                if (labelEl) labelEl.textContent = `${selected.length} Suppliers Selected`;
+                if (badgeEl) { badgeEl.style.display = 'inline-flex'; badgeEl.textContent = String(selected.length); }
+            }
+        }
+
+        function openDropdown(open) {
+            dd.classList.toggle('is-open', open);
+            trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+            if (open) {
+                initialChecked = getCheckboxes().filter((c) => c.checked).map((c) => c.value);
+                if (searchInput) {
+                    searchInput.value = '';
+                    filterList('');
+                    setTimeout(() => searchInput.focus(), 60);
+                }
+            }
+        }
+
+        function filterList(q) {
+            const query = q.trim().toLowerCase();
+            if (searchClear) searchClear.style.display = query ? 'flex' : 'none';
+            getItems().forEach((item) => {
+                const code = (item.getAttribute('data-code') || '').toLowerCase();
+                const name = (item.getAttribute('data-name') || '').toLowerCase();
+                const match = !query || code.includes(query) || name.includes(query);
+                item.style.display = match ? 'flex' : 'none';
+            });
+        }
+
+        trigger?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openDropdown(!dd.classList.contains('is-open'));
+        });
+
+        menu?.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+
+        searchInput?.addEventListener('input', () => {
+            filterList(searchInput.value);
+        });
+
+        searchClear?.addEventListener('click', () => {
+            if (searchInput) searchInput.value = '';
+            filterList('');
+            searchInput?.focus();
+        });
+
+        selectAllBtn?.addEventListener('click', () => {
+            getItems().forEach((item) => {
+                if (item.style.display !== 'none') {
+                    const cb = item.querySelector('.po-multi-checkbox');
+                    if (cb) cb.checked = true;
+                }
+            });
+            updateCountInfo();
+        });
+
+        clearAllBtn?.addEventListener('click', () => {
+            getItems().forEach((item) => {
+                if (item.style.display !== 'none') {
+                    const cb = item.querySelector('.po-multi-checkbox');
+                    if (cb) cb.checked = false;
+                }
+            });
+            updateCountInfo();
+        });
+
+        cancelBtn?.addEventListener('click', () => {
+            getCheckboxes().forEach((c) => { c.checked = initialChecked.includes(c.value); });
+            updateCountInfo();
+            openDropdown(false);
+        });
+
+        applyBtn?.addEventListener('click', () => {
+            const selected = getCheckboxes().filter((c) => c.checked).map((c) => c.value);
+            const val = selected.join(',');
+            const oldVal = hiddenInput ? hiddenInput.value : '';
+            if (hiddenInput) hiddenInput.value = val;
+            updateTriggerUI(selected);
+            openDropdown(false);
+            if (val !== oldVal) {
+                showSpinner(true);
+                form.submit();
+            }
+        });
+
+        document.addEventListener('click', (e) => {
+            if (dd.classList.contains('is-open') && !dd.contains(e.target)) {
+                getCheckboxes().forEach((c) => { c.checked = initialChecked.includes(c.value); });
+                updateCountInfo();
+                openDropdown(false);
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && dd.classList.contains('is-open')) {
+                getCheckboxes().forEach((c) => { c.checked = initialChecked.includes(c.value); });
+                updateCountInfo();
+                openDropdown(false);
+            }
+        });
+
+        supplierDropdownApi = {
+            populate(suppliersList) {
+                if (!listEl) return;
+                const activeCodes = (hiddenInput?.value || '').split(',').map((s) => s.trim()).filter(Boolean);
+                supplierMap = {};
+                if (!suppliersList || suppliersList.length === 0) {
+                    listEl.innerHTML = '<div style="padding: 14px 10px; text-align: center; color: #64748b; font-size: 12px;">No suppliers found</div>';
+                    return;
+                }
+
+                let html = '';
+                suppliersList.forEach((s) => {
+                    const code = String(s.code || '').trim();
+                    const name = String(s.name || s.supplier_full_name || code).trim();
+                    if (!code) return;
+                    supplierMap[code] = name;
+                    const isChecked = activeCodes.includes(code);
+                    html += `
+                        <label class="po-multi-item" data-code="${P.esc(code)}" data-name="${P.esc(name.toLowerCase())}">
+                            <input type="checkbox" class="po-multi-checkbox" value="${P.esc(code)}"${isChecked ? ' checked' : ''}>
+                            <span class="po-multi-item-name" title="${P.esc(name)}">${P.esc(name)}</span>
+                            <span class="po-multi-item-code">${P.esc(code)}</span>
+                        </label>
+                    `;
+                });
+                listEl.innerHTML = html;
+
+                getCheckboxes().forEach((cb) => {
+                    cb.addEventListener('change', updateCountInfo);
+                });
+
+                const curSelected = getCheckboxes().filter((c) => c.checked).map((c) => c.value);
+                updateTriggerUI(curSelected);
+                updateCountInfo();
+            }
+        };
+    }
+
+    function initColumnDropdowns(records) {
+        if (!isList || !records || !records.length) return;
+
+        const supColIdx = columns.findIndex((c) => c.key === 'supplier');
+        const supNameColIdx = columns.findIndex((c) => c.key === 'supplier_full_name');
+
+        function setupDropdown(colIdx, getVal, label) {
+            if (colIdx < 0) return;
+            const input = table.querySelector(`.rpt-col-input[data-col="${colIdx}"]`);
+            if (!input) return;
+            const wrap = input.parentElement;
+            if (!wrap || wrap.querySelector('.rpt-col-filter-menu')) return;
+
+            const uniqueMap = {};
+            records.forEach((r) => {
+                const v = getVal(r);
+                if (v && v !== '—' && v !== '-') uniqueMap[v] = true;
+            });
+            const list = Object.keys(uniqueMap).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+            if (list.length === 0) return;
+
+            const toggleBtn = document.createElement('button');
+            toggleBtn.type = 'button';
+            toggleBtn.className = 'rpt-col-dropdown-toggle';
+            toggleBtn.title = `Select ${label} from dropdown`;
+            toggleBtn.setAttribute('tabindex', '-1');
+            toggleBtn.innerHTML = '<span class="material-icons-round">expand_more</span>';
+
+            const menu = document.createElement('div');
+            menu.className = 'rpt-col-filter-menu';
+            let menuHtml = `<div class="rpt-col-filter-opt is-all" data-val="">— All ${label}s (${list.length}) —</div>`;
+            list.forEach((val) => {
+                menuHtml += `<div class="rpt-col-filter-opt" data-val="${P.esc(val)}" title="${P.esc(val)}">${P.esc(val)}</div>`;
+            });
+            menu.innerHTML = menuHtml;
+
+            wrap.style.position = 'relative';
+            wrap.appendChild(toggleBtn);
+            wrap.appendChild(menu);
+
+            toggleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                document.querySelectorAll('.rpt-col-filter-menu.is-open').forEach((m) => {
+                    if (m !== menu) m.classList.remove('is-open');
+                });
+                menu.classList.toggle('is-open');
+            });
+
+            menu.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const opt = e.target.closest('.rpt-col-filter-opt');
+                if (!opt) return;
+                const picked = opt.getAttribute('data-val') || '';
+                input.value = picked;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                menu.classList.remove('is-open');
+                applyFilterAndSearch();
+            });
+        }
+
+        setupDropdown(supColIdx, (r) => r.supplier, 'Supplier');
+        setupDropdown(supNameColIdx, (r) => r.supplier_full_name, 'Vendor');
+
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.rpt-col-input-wrap')) {
+                document.querySelectorAll('.rpt-col-filter-menu.is-open').forEach((m) => m.classList.remove('is-open'));
+            }
+        });
+    }
+
     function bindListFilterControls() {
         const form = $('poFilterForm');
         if (!form) return;
@@ -254,6 +521,7 @@
         }
 
         bindDocTypeDropdown(form);
+        bindSupplierDropdown(form);
 
         form.addEventListener('submit', (e) => {
             const typedPo = P.cleanPo(poSearchInput ? poSearchInput.value : '');
@@ -858,7 +1126,24 @@
                 }
                 totals = data.totals || {};
                 fillListStats(totals);
+                if (supplierDropdownApi) {
+                    const supList = (Array.isArray(data.suppliers) && data.suppliers.length > 0)
+                        ? data.suppliers
+                        : (() => {
+                            const map = {};
+                            records.forEach((r) => {
+                                const c = String(r.supplier || '').trim();
+                                if (c && c !== '—' && c !== '-') {
+                                    const n = String(r.supplier_full_name || '').trim() || `Supplier ${c}`;
+                                    if (!map[c]) map[c] = { code: c, name: n };
+                                }
+                            });
+                            return Object.values(map).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+                        })();
+                    supplierDropdownApi.populate(supList);
+                }
                 renderListRows(records);
+                initColumnDropdowns(records);
                 columnFeatures.refresh();
                 applyFilterAndSearch();
                 fillListCharts(records, totals);

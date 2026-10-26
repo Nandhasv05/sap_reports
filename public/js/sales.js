@@ -22,7 +22,8 @@
     ];
 
     let currentPage = 1;
-    let pageSize = 10;
+    let pageSize = 8000;
+    let lastGroupCount = 0;
     let currentFrom = '';
     let currentTo = '';
     let loading = false;
@@ -32,8 +33,12 @@
     let loaderStarted = 0;
 
     let trendChart, divisionChart, stylesChart, channelChart, statusChart, soQtyChart, soMixChart;
+    let currentLeftChartMode = 'auto';
+    let currentRightChartMode = 'category';
+    let lastChartsData = null;
     let soTableLines = [];
     let soTableParent = null;
+    let soTableSort = { col: '', dir: 'asc' };
 
     const hub = document.getElementById('salesHub');
     const loaderNote = document.getElementById('salesLoaderNote');
@@ -44,7 +49,7 @@
     const pageNumbersContainer = document.getElementById('salesPageNumbers');
     const searchInput = document.getElementById('salesSearch');
     const pageSizeSelect = document.getElementById('salesPageSize');
-    pageSize = Math.max(10, parseInt(pageSizeSelect?.value, 10) || cfg.pageSize || 10);
+    pageSize = 8000;
     const exportWrap = document.getElementById('salesExport');
     const exportBtn = document.getElementById('salesExportBtn');
     const exportMenu = document.getElementById('salesExportMenu');
@@ -162,6 +167,16 @@
     /********** DASHBOARD SEARCH TERM FUNCTIONS *********   */
     function getDashboardSearchTerm() {
         return String(headerSoSearchInput?.value || searchInput?.value || '').trim();
+    }
+
+    function extractIdSearchList(term) {
+        if (!term) return [];
+        const cleaned = String(term).trim().replace(/(?:so|qt|quo(?:tation)?)\s*#?/gi, '');
+        const tokens = cleaned.split(/[,;\s|\/]+/).map(t => t.trim()).filter(Boolean);
+        if (tokens.length > 0 && tokens.every(t => /^\d{1,10}$/.test(t))) {
+            return tokens;
+        }
+        return [];
     }
 
     /********** DASHBOARD SEARCH TERM FUNCTIONS *********   */
@@ -351,11 +366,11 @@
 
     /********** SHOW SALES LOADER FUNCTION *********   */
     function showSalesLoader(active) {
-        const loader = document.getElementById('salesLoader');
+        const loader = document.getElementById('rptSpinner');
         if (hub) hub.classList.toggle('is-loading', active);
         document.documentElement.classList.toggle('sales-is-loading', active);
         document.body.classList.toggle('sales-is-loading', active);
-        document.body.classList.toggle('sales-launch-loading', active);
+        document.body.classList.toggle('rpt-loading', active);
         if (active && window.kapisSplash && typeof window.kapisSplash.hide === 'function') {
             window.kapisSplash.hide();
         }
@@ -364,34 +379,7 @@
             splash.classList.add('is-done');
             splash.setAttribute('hidden', '');
         }
-        if (loader) {
-            loader.classList.toggle('is-on', active);
-            loader.classList.toggle('sales-loader--launch', active);
-            loader.setAttribute('aria-hidden', active ? 'false' : 'true');
-            if (loader.parentElement !== document.documentElement) {
-                document.documentElement.appendChild(loader);
-            }
-        }
-        if (loaderTimer) {
-            clearInterval(loaderTimer);
-            loaderTimer = null;
-        }
-        if (!active) {
-            return;
-        }
-        loaderStarted = Date.now();
-        if (loaderNote) loaderNote.textContent = 'Loading sales data…';
-        loaderTimer = setInterval(() => {
-            const secs = Math.round((Date.now() - loaderStarted) / 1000);
-            if (!loaderNote) return;
-            if (secs < 3) {
-                loaderNote.textContent = 'Loading sales data…';
-            } else if (secs < 8) {
-                loaderNote.textContent = 'Fetching SAP order lines…';
-            } else {
-                loaderNote.textContent = `Still loading… ${secs}s`;
-            }
-        }, 400);
+        if (loader) loader.hidden = !active;
     }
 
     /*
@@ -3098,9 +3086,54 @@
         });
         if (countEl) {
             const total = soTableLines.length;
-            const filtered = q || Object.keys(colFilters).length;
-            countEl.textContent = filtered ? `${visible} / ${total}` : `${total} item${total === 1 ? '' : 's'}`;
+            countEl.textContent = `Showing ${visible.toLocaleString()} of ${total.toLocaleString()} items`;
         }
+        updateSoFoot();
+    }
+
+    function updateSoFoot() {
+        const label = document.getElementById('soFootLabel');
+        const qtyEl = document.getElementById('soFootQty');
+        const netEl = document.getElementById('soFootNet');
+        let qty = 0;
+        let net = 0;
+        let visible = 0;
+        document.querySelectorAll('#soRelatedLinesBody .so-related-row').forEach((row) => {
+            if (row.style.display === 'none') return;
+            const item = soTableLines[Number(row.getAttribute('data-related-idx'))];
+            if (!item) return;
+            visible += 1;
+            qty += Number(item.qty) || 0;
+            net += Number(item.net_amount) || 0;
+        });
+        if (label) label.textContent = visible ? `Total (${visible})` : 'Total';
+        if (qtyEl) qtyEl.textContent = visible ? fmtNum(qty) : '';
+        if (netEl) netEl.textContent = visible ? fmtMoney(net) : '';
+    }
+
+    function soSortValue(row, col) {
+        if (col === 'type') return row.quotation_type || row.sales_order_type || '';
+        return row[col];
+    }
+
+    function sortSoLines(lines) {
+        if (!soTableSort.col) return lines;
+        const col = soTableSort.col;
+        const dir = soTableSort.dir === 'desc' ? -1 : 1;
+        return [...lines].sort((a, b) => {
+            if (col === 'qty' || col === 'net_amount') {
+                return ((Number(soSortValue(a, col)) || 0) - (Number(soSortValue(b, col)) || 0)) * dir;
+            }
+            return String(soSortValue(a, col) || '').localeCompare(String(soSortValue(b, col) || ''), undefined, { numeric: true }) * dir;
+        });
+    }
+
+    function updateSoSortHeaders() {
+        document.querySelectorAll('#soRelatedTable thead th[data-sort]').forEach((th) => {
+            const col = th.getAttribute('data-sort');
+            th.classList.toggle('is-sorted-asc', col === soTableSort.col && soTableSort.dir === 'asc');
+            th.classList.toggle('is-sorted-desc', col === soTableSort.col && soTableSort.dir === 'desc');
+        });
     }
 
     function exportSoTable() {
@@ -3111,23 +3144,38 @@
         downloadCsv(`sales-order-${so}-${Date.now()}.csv`, recordsToCsv(rows));
     }
 
-    function renderRelatedOrderLines(record) {
+    function renderRelatedOrderLines(record, options) {
+        const keepTools = Boolean(options && options.keepTools);
         const body = document.getElementById('soRelatedLinesBody');
         const countEl = document.getElementById('soRelatedCount');
         const family = record?._family || quotationFamilyLines(record);
-        const lines = family.length ? family : [];
+        const lines = sortSoLines(family.length ? family : []);
         soTableLines = lines;
         soTableParent = record;
         const searchEl = document.getElementById('soRelatedSearch');
+        const searchClear = document.getElementById('soRelatedSearchClear');
         if (searchEl) {
-            searchEl.value = '';
+            if (!keepTools) searchEl.value = '';
+            if (searchClear) searchClear.style.display = searchEl.value.trim() ? '' : 'none';
             if (!searchEl.dataset.bound) {
                 searchEl.dataset.bound = '1';
-                searchEl.addEventListener('input', applySoTableFilter);
+                searchEl.addEventListener('input', () => {
+                    if (searchClear) searchClear.style.display = searchEl.value.trim() ? '' : 'none';
+                    applySoTableFilter();
+                });
             }
         }
+        if (searchClear && !searchClear.dataset.bound) {
+            searchClear.dataset.bound = '1';
+            searchClear.addEventListener('click', () => {
+                if (searchEl) searchEl.value = '';
+                searchClear.style.display = 'none';
+                searchEl?.focus();
+                applySoTableFilter();
+            });
+        }
         const exportEl = document.getElementById('soRelatedExport');
-        if (exportEl && !exportEl.dataset.bound) {
+        if (exportEl && !exportEl.dataset.bound && !exportEl.hasAttribute('data-excel-export')) {
             exportEl.dataset.bound = '1';
             exportEl.addEventListener('click', exportSoTable);
         }
@@ -3138,9 +3186,22 @@
             soFilterBtn.addEventListener('click', () => {
                 const on = soTableEl?.classList.toggle('show-col-filters');
                 soFilterBtn.classList.toggle('is-on', !!on);
+                soFilterBtn.classList.toggle('is-active', !!on);
                 soFilterBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
             });
         }
+        if (!document.documentElement.dataset.soSortBound) {
+            document.documentElement.dataset.soSortBound = '1';
+            soTableEl?.querySelector('thead')?.addEventListener('click', (e) => {
+                const th = e.target.closest('th[data-sort]');
+                if (!th || e.target.closest('input, button')) return;
+                const col = th.getAttribute('data-sort');
+                if (soTableSort.col === col) soTableSort.dir = soTableSort.dir === 'asc' ? 'desc' : 'asc';
+                else soTableSort = { col, dir: 'asc' };
+                if (soTableParent) renderRelatedOrderLines(soTableParent, { keepTools: true });
+            });
+        }
+        initSoColumnMenu();
         const soExpandBtn = document.getElementById('soRelatedExpandBtn');
         const soPanel = document.getElementById('soRelatedPanel');
         if (soExpandBtn && !soExpandBtn.dataset.bound) {
@@ -3160,30 +3221,32 @@
             });
         }
         if (countEl) {
-            countEl.textContent = `${lines.length} item${lines.length === 1 ? '' : 's'}`;
+            countEl.textContent = `Showing ${lines.length.toLocaleString()} of ${lines.length.toLocaleString()} items`;
         }
+        updateSoSortHeaders();
         if (!body) return lines;
         if (!lines.length) {
             body.innerHTML = '<tr><td colspan="9" class="so-related-empty">No sales order items for this quotation.</td></tr>';
+            updateSoFoot();
             return lines;
         }
         body.innerHTML = lines.map((r, i) => {
             const cat = r.item_category || (r.is_header ? 'HDR' : '—');
             const desc = r.material_group && r.material_group !== '—' ? r.material_group : '';
             return `
-            <tr class="so-related-row ${String(r.id) === String(record?.id) ? 'is-active' : ''}" data-related-idx="${i}" tabindex="0">
-                <td><span class="line-no">${escapeHtml(r.line_item)}</span></td>
-                <td><span class="category-tag">${escapeHtml(cat)}</span></td>
-                <td class="rpt-mat">
+            <tr class="so-related-row ${String(r.id) === String(record?.id) ? 'is-active' : ''}" data-orig-sno="${i + 1}" data-related-idx="${i}" tabindex="0">
+                <td data-col-id="line_item"><span class="line-no">${escapeHtml(r.line_item)}</span></td>
+                <td data-col-id="item_category"><span class="category-tag">${escapeHtml(cat)}</span></td>
+                <td data-col-id="material" class="rpt-mat">
                     <div>${escapeHtml(r.material || '—')}</div>
                     ${desc ? `<div class="style-meta">${escapeHtml(desc)}</div>` : ''}
                 </td>
-                <td>${getPlantBadgeHtml(r.plant)}</td>
-                <td>${escapeHtml(r.customer || '—')}</td>
-                <td>${escapeHtml(r.quotation_type || r.sales_order_type || '—')}</td>
-                <td class="col-num">${fmtNum(r.qty)}${r.unit ? ` ${escapeHtml(r.unit)}` : ''}</td>
-                <td class="col-num">${fmtMoney(r.net_amount)}</td>
-                <td>${escapeHtml(r.sales_order || '—')}</td>
+                <td data-col-id="plant">${getPlantBadgeHtml(r.plant)}</td>
+                <td data-col-id="customer">${escapeHtml(r.customer || '—')}</td>
+                <td data-col-id="type">${escapeHtml(r.quotation_type || r.sales_order_type || '—')}</td>
+                <td data-col-id="qty" class="col-num">${fmtNum(r.qty)}${r.unit ? ` ${escapeHtml(r.unit)}` : ''}</td>
+                <td data-col-id="net_amount" class="col-num">${fmtMoney(r.net_amount)}</td>
+                <td data-col-id="sales_order">${escapeHtml(r.sales_order || '—')}</td>
             </tr>`;
         }).join('');
         body.querySelectorAll('.so-related-row').forEach((row) => {
@@ -3197,7 +3260,88 @@
                 openSoLineDrawer(item, record);
             });
         });
+        applySoTableFilter();
         return lines;
+    }
+
+    function initSoColumnMenu() {
+        const dropdown = document.getElementById('soColumnToggleDropdown');
+        const btn = document.getElementById('soColumnToggleBtn');
+        const menu = document.getElementById('soColumnToggleMenu');
+        if (!dropdown || !btn || !menu || btn.dataset.bound) return;
+        btn.dataset.bound = '1';
+        const columns = [
+            { id: 'line_item', label: 'Line', locked: true },
+            { id: 'item_category', label: 'Category' },
+            { id: 'material', label: 'Material' },
+            { id: 'plant', label: 'Plant' },
+            { id: 'customer', label: 'Customer' },
+            { id: 'type', label: 'Type' },
+            { id: 'qty', label: 'Qty' },
+            { id: 'net_amount', label: 'Net' },
+            { id: 'sales_order', label: 'Sales Order' },
+        ];
+        const storageKey = 'sales_order_table_hidden_cols';
+        let hidden = new Set();
+        try { hidden = new Set(JSON.parse(localStorage.getItem(storageKey) || '[]')); } catch (e) { hidden = new Set(); }
+        const style = document.createElement('style');
+        style.id = 'soColHideStyle';
+        document.head.appendChild(style);
+        function applyHidden() {
+            style.textContent = [...hidden].map((id) => `#soRelatedTable [data-col-id="${id}"]{display:none !important;}`).join('\n');
+            btn.classList.toggle('is-active', hidden.size > 0);
+        }
+        function renderMenu() {
+            menu.innerHTML = `
+                <div class="rpt-colmgr-head">
+                    <span class="rpt-cat-dd-header">Show columns</span>
+                    <span class="rpt-colmgr-count">${columns.length - hidden.size} of ${columns.length}</span>
+                </div>
+                <ul class="rpt-colmgr-list">
+                    ${columns.map((col) => `
+                        <li class="rpt-colmgr-item${col.locked ? ' is-locked' : ''}${hidden.has(col.id) ? ' is-hidden' : ''}">
+                            <label class="rpt-colmgr-label">
+                                <input type="checkbox" data-col-toggle="${col.id}" ${col.locked || !hidden.has(col.id) ? 'checked' : ''} ${col.locked ? 'disabled' : ''}>
+                                <span>${col.label}</span>
+                            </label>
+                        </li>`).join('')}
+                </ul>
+                <div class="rpt-cat-dd-divider"></div>
+                <button type="button" class="rpt-cat-dd-item" data-col-reset>
+                    <span class="material-icons-round">restart_alt</span>
+                    <span class="rpt-cat-dd-item-text">Show all columns</span>
+                </button>`;
+        }
+        function save() {
+            try { localStorage.setItem(storageKey, JSON.stringify([...hidden])); } catch (e) {}
+            applyHidden();
+            renderMenu();
+        }
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const open = dropdown.classList.toggle('is-open');
+            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        });
+        menu.addEventListener('change', (e) => {
+            const input = e.target.closest('[data-col-toggle]');
+            if (!input || input.disabled) return;
+            if (input.checked) hidden.delete(input.getAttribute('data-col-toggle'));
+            else hidden.add(input.getAttribute('data-col-toggle'));
+            save();
+        });
+        menu.addEventListener('click', (e) => {
+            if (!e.target.closest('[data-col-reset]')) return;
+            hidden = new Set();
+            save();
+        });
+        document.addEventListener('click', (e) => {
+            if (!dropdown.contains(e.target)) {
+                dropdown.classList.remove('is-open');
+                btn.setAttribute('aria-expanded', 'false');
+            }
+        });
+        applyHidden();
+        renderMenu();
     }
 
     function renderSoDashboardCharts(lines) {
@@ -3460,7 +3604,34 @@
         if (!summary) return;
         animateValue(document.getElementById('skNet'), summary.net_sales, v => fmtMoney(v));
         animateValue(document.getElementById('skQty'), summary.total_qty || 0, v => fmtNum(v));
-        animateValue(document.getElementById('skOrders'), summary.lines || summary.orders || 0, v => fmtNum(v));
+        const quotCount = Number(summary.quotations || (summary.lines > 0 ? 1 : 0));
+        const lineCount = Number(summary.lines || 0);
+        animateValue(document.getElementById('skOrders'), quotCount, v => fmtNum(v));
+        const linesPill = document.getElementById('skLinesPill');
+        if (linesPill) {
+            linesPill.textContent = `${fmtNum(lineCount)} Item${lineCount !== 1 ? 's' : ''}`;
+        }
+        const skOrdersSub = document.getElementById('skOrdersSub');
+        if (skOrdersSub) {
+            skOrdersSub.textContent = `${fmtNum(lineCount)} Quoted Line Item${lineCount !== 1 ? 's' : ''}`;
+        }
+        const convRate = Number(summary.conversion_rate != null ? summary.conversion_rate : 0);
+        animateValue(document.getElementById('skConversion'), convRate, v => v.toFixed(1) + '%');
+        const convBar = document.getElementById('skConversionBar');
+        if (convBar) {
+            convBar.style.width = Math.min(100, Math.max(0, convRate)) + '%';
+        }
+        const convSub = document.getElementById('skConversionSub');
+        if (convSub) {
+            const convQ = Number(summary.converted_quotations || 0);
+            const pendQ = Number(summary.pending_quotations || 0);
+            convSub.textContent = `${convQ} Converted • ${pendQ} Open`;
+        }
+        const convPill = document.getElementById('skConversionPill');
+        if (convPill) {
+            convPill.textContent = convRate >= 80 ? 'High' : (convRate >= 50 ? 'Moderate' : 'Active');
+        }
+
         animateValue(document.getElementById('skAvg'), summary.avg_line || 0, v => fmtMoney(v));
         animateValue(document.getElementById('skReturn'), summary.return_rate || 0, v => v.toFixed(1) + '%');
         animateValue(document.getElementById('skMargin'), summary.gross_margin || 0, v => v.toFixed(1) + '%');
@@ -3469,10 +3640,10 @@
             animateValue(procKpi, summary.orders || 0, v => fmtNum(v) + ' orders');
         }
         if (liveCount) {
-            liveCount.innerHTML = `<span class="material-icons-round">receipt_long</span> ${fmtNum(summary.lines || 0)} lines`;
+            liveCount.innerHTML = `<span class="material-icons-round">receipt_long</span> ${fmtNum(lineCount)} items`;
         }
         if (tableCount && summary && summary.lines !== undefined) {
-            tableCount.textContent = fmtNum(summary.lines);
+            tableCount.textContent = `${fmtNum(quotCount)} Quotation${quotCount !== 1 ? 's' : ''} • ${fmtNum(lineCount)} Items`;
         }
     }
 
@@ -3485,11 +3656,13 @@
         const end = Math.min(page * per, total);
 
         if (rangeInfo) {
-            rangeInfo.textContent = total === 0
-                ? 'Showing 0 of 0'
-                : `Showing ${start.toLocaleString()} - ${end.toLocaleString()} of ${total.toLocaleString()}`;
+            const shown = lastGroupCount;
+            rangeInfo.textContent = `Showing ${shown.toLocaleString()} of ${shown.toLocaleString()} quotations`;
         }
-        if (tableCount) {
+        if (tableCount && lastPayload?.summary) {
+            const qCount = Number(lastPayload.summary.quotations || (total > 0 ? 1 : 0));
+            tableCount.textContent = `${fmtNum(qCount)} Quotation${qCount !== 1 ? 's' : ''} • ${fmtNum(total)} Items`;
+        } else if (tableCount) {
             tableCount.textContent = fmtNum(total);
         }
         prevBtn && (prevBtn.disabled = page <= 1 || total === 0);
@@ -3564,6 +3737,38 @@
         Chart.defaults.color = '#64748b';
         Chart.defaults.borderColor = '#e2e8f0';
         Chart.defaults.font.family = 'DM Sans, sans-serif';
+
+        const btnItems = document.getElementById('btnChartModeItems');
+        const btnTrend = document.getElementById('btnChartModeTrend');
+        btnItems?.addEventListener('click', (e) => {
+            e.preventDefault();
+            currentLeftChartMode = 'items';
+            if (lastChartsData) renderLeftChart(lastChartsData);
+        });
+        btnTrend?.addEventListener('click', (e) => {
+            e.preventDefault();
+            currentLeftChartMode = 'trend';
+            if (lastChartsData) renderLeftChart(lastChartsData);
+        });
+
+        const btnCat = document.getElementById('btnMixModeCategory');
+        const btnCust = document.getElementById('btnMixModeCustomer');
+        const btnMat = document.getElementById('btnMixModeMaterial');
+        btnCat?.addEventListener('click', (e) => {
+            e.preventDefault();
+            currentRightChartMode = 'category';
+            if (lastChartsData) renderRightChart(lastChartsData);
+        });
+        btnCust?.addEventListener('click', (e) => {
+            e.preventDefault();
+            currentRightChartMode = 'customer';
+            if (lastChartsData) renderRightChart(lastChartsData);
+        });
+        btnMat?.addEventListener('click', (e) => {
+            e.preventDefault();
+            currentRightChartMode = 'material';
+            if (lastChartsData) renderRightChart(lastChartsData);
+        });
 
         const trendEl = document.getElementById('salesTrendChart');
         if (trendEl) {
@@ -3839,48 +4044,349 @@
         fillSpark('skNetSpark', slice);
         fillSpark('skQtySpark', slice.map((v, i) => v * (0.72 + ((i % 3) * 0.08))));
         fillSpark('skOrdersSpark', slice.map((v, i) => v * (0.55 + ((i % 4) * 0.1))));
+        fillSpark('skConversionSpark', slice.map((v, i) => v * (0.85 + ((i % 2) * 0.12))));
         setDelta('skNetDelta', nums);
         setDelta('skQtyDelta', nums);
         setDelta('skOrdersDelta', nums);
     }
 
+    function renderLeftChart(charts) {
+        const trendEl = document.getElementById('salesTrendChart');
+        if (!trendEl || !charts) return;
+        const itemsData = charts.items || null;
+        const trendData = charts.trend || null;
+
+        // Auto logic: if single date/quotation or items available, show items breakdown
+        const hasMultipleDates = (trendData?.labels?.length || 0) > 1;
+        const activeMode = currentLeftChartMode === 'auto'
+            ? (hasMultipleDates ? 'trend' : 'items')
+            : currentLeftChartMode;
+
+        const titleEl = document.getElementById('trendChartTitle');
+        const subEl = document.getElementById('trendChartSubtitle');
+        const iconEl = document.getElementById('trendChartIcon');
+        const peakEl = document.getElementById('trendPeakStat');
+        const tabItems = document.getElementById('btnChartModeItems');
+        const tabTrend = document.getElementById('btnChartModeTrend');
+
+        tabItems?.classList.toggle('active', activeMode === 'items');
+        tabTrend?.classList.toggle('active', activeMode === 'trend');
+
+        if (activeMode === 'items' && itemsData && itemsData.labels && itemsData.labels.length > 0) {
+            if (titleEl) titleEl.textContent = 'Item Breakdown';
+            if (subEl) subEl.textContent = 'Net value & quantity per line item';
+            if (iconEl) iconEl.textContent = 'bar_chart';
+
+            const totalItemsNet = itemsData.values.reduce((a, b) => a + Number(b || 0), 0);
+            if (peakEl) peakEl.textContent = `${itemsData.labels.length} Items • ${fmtMoney(totalItemsNet)}`;
+
+            if (trendChart) {
+                trendChart.destroy();
+                trendChart = null;
+            }
+
+            trendChart = new Chart(trendEl, {
+                type: 'bar',
+                data: {
+                    labels: itemsData.labels,
+                    datasets: [
+                        {
+                            label: 'Net Value',
+                            data: itemsData.values,
+                            backgroundColor: (ctx) => {
+                                const colors = ['#3b82f6', '#06b6d4', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#6366f1'];
+                                return colors[ctx.dataIndex % colors.length];
+                            },
+                            borderRadius: 8,
+                            borderSkipped: false,
+                            maxBarThickness: 45,
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: chartAnim,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                            titleColor: '#ffffff',
+                            bodyColor: '#e2e8f0',
+                            borderColor: 'rgba(255, 255, 255, 0.15)',
+                            borderWidth: 1,
+                            padding: 12,
+                            boxPadding: 6,
+                            cornerRadius: 10,
+                            callbacks: {
+                                label: function(ctx) {
+                                    const idx = ctx.dataIndex;
+                                    const val = ctx.parsed.y;
+                                    const qty = itemsData.quantities?.[idx] || 0;
+                                    const unit = itemsData.units?.[idx] || 'EA';
+                                    const mat = itemsData.materials?.[idx] || '';
+                                    const lines = [` Net Value: ${fmtMoney(val)}`, ` Quantity: ${fmtNum(qty)} ${unit}`];
+                                    if (mat && mat !== '—') lines.unshift(` Material: ${mat}`);
+                                    return lines;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                color: '#64748b',
+                                font: { size: 11, weight: 600 },
+                                callback: v => symbol + Number(v).toLocaleString()
+                            },
+                            grid: {
+                                color: 'rgba(226, 232, 240, 0.7)',
+                                borderDash: [5, 5]
+                            }
+                        },
+                        x: {
+                            ticks: {
+                                color: '#64748b',
+                                font: { size: 11, weight: 600 },
+                                maxRotation: 25,
+                                minRotation: 0,
+                                autoSkip: false
+                            },
+                            grid: { display: false }
+                        }
+                    }
+                }
+            });
+
+            paintKpiSparks(itemsData.values);
+        } else {
+            // Date Trend mode
+            if (titleEl) titleEl.textContent = 'Quotation Value Trend';
+            if (subEl) subEl.textContent = 'Net value aggregated by quotation date';
+            if (iconEl) iconEl.textContent = 'show_chart';
+
+            const maxVal = (trendData?.values || []).length > 0 ? Math.max(...trendData.values.map(Number)) : 0;
+            if (peakEl) peakEl.textContent = `Peak: ${fmtMoney(maxVal)}`;
+
+            if (trendChart) {
+                trendChart.destroy();
+                trendChart = null;
+            }
+
+            trendChart = new Chart(trendEl, {
+                type: 'line',
+                data: {
+                    labels: trendData?.labels || [],
+                    datasets: [{
+                        label: 'Net Sales',
+                        data: trendData?.values || [],
+                        borderColor: '#3b82f6',
+                        borderWidth: 3.5,
+                        backgroundColor: (ctx) => {
+                            const { chart } = ctx;
+                            const { ctx: c, chartArea } = chart;
+                            if (!chartArea) return 'rgba(59, 130, 246, 0.15)';
+                            const g = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+                            g.addColorStop(0, 'rgba(139, 92, 246, 0.42)');
+                            g.addColorStop(0.35, 'rgba(59, 130, 246, 0.22)');
+                            g.addColorStop(0.75, 'rgba(6, 182, 212, 0.08)');
+                            g.addColorStop(1, 'rgba(255, 255, 255, 0.0)');
+                            return g;
+                        },
+                        fill: true,
+                        tension: 0.44,
+                        pointRadius: 6,
+                        pointHoverRadius: 9,
+                        pointBackgroundColor: '#ffffff',
+                        pointBorderColor: '#6366f1',
+                        pointBorderWidth: 3,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: chartAnim,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                            titleColor: '#ffffff',
+                            bodyColor: '#e2e8f0',
+                            borderColor: 'rgba(255, 255, 255, 0.15)',
+                            borderWidth: 1,
+                            padding: 12,
+                            boxPadding: 6,
+                            cornerRadius: 10,
+                            callbacks: {
+                                label: function (ctx) {
+                                    return ` Net Sales: ${fmtMoney(ctx.parsed.y)}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                color: '#64748b',
+                                font: { size: 11, weight: 600 },
+                                callback: v => symbol + Number(v).toLocaleString()
+                            },
+                            grid: {
+                                color: 'rgba(226, 232, 240, 0.7)',
+                                borderDash: [5, 5]
+                            }
+                        },
+                        x: {
+                            ticks: {
+                                color: '#64748b',
+                                font: { size: 11, weight: 600 },
+                                maxRotation: 0,
+                                autoSkip: true,
+                                maxTicksLimit: 12
+                            },
+                            grid: { display: false }
+                        }
+                    }
+                }
+            });
+
+            paintKpiSparks(trendData?.values || []);
+        }
+    }
+
+    function renderRightChart(charts) {
+        const divEl = document.getElementById('salesDivisionChart');
+        if (!divEl || !charts) return;
+
+        const titleEl = document.getElementById('salesMixTitle');
+        const subEl = document.getElementById('salesMixSubtitle');
+        const centerVal = document.getElementById('plantMixCenterVal');
+        const centerLbl = document.getElementById('plantMixCenterLbl');
+        const tabCat = document.getElementById('btnMixModeCategory');
+        const tabCust = document.getElementById('btnMixModeCustomer');
+        const tabMat = document.getElementById('btnMixModeMaterial');
+
+        tabCat?.classList.toggle('active', currentRightChartMode === 'category');
+        tabCust?.classList.toggle('active', currentRightChartMode === 'customer');
+        tabMat?.classList.toggle('active', currentRightChartMode === 'material');
+
+        let mixData = null;
+        if (currentRightChartMode === 'material' && charts.materials && charts.materials.labels?.length > 0) {
+            mixData = {
+                title: 'Material Share',
+                subtitle: 'Net quoted amount by material',
+                labels: charts.materials.labels,
+                values: charts.materials.values,
+            };
+        } else if (currentRightChartMode === 'customer' && charts.customers && charts.customers.labels?.length > 0) {
+            mixData = {
+                title: 'Customer Distribution',
+                subtitle: 'Net quoted amount by customer',
+                labels: charts.customers.labels,
+                values: charts.customers.values,
+            };
+        } else {
+            const catData = charts.categories && charts.categories.labels?.length > 0 ? charts.categories : (charts.mix || charts.division);
+            mixData = {
+                title: 'Item Category Mix',
+                subtitle: 'Net quoted amount by category',
+                labels: catData?.labels || ['No data'],
+                values: catData?.values || [0],
+            };
+        }
+
+        if (titleEl) titleEl.textContent = mixData.title;
+        if (subEl) subEl.textContent = mixData.subtitle;
+
+        const totalVal = (mixData.values || []).reduce((a, b) => a + Number(b || 0), 0);
+
+        if (divisionChart) {
+            divisionChart.destroy();
+            divisionChart = null;
+        }
+
+        divisionChart = new Chart(divEl, {
+            type: 'doughnut',
+            data: {
+                labels: mixData.labels || [],
+                datasets: [{
+                    data: mixData.values || [],
+                    backgroundColor: (mixData.labels || []).map((_, i) => PALETTE[i % PALETTE.length]),
+                    borderWidth: 4,
+                    borderColor: '#ffffff',
+                    borderRadius: 8,
+                    spacing: 3,
+                    hoverOffset: 12,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '72%',
+                animation: { animateRotate: true, animateScale: true, duration: 900, easing: 'easeOutQuart' },
+                onClick: function (evt, els) { clickFilter(this)(evt, els); },
+                onHover: function (evt, elements) {
+                    if (!centerVal || !centerLbl) return;
+                    if (elements && elements.length > 0) {
+                        const idx = elements[0].index;
+                        const label = this.data.labels[idx];
+                        const val = Number(this.data.datasets[0].data[idx] || 0);
+                        const total = this.data.datasets[0].data.reduce((a, b) => a + Number(b || 0), 0);
+                        const pct = total > 0 ? Math.round((val / total) * 100) : 0;
+                        centerVal.textContent = `${pct}%`;
+                        centerLbl.textContent = label;
+                    } else {
+                        centerVal.textContent = fmtMoney(totalVal);
+                        centerLbl.textContent = 'Total Value';
+                    }
+                },
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            color: '#334155',
+                            padding: 14,
+                            boxWidth: 12,
+                            boxHeight: 12,
+                            font: { size: 12, weight: 700 },
+                            usePointStyle: true,
+                            pointStyle: 'circle'
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                        titleColor: '#ffffff',
+                        bodyColor: '#e2e8f0',
+                        borderColor: 'rgba(255, 255, 255, 0.15)',
+                        borderWidth: 1,
+                        padding: 12,
+                        boxPadding: 6,
+                        cornerRadius: 10,
+                        callbacks: {
+                            label: function (ctx) {
+                                const val = ctx.parsed || 0;
+                                const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                                const pct = total > 0 ? Math.round((val / total) * 100) : 0;
+                                return ` ${ctx.label}: ${fmtMoney(val)} (${pct}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        if (centerVal) centerVal.textContent = fmtMoney(totalVal);
+        if (centerLbl) centerLbl.textContent = 'Total Value';
+    }
+
     function updateCharts(charts) {
         if (!charts || typeof Chart === 'undefined') return;
+        lastChartsData = charts;
 
-        if (trendChart && charts.trend) {
-            trendChart.data.labels = charts.trend.labels || [];
-            trendChart.data.datasets[0].data = charts.trend.values || [];
-            trendChart.data.datasets[0].pointRadius = (charts.trend.labels || []).length > 25 ? 0 : 6;
-            trendChart.update('active');
-
-            const trendPeak = document.getElementById('trendPeakStat');
-            if (trendPeak && (charts.trend.values || []).length > 0) {
-                const maxVal = Math.max(...charts.trend.values.map(Number));
-                trendPeak.textContent = `Peak: ${fmtMoney(maxVal)}`;
-            }
-            paintKpiSparks(charts.trend.values || []);
-        }
-
-        const mix = charts.plants && charts.plants.labels?.length > 1 ? charts.plants : (charts.mix || charts.division);
-        if (divisionChart && mix) {
-            const mixTitle = document.getElementById('salesMixTitle');
-            const mixSub = document.getElementById('salesMixSubtitle');
-            if (mixTitle) mixTitle.textContent = mix.title || 'Plant Mix';
-            if (mixSub) mixSub.textContent = mix.subtitle || 'Click a slice to filter';
-            divisionChart.data.labels = mix.labels || [];
-            divisionChart.data.datasets[0].data = mix.values || [];
-            divisionChart.data.datasets[0].backgroundColor = (mix.labels || []).map((_, i) => PALETTE[i % PALETTE.length]);
-            divisionChart.update('active');
-
-            const centerVal = document.getElementById('plantMixCenterVal');
-            const centerLbl = document.getElementById('plantMixCenterLbl');
-            if (centerVal) {
-                centerVal.textContent = (mix.labels || []).length + ' Plants';
-            }
-            if (centerLbl) {
-                centerLbl.textContent = 'Distribution';
-            }
-        }
+        renderLeftChart(charts);
+        renderRightChart(charts);
 
         if (stylesChart && charts.top_styles) {
             stylesChart.data.labels = charts.top_styles.labels || [];
@@ -3941,53 +4447,167 @@
         return `<span class="plant-badge ${cls}"><span class="plant-dot"></span>${escapeHtml(p)}</span>`;
     }
 
+    function isHeaderLine(record) {
+        return Boolean(record?.is_header || (String(record?.line_item) === '0' && (Number(record?.qty) === 0 || !record?.material || record.material === '—')));
+    }
+
+    function groupRowsByQuotation(lines) {
+        const order = [];
+        const buckets = new Map();
+        lines.forEach((row) => {
+            const key = String(row.quotation || '').trim() || `__line_${row.id || order.length}`;
+            if (!buckets.has(key)) {
+                buckets.set(key, []);
+                order.push(key);
+            }
+            buckets.get(key).push(row);
+        });
+
+        return order.map((key) => {
+            const rows = buckets.get(key);
+            const items = rows.filter((row) => !isHeaderLine(row));
+            const base = items[0] || rows[0] || {};
+            const materials = [...new Set(items.map((row) => String(row.material || '').trim()).filter((value) => value && value !== '—'))];
+            const categories = [...new Set(items.map((row) => String(row.item_category || '').trim()).filter(Boolean))];
+            const orders = [...new Set(rows.map((row) => String(row.sales_order || '').trim()).filter((value) => value && !isBlankCode(value)))];
+            const units = [...new Set(items.map((row) => String(row.unit || '').trim()).filter(Boolean))];
+            return {
+                ...base,
+                id: `qt-${key}`,
+                is_group: true,
+                quotation: base.quotation || key,
+                raw_rows: rows,
+                raw_items: items,
+                item_count: items.length,
+                material: materials[0] || '',
+                material_extra: Math.max(0, materials.length - 1),
+                material_group: materials.length > 1 ? `${materials.length} materials` : (base.material_group || ''),
+                item_category: categories.length === 1 ? categories[0] : (categories.length > 1 ? 'Mixed' : (base.quotation_type || '')),
+                qty: items.reduce((sum, row) => sum + (Number(row.qty) || 0), 0),
+                unit: units.length === 1 ? units[0] : '',
+                net_amount: items.reduce((sum, row) => sum + (Number(row.net_amount) || 0), 0),
+                sales_orders: orders,
+                sales_order: orders[0] || '',
+            };
+        });
+    }
+
     function renderRows(records) {
         if (!tbody) return;
         if (!records.length) {
             tbody.innerHTML = emptyRowHtml('No data found', 'No quotation lines match this filter.');
+            updateTableFoot([]);
             return;
         }
 
-        const startIdx = ((currentPage - 1) * pageSize);
-
         tbody.innerHTML = records.map((r, i) => {
-            const sno = startIdx + i + 1;
-            const cat = r.item_category || (r.is_header ? 'HDR' : '');
-            const desc = r.material_group && r.material_group !== '—' && r.material_group !== '—' ? r.material_group : '';
-            const soType = r.sales_order_type ? `&bull; ${escapeHtml(r.sales_order_type)}` : '';
-            const hasSo = !isBlankCode(r.sales_order);
-            const soClean = hasSo ? escapeHtml(r.sales_order) : '';
-            return `
-                <tr class="sales-row row-animate" data-id="${escapeHtml(r.id)}" data-row-idx="${i}" tabindex="0" role="button" title="Quotation ${escapeHtml(r.quotation)} item ${escapeHtml(r.line_item)}" style="animation-delay:${Math.min(i, 12) * 0.03}s">
-                    <td style="text-align:center;"><span class="sales-sno">${sno}</span></td>
-                    <td>
-                        <button type="button" class="so-id-btn qt-id-btn" data-quotation="${escapeHtml(r.quotation)}" title="View Quotation #${escapeHtml(r.quotation)}">
-                            <span class="material-icons-round">request_quote</span>
+            const sno = i + 1;
+            const isGroup = Boolean(r.is_group);
+            const isHdr = !isGroup && isHeaderLine(r);
+            const cat = r.item_category || (isHdr ? 'HDR' : '');
+            const desc = isGroup && r.material_extra
+                ? `+${r.material_extra} more`
+                : (r.material_group && r.material_group !== '—' ? r.material_group : '');
+            const orders = isGroup && Array.isArray(r.sales_orders) ? r.sales_orders : [];
+            const hasSo = orders.length ? true : !isBlankCode(r.sales_order);
+            const soClean = hasSo ? escapeHtml(orders[0] || r.sales_order) : '';
+            const extraOrders = orders.slice(1);
+            const subItems = (r.raw_items && r.raw_items.length > 0) ? r.raw_items : [];
+            const lineBadge = isGroup
+                ? `<div class="sales-item-pill-wrap">
+                    <span class="line-no" title="${r.item_count} item${r.item_count === 1 ? '' : 's'}">${r.item_count} item${r.item_count === 1 ? '' : 's'}</span>
+                    ${subItems.length > 1 ? `
+                        <button type="button" class="sales-row-expand-btn" data-qt="${escapeHtml(r.quotation)}" title="Expand/collapse line items" aria-label="Expand line items">
+                            <i class="fas fa-chevron-down"></i>
+                        </button>
+                    ` : ''}
+                   </div>`
+                : (isHdr
+                    ? `<span class="line-no hdr-line" title="Quotation Header">0 (Header)</span>`
+                    : `<span class="line-no">${escapeHtml(r.line_item)}</span>`);
+            const matDisplay = isGroup && !r.material
+                ? `<span class="style-name text-muted" style="color:#94a3b8;font-style:italic;">No material lines</span>`
+                : (isHdr && (!r.material || r.material === '—')
+                    ? `<span class="style-name text-muted" style="color:#94a3b8;font-style:italic;">Quotation Header</span>`
+                    : `<span class="style-name">${escapeHtml(r.material || '—')}</span>`);
+            const soType = !isGroup && r.sales_order_type ? `&bull; ${escapeHtml(r.sales_order_type)}` : '';
+
+            const mainTr = `
+                <tr class="sales-row row-animate ${isGroup ? 'row-quotation-group' : ''} ${isHdr ? 'row-quotation-header' : ''}" data-orig-sno="${sno}" data-id="${escapeHtml(r.id)}" data-row-idx="${i}" data-quotation="${escapeHtml(r.quotation)}" tabindex="0" role="button" title="Quotation ${escapeHtml(r.quotation)}" style="animation-delay:${Math.min(i, 12) * 0.03}s">
+                    <td data-col-id="sno" class="num sno" style="text-align:center;"><span class="sales-sno">${sno}</span></td>
+                    <td data-col-id="quotation">
+                        <button type="button" class="po-item-tag is-link qt-id-btn sales-qt-badge" data-quotation="${escapeHtml(r.quotation)}" title="Open Quotation #${escapeHtml(r.quotation)}">
+                            <i class="fas fa-file-invoice"></i>
                             <span>${escapeHtml(r.quotation)}</span>
                         </button>
                     </td>
-                    <td><span class="line-no">${escapeHtml(r.line_item)}</span></td>
-                    <td class="col-style">
-                        <span class="style-name">${escapeHtml(r.material || '—')}</span>
+                    <td data-col-id="line_item">${lineBadge}</td>
+                    <td data-col-id="material" class="col-style">
+                        ${matDisplay}
                         ${desc ? `<span class="style-meta">${escapeHtml(desc)}</span>` : ''}
                     </td>
-                    <td>${cat ? `<span class="category-tag">${escapeHtml(cat)}</span>` : '—'}</td>
-                    <td>${escapeHtml(r.customer || '—')}</td>
-                    <td class="col-style"><span class="style-name">${escapeHtml(r.customer_ref || '—')}</span></td>
-                    <td class="col-date">${escapeHtml(fmtSapDate(r.date) || r.date || '—')}</td>
-                    <td class="col-num">${fmtNum(r.qty)}${r.unit ? ` ${escapeHtml(r.unit)}` : ''}</td>
-                    <td class="col-num revenue-cell">${fmtMoney(r.net_amount)}</td>
-                    <td>
+                    <td data-col-id="item_category">${cat ? `<span class="category-tag">${escapeHtml(cat)}</span>` : '—'}</td>
+                    <td data-col-id="customer">${escapeHtml(r.customer || '—')}</td>
+                    <td data-col-id="customer_ref" class="col-style"><span class="style-name">${escapeHtml(r.customer_ref || '—')}</span></td>
+                    <td data-col-id="date" class="col-date">${escapeHtml(fmtSapDate(r.date) || r.date || '—')}</td>
+                    <td data-col-id="qty" class="col-num num">${fmtNum(r.qty)}${r.unit ? ` ${escapeHtml(r.unit)}` : ''}</td>
+                    <td data-col-id="net_amount" class="col-num num revenue-cell">${fmtMoney(r.net_amount)}</td>
+                    <td data-col-id="sales_order">
                         ${hasSo ? `
-                            <button type="button" class="so-id-btn so-action-btn" data-so="${soClean}" title="View Live Sales Order #${soClean} Details">
-                                <span class="material-icons-round">receipt_long</span>
+                            <button type="button" class="po-item-tag is-link so-action-btn" data-so="${soClean}" title="View Live Sales Order #${soClean} Details">
+                                <i class="fas fa-file-invoice"></i>
                                 <span>${soClean}</span>
                             </button>
+                            ${extraOrders.length ? `<span class="style-meta">+${extraOrders.length} more</span>` : ''}
                         ` : `<span class="category-tag" style="background:#f1f5f9;color:#94a3b8">—</span>`}
                         ${soType ? `<span class="style-meta">${soType}</span>` : ''}
                     </td>
                 </tr>
             `;
+
+            const extTr = subItems.length > 1 ? `
+                <tr class="sales-extended-row" data-extended-for="${escapeHtml(r.quotation)}" style="display:none;">
+                    <td colspan="11" class="sales-extended-cell">
+                        <div class="sales-extended-content">
+                            <div class="sales-extended-bar">
+                                <span class="sales-ext-title"><i class="fas fa-layer-group"></i> Quotation <b>${escapeHtml(r.quotation)}</b> Line Items (${subItems.length})</span>
+                                <span class="sales-ext-cust"><i class="fas fa-building"></i> Customer: <b>${escapeHtml(r.customer || '—')}</b></span>
+                                ${r.customer_ref ? `<span class="sales-ext-ref"><i class="fas fa-tag"></i> Ref: ${escapeHtml(r.customer_ref)}</span>` : ''}
+                            </div>
+                            <table class="sales-sub-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 55px; text-align: center;">Item #</th>
+                                        <th>Material</th>
+                                        <th>Material Group</th>
+                                        <th>Category</th>
+                                        <th class="num">Quantity</th>
+                                        <th class="num">Net Value</th>
+                                        <th>Sales Order</th>
+                                        <th>Plant</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${subItems.map(item => `
+                                        <tr>
+                                            <td style="text-align: center;"><span class="line-no">${escapeHtml(item.line_item || '—')}</span></td>
+                                            <td><span class="style-name"><b>${escapeHtml(item.material || '—')}</b></span></td>
+                                            <td>${escapeHtml(item.material_group || '—')}</td>
+                                            <td><span class="category-tag">${escapeHtml(item.item_category || '—')}</span></td>
+                                            <td class="num">${fmtNum(item.qty)}${item.unit ? ` ${escapeHtml(item.unit)}` : ''}</td>
+                                            <td class="num revenue-cell">${fmtMoney(item.net_amount)}</td>
+                                            <td>${item.sales_order ? `<button type="button" class="po-item-tag is-link so-action-btn" data-so="${escapeHtml(item.sales_order)}" style="font-size:11px;padding:2px 6px;"><i class="fas fa-file-invoice"></i> ${escapeHtml(item.sales_order)}</button>` : '<span class="text-muted">—</span>'}</td>
+                                            <td><span class="po-plant-badge">${escapeHtml(item.plant || '—')}</span></td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </td>
+                </tr>
+            ` : '';
+
+            return mainTr + extTr;
         }).join('');
 
         // 1. Direct Sales Order button click
@@ -4015,7 +4635,28 @@
             });
         });
 
-        // 3. Row click (any other part of row)
+        // 3. Extended row expand/collapse toggle
+        tbody.querySelectorAll('.sales-row-expand-btn').forEach((btn) => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                const qt = btn.getAttribute('data-qt');
+                const extRow = tbody.querySelector(`tr.sales-extended-row[data-extended-for="${qt}"]`);
+                if (extRow) {
+                    const isHidden = extRow.style.display === 'none';
+                    extRow.style.display = isHidden ? 'table-row' : 'none';
+                    btn.classList.toggle('is-open', isHidden);
+                    const icon = btn.querySelector('i');
+                    if (icon) {
+                        icon.className = isHidden ? 'fas fa-chevron-up' : 'fas fa-chevron-down';
+                    }
+                }
+            });
+        });
+
+        // 4. Row click (any other part of row)
+        updateTableFoot(records);
+
         tbody.querySelectorAll('.sales-row').forEach((row, i) => {
             const record = records[i];
 
@@ -4036,11 +4677,26 @@
     function applyFiltersAndSort() {
         let list = [...currentRawRecords];
 
-        if (currentFrom && currentTo) {
+        const queryTerm = getDashboardSearchTerm();
+        const idTokens = extractIdSearchList(queryTerm);
+        const isIdSearch = idTokens.length > 0 ||
+            Boolean(activeColFilters.quotation || activeColFilters.sales_order);
+
+        if (!isIdSearch && currentFrom && currentTo) {
             list = list.filter((r) => {
                 const iso = String(r.date_iso || r.date || '').slice(0, 10);
                 if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false;
                 return iso >= currentFrom && iso <= currentTo;
+            });
+        }
+
+        if (idTokens.length > 1) {
+            const tokenSet = new Set(idTokens.map(t => t.replace(/^0+/, '')));
+            list = list.filter(r => {
+                const qClean = String(r.quotation || '').replace(/^0+/, '');
+                const soClean = String(r.sales_order || '').replace(/^0+/, '');
+                return tokenSet.has(qClean) || tokenSet.has(soClean) ||
+                    (r.sales_orders && Array.isArray(r.sales_orders) && r.sales_orders.some(s => tokenSet.has(String(s).replace(/^0+/, ''))));
             });
         }
 
@@ -4126,24 +4782,51 @@
             });
         }
 
-        renderRows(list);
-        if (tableCount) {
-            tableCount.textContent = fmtNum(list.length);
+        const grouped = groupRowsByQuotation(list);
+        lastGroupCount = grouped.length;
+        renderRows(grouped);
+
+        const activeFilterCount = Object.values(activeColFilters).filter(Boolean).length;
+        const activeBadge = document.getElementById('salesActiveFilterBadge');
+        if (activeBadge) {
+            activeBadge.style.display = activeFilterCount > 0 ? 'inline-flex' : 'none';
+            activeBadge.textContent = String(activeFilterCount);
         }
+
+        const clearAllBtn = document.getElementById('salesClearAllFilters');
+        const hasSearch = Boolean(searchInput?.value.trim());
+        const hasFilters = activeFilterCount > 0 || hasSearch || Boolean(currentSortCol);
+        if (clearAllBtn) {
+            clearAllBtn.style.display = hasFilters ? 'inline-flex' : 'none';
+        }
+
+        if (rangeInfo) {
+            rangeInfo.textContent = `Showing ${grouped.length.toLocaleString()} of ${grouped.length.toLocaleString()} quotations`;
+            rangeInfo.classList.toggle('is-filtered', hasFilters);
+        }
+        if (tableCount) {
+            const itemCount = list.filter((row) => !isHeaderLine(row)).length;
+            tableCount.textContent = `${fmtNum(grouped.length)} Quotation${grouped.length === 1 ? '' : 's'} • ${fmtNum(itemCount)} Items`;
+        }
+    }
+
+    function updateTableFoot(records) {
+        const label = document.getElementById('salesFootLabel');
+        const qtyCell = document.getElementById('salesFootQty');
+        const netCell = document.getElementById('salesFootNet');
+        const qty = records.reduce((sum, row) => sum + (Number(row.qty) || 0), 0);
+        const net = records.reduce((sum, row) => sum + (Number(row.net_amount) || 0), 0);
+        if (label) label.textContent = records.length ? `Total (${records.length})` : 'Total';
+        if (qtyCell) qtyCell.textContent = records.length ? fmtNum(qty) : '';
+        if (netCell) netCell.textContent = records.length ? fmtMoney(net) : '';
     }
 
     function updateSortHeaders() {
         document.querySelectorAll('#salesDataTable thead th.col-sortable').forEach(th => {
             const col = th.dataset.sort;
-            const icon = th.querySelector('.sort-icon');
             th.classList.remove('is-sorted-asc', 'is-sorted-desc');
             if (col === currentSortCol) {
                 th.classList.add(currentSortDir === 'asc' ? 'is-sorted-asc' : 'is-sorted-desc');
-                if (icon) {
-                    icon.textContent = currentSortDir === 'asc' ? 'arrow_upward' : 'arrow_downward';
-                }
-            } else {
-                if (icon) icon.textContent = 'unfold_more';
             }
         });
     }
@@ -4176,11 +4859,41 @@
 
         // Column filter text inputs
         document.querySelectorAll('.col-filter-input').forEach(input => {
+            const wrap = input.closest('.rpt-col-input-wrap');
+            const clearBtn = wrap?.querySelector('.rpt-col-clear');
+            const syncClear = () => {
+                const val = input.value.trim();
+                input.classList.toggle('has-val', val !== '');
+                if (clearBtn) clearBtn.style.display = val !== '' ? 'block' : 'none';
+            };
+
             input.addEventListener('input', () => {
+                syncClear();
                 const col = input.dataset.filterCol;
                 if (col) {
                     activeColFilters[col] = input.value.trim();
                     applyFiltersAndSort();
+                }
+            });
+        });
+
+        // Individual column clear buttons (×)
+        document.querySelectorAll('.sales-col-filter-row .rpt-col-clear').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                const wrap = btn.closest('.rpt-col-input-wrap');
+                const input = wrap?.querySelector('.col-filter-input');
+                if (input) {
+                    input.value = '';
+                    input.classList.remove('has-val');
+                    btn.style.display = 'none';
+                    const col = input.dataset.filterCol;
+                    if (col) {
+                        activeColFilters[col] = '';
+                        applyFiltersAndSort();
+                    }
+                    input.focus();
                 }
             });
         });
@@ -4196,10 +4909,47 @@
             });
         });
 
-        // Clear all filters button
+        // Clear all column filters button (eraser icon in S.No column)
         const btnClear = document.getElementById('btnClearColFilters');
         btnClear?.addEventListener('click', () => {
-            document.querySelectorAll('.col-filter-input').forEach(inp => inp.value = '');
+            document.querySelectorAll('.sales-col-filter-row .col-filter-input').forEach(inp => {
+                inp.value = '';
+                inp.classList.remove('has-val');
+                const wrap = inp.closest('.rpt-col-input-wrap');
+                const cb = wrap?.querySelector('.rpt-col-clear');
+                if (cb) cb.style.display = 'none';
+            });
+            document.querySelectorAll('.col-filter-select').forEach(sel => sel.value = '');
+            activeColFilters = {
+                quotation: '',
+                line_item: '',
+                material: '',
+                item_category: '',
+                customer: '',
+                customer_ref: '',
+                sales_order: '',
+                date: '',
+                qty: '',
+                net_amount: '',
+                status: ''
+            };
+            applyFiltersAndSort();
+        });
+
+        // Global Clear All toolbar button
+        const clearAllToolbarBtn = document.getElementById('salesClearAllFilters');
+        clearAllToolbarBtn?.addEventListener('click', () => {
+            if (searchInput) searchInput.value = '';
+            const searchClear = document.getElementById('salesSearchClear');
+            if (searchClear) searchClear.style.display = 'none';
+
+            document.querySelectorAll('.sales-col-filter-row .col-filter-input').forEach(inp => {
+                inp.value = '';
+                inp.classList.remove('has-val');
+                const wrap = inp.closest('.rpt-col-input-wrap');
+                const cb = wrap?.querySelector('.rpt-col-clear');
+                if (cb) cb.style.display = 'none';
+            });
             document.querySelectorAll('.col-filter-select').forEach(sel => sel.value = '');
             activeColFilters = {
                 quotation: '',
@@ -4227,11 +4977,23 @@
         btnFilter?.addEventListener('click', () => {
             const on = tableEl?.classList.toggle('show-col-filters');
             btnFilter.classList.toggle('is-on', !!on);
+            btnFilter.classList.toggle('is-active', !!on);
             btnFilter.setAttribute('aria-pressed', on ? 'true' : 'false');
             if (on) {
                 tableEl.querySelector('.col-filter-input')?.focus();
             }
         });
+        const tableWrap = document.getElementById('salesTableWrap');
+        const stickyBtn = document.getElementById('salesToggleStickyScroll');
+        const stickyLabel = document.getElementById('salesStickyScrollLabel');
+        const applySticky = (on) => {
+            tableWrap?.classList.toggle('is-scroll-body', on);
+            stickyBtn?.classList.toggle('is-active', on);
+            if (stickyLabel) stickyLabel.textContent = on ? 'Scroll Body Only' : 'Expand Table';
+        };
+        applySticky(true);
+        stickyBtn?.addEventListener('click', () => applySticky(!tableWrap?.classList.contains('is-scroll-body')));
+        initSalesColumnMenu();
         btnExpand?.addEventListener('click', () => {
             const on = shellEl?.classList.toggle('is-expanded');
             document.body.classList.toggle('sales-table-expanded', !!on);
@@ -4242,6 +5004,101 @@
             if (icon) icon.textContent = on ? 'close_fullscreen' : 'open_in_full';
             if (lbl) lbl.textContent = on ? 'Collapse' : 'Expand';
         });
+    }
+
+    function initSalesColumnMenu() {
+        const dropdown = document.getElementById('salesColumnToggleDropdown');
+        const btn = document.getElementById('salesColumnToggleBtn');
+        const menu = document.getElementById('salesColumnToggleMenu');
+        if (!dropdown || !btn || !menu) return;
+
+        const columns = [
+            { id: 'sno', label: 'S.No', locked: true },
+            { id: 'quotation', label: 'Quotation' },
+            { id: 'line_item', label: 'Item' },
+            { id: 'material', label: 'Material' },
+            { id: 'item_category', label: 'Category' },
+            { id: 'customer', label: 'Customer' },
+            { id: 'customer_ref', label: 'Customer Reference' },
+            { id: 'date', label: 'Quotation Date' },
+            { id: 'qty', label: 'Quantity' },
+            { id: 'net_amount', label: 'Net Value' },
+            { id: 'sales_order', label: 'Sales Order' },
+        ];
+        const storageKey = 'sales_quotation_hidden_cols';
+        let hidden = new Set();
+        try {
+            hidden = new Set(JSON.parse(localStorage.getItem(storageKey) || '[]'));
+        } catch (e) {
+            hidden = new Set();
+        }
+
+        const style = document.createElement('style');
+        style.id = 'salesColHideStyle';
+        document.head.appendChild(style);
+
+        function applyHidden() {
+            style.textContent = [...hidden]
+                .map((id) => `#salesDataTable [data-col-id="${id}"]{display:none !important;}`)
+                .join('\n');
+            btn.classList.toggle('is-active', hidden.size > 0);
+        }
+
+        function renderMenu() {
+            const shown = columns.length - hidden.size;
+            menu.innerHTML = `
+                <div class="rpt-colmgr-head">
+                    <span class="rpt-cat-dd-header">Show columns</span>
+                    <span class="rpt-colmgr-count">${shown} of ${columns.length}</span>
+                </div>
+                <ul class="rpt-colmgr-list">
+                    ${columns.map((col) => `
+                        <li class="rpt-colmgr-item${col.locked ? ' is-locked' : ''}${hidden.has(col.id) ? ' is-hidden' : ''}">
+                            <label class="rpt-colmgr-label">
+                                <input type="checkbox" data-col-toggle="${col.id}" ${col.locked || !hidden.has(col.id) ? 'checked' : ''} ${col.locked ? 'disabled' : ''}>
+                                <span>${col.label}</span>
+                            </label>
+                        </li>
+                    `).join('')}
+                </ul>
+                <div class="rpt-cat-dd-divider"></div>
+                <button type="button" class="rpt-cat-dd-item" data-col-reset>
+                    <span class="material-icons-round">restart_alt</span>
+                    <span class="rpt-cat-dd-item-text">Show all columns</span>
+                </button>`;
+        }
+
+        function save() {
+            try { localStorage.setItem(storageKey, JSON.stringify([...hidden])); } catch (e) {}
+            applyHidden();
+            renderMenu();
+        }
+
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const open = dropdown.classList.toggle('is-open');
+            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        });
+        menu.addEventListener('change', (e) => {
+            const input = e.target.closest('[data-col-toggle]');
+            if (!input || input.disabled) return;
+            if (input.checked) hidden.delete(input.getAttribute('data-col-toggle'));
+            else hidden.add(input.getAttribute('data-col-toggle'));
+            save();
+        });
+        menu.addEventListener('click', (e) => {
+            if (!e.target.closest('[data-col-reset]')) return;
+            hidden = new Set();
+            save();
+        });
+        document.addEventListener('click', (e) => {
+            if (!dropdown.contains(e.target)) {
+                dropdown.classList.remove('is-open');
+                btn.setAttribute('aria-expanded', 'false');
+            }
+        });
+        applyHidden();
+        renderMenu();
     }
 
     function showLoadingBar(active) {
@@ -4261,19 +5118,22 @@
         const queryTerm = getDashboardSearchTerm();
         setDashboardSearchTerm(queryTerm);
 
+        const idTokens = extractIdSearchList(queryTerm);
+        const isIdSearch = idTokens.length > 0;
+
         const params = new URLSearchParams({
             page: String(page),
             per_page: String(pageSize),
             search: queryTerm,
             q: queryTerm,
-            from_date: currentFrom,
-            to_date: currentTo,
-            from: currentFrom,
-            to: currentTo,
+            from_date: isIdSearch ? '' : currentFrom,
+            to_date: isIdSearch ? '' : currentTo,
+            from: isIdSearch ? '' : currentFrom,
+            to: isIdSearch ? '' : currentTo,
             _: String(Date.now()),
         });
-        if (/^(?:(?:so|qt|quo(?:tation)?)\s*#?\s*)?\d{1,10}$/i.test(queryTerm.trim())) {
-            params.set('quotation', queryTerm.trim().replace(/^(?:(?:so|qt|quo(?:tation)?)\s*#?\s*)/i, ''));
+        if (isIdSearch) {
+            params.set('quotation', idTokens.join(','));
         }
 
         try {
@@ -4314,18 +5174,22 @@
             updateCharts(data.charts || {});
             updateRange(data);
             if (!currentRawRecords.length) {
-                tbody.innerHTML = emptyRowHtml('No data found', 'SAP returned no sales lines for this date range.');
+                const emptyMsg = isIdSearch || queryTerm
+                    ? `No quotation or sales order lines found matching "${queryTerm}".`
+                    : 'SAP returned no sales lines for this date range.';
+                tbody.innerHTML = emptyRowHtml('No data found', emptyMsg);
             }
 
             if (activeFilterBanner) {
                 if (queryTerm) {
                     activeFilterBanner.style.display = 'flex';
                     if (activeFilterText) {
-                        const isNumericSo = /^(?:(?:so|qt|quo(?:tation)?)\s*#?\s*)?\d+$/i.test(queryTerm);
-                        const cleanSo = queryTerm.replace(/^(?:(?:so|qt|quo(?:tation)?)\s*#?\s*)/i, '');
-                        activeFilterText.textContent = isNumericSo
-                            ? `Quotation / Sales Order #${cleanSo} (${data.total || 0} line${(data.total || 0) === 1 ? '' : 's'})`
-                            : `"${queryTerm}" (${data.total || 0} result${(data.total || 0) === 1 ? '' : 's'})`;
+                        if (idTokens.length > 0) {
+                            const formatted = idTokens.map(t => `#${t}`).join(', ');
+                            activeFilterText.textContent = `Quotation / Sales Order ${formatted} (${data.total || 0} line${(data.total || 0) === 1 ? '' : 's'})`;
+                        } else {
+                            activeFilterText.textContent = `"${queryTerm}" (${data.total || 0} result${(data.total || 0) === 1 ? '' : 's'})`;
+                        }
                     }
                 } else {
                     activeFilterBanner.style.display = 'none';
