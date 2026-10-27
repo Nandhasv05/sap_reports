@@ -192,6 +192,10 @@ class SapPurchaseOrderService
             ['key' => 'plant',          'label' => 'Plant',        'type' => 'text'],
             ['key' => 'supplier',       'label' => 'Supplier',     'type' => 'text'],
             ['key' => 'supplier_full_name', 'label' => 'Supplier Name', 'type' => 'text'],
+            ['key' => 'materials',      'label' => 'Material',     'type' => 'text'],
+            ['key' => 'material_type',  'label' => 'MaterialType', 'type' => 'text'],
+            ['key' => 'mat_type_desc',  'label' => 'MatTypeDesc',  'type' => 'text'],
+            ['key' => 'material_group', 'label' => 'MaterialGroup','type' => 'text'],
             ['key' => 'items_count',    'label' => 'Items',        'type' => 'num'],
             ['key' => 'total_qty',      'label' => 'Order Qty',    'type' => 'num'],
             ['key' => 'unit',           'label' => 'Unit',         'type' => 'text'],
@@ -200,6 +204,40 @@ class SapPurchaseOrderService
             ['key' => 'sales_orders',   'label' => 'Sales Orders', 'type' => 'text'],
             ['key' => 'created_by',     'label' => 'Created By',   'type' => 'text'],
         ];
+    }
+
+    /*
+     * Material category filter options (All / Fabric / Trims)
+     */
+    public static function materialCategories(): array
+    {
+        return [
+            'all'    => 'All Materials',
+            'fabric' => 'Fabric',
+            'trims'  => 'Trims',
+        ];
+    }
+
+    /** Fabric MaterialType codes only */
+    public const FABRIC_MATERIAL_TYPES = ['ZFRI', 'ZFRD'];
+
+    /** Trims MaterialType codes only */
+    public const TRIMS_MATERIAL_TYPES = ['ZTRD', 'ZTRI'];
+
+    /*
+     * Classify a PO line as fabric | trims | other from MaterialType only.
+     * Fabric: ZFRI, ZFRD | Trims: ZTRD, ZTRI
+     */
+    public static function classifyMaterial(string $materialType, string $matTypeDesc = '', string $materialGroup = ''): string
+    {
+        $type = strtoupper(trim($materialType));
+        if (in_array($type, self::FABRIC_MATERIAL_TYPES, true)) {
+            return 'fabric';
+        }
+        if (in_array($type, self::TRIMS_MATERIAL_TYPES, true)) {
+            return 'trims';
+        }
+        return 'other';
     }
 
     /*
@@ -217,6 +255,9 @@ class SapPurchaseOrderService
             ['key' => 'supplier_full_name', 'label' => 'Supplier Name', 'type' => 'text'],
             ['key' => 'material',         'label' => 'Material',     'type' => 'text'],
             ['key' => 'description',      'label' => 'Description',  'type' => 'text'],
+            ['key' => 'material_type',    'label' => 'MaterialType', 'type' => 'text'],
+            ['key' => 'mat_type_desc',    'label' => 'MatTypeDesc',  'type' => 'text'],
+            ['key' => 'material_group',   'label' => 'MaterialGroup','type' => 'text'],
             ['key' => 'plant',            'label' => 'Plant',        'type' => 'text'],
             ['key' => 'storage_location', 'label' => 'Storage Loc.', 'type' => 'text'],
             ['key' => 'order_qty',        'label' => 'Order Qty',    'type' => 'num'],
@@ -255,11 +296,16 @@ class SapPurchaseOrderService
             $poTypes = array_values(array_unique(array_filter(array_map('strtoupper', array_map('trim', explode(',', (string) $rawTypes))))));
         }
 
+        $matCat = strtolower(trim((string) ($filters['mat_cat'] ?? $filters['category'] ?? 'all')));
+        if (!array_key_exists($matCat, self::materialCategories())) {
+            $matCat = 'all';
+        }
+
         $typesKey = $poTypes;
         sort($typesKey);
         $supKey = $suppliers;
         sort($supKey);
-        $cacheKey = 'po_list_' . md5(json_encode([$range['preset'], $range['from'], $range['to'], $plant, implode(',', $supKey), $so, implode(',', $typesKey)]));
+        $cacheKey = 'po_list_' . md5(json_encode([$range['preset'], $range['from'], $range['to'], $plant, implode(',', $supKey), $so, implode(',', $typesKey), $matCat]));
         $cached = $this->cacheRead($cacheKey, (int) ($this->cfg['cache_ttl'] ?? 300));
         if ($cached !== null) {
             return $cached;
@@ -294,8 +340,10 @@ class SapPurchaseOrderService
             }
         }
 
+        // Do not pass $top here — SapODataClient paginates ($skip) up to config max_rows.
+        // A hard $top=1000 was truncating Previous Month (and other ranges) to ~1000 line items
+        // which then aggregated into far fewer purchase orders (e.g. 126 POs / 1,000 items).
         $query = [
-            '$top' => '1000',
             '$orderby' => 'PurchaseOrderDate desc, PurchaseOrder desc',
         ];
         if (!empty($filterParts)) {
@@ -303,7 +351,8 @@ class SapPurchaseOrderService
         }
 
         $service = (string) ($this->cfg['purchase_order_service'] ?? self::DEFAULT_SERVICE);
-        $result = $this->client->fetchResults($service, $query);
+        $maxRows = max(1, (int) ($this->cfg['po_max_rows'] ?? $this->cfg['max_rows'] ?? 10000));
+        $result = $this->client->fetchResults($service, $query, $maxRows);
         if (($result['error'] ?? null) !== null) {
             return [
                 'records' => [],
@@ -317,9 +366,14 @@ class SapPurchaseOrderService
                     'suppliers_count' => 0,
                 ],
                 'range'   => $range,
+                'truncated' => false,
+                'items_fetched' => 0,
                 'error'   => $result['error'],
             ];
         }
+
+        $itemsFetched = (int) ($result['row_count'] ?? count($result['rows'] ?? []));
+        $truncated = $itemsFetched >= $maxRows;
 
         $pos = [];
         $currencies = [];
@@ -340,6 +394,14 @@ class SapPurchaseOrderService
                 if ($v !== '') $soList[] = $v;
             }
             if ($so !== '' && !in_array($so, $soList, true)) {
+                continue;
+            }
+
+            $materialType = trim((string) ($row['MaterialType'] ?? ''));
+            $matTypeDesc = trim((string) ($row['MatTypeDesc'] ?? ''));
+            $materialGroup = trim((string) ($row['MaterialGroup'] ?? ''));
+            $lineCat = self::classifyMaterial($materialType, $matTypeDesc, $materialGroup);
+            if ($matCat !== 'all' && $lineCat !== $matCat) {
                 continue;
             }
 
@@ -365,6 +427,9 @@ class SapPurchaseOrderService
                     'plants'           => [],
                     'items_count'      => 0,
                     'materials'        => [],
+                    'material_types'   => [],
+                    'mat_type_descs'   => [],
+                    'material_groups'  => [],
                     'total_qty'        => 0.0,
                     'unit'             => trim((string) ($row['PurchaseOrderQuantityUnit'] ?? '')),
                     'total_value'      => 0.0,
@@ -382,6 +447,15 @@ class SapPurchaseOrderService
             $mat = trim((string) ($row['Material'] ?? ''));
             if ($mat !== '' && !in_array($mat, $p['materials'], true)) {
                 $p['materials'][] = $mat;
+            }
+            if ($materialType !== '' && !in_array($materialType, $p['material_types'], true)) {
+                $p['material_types'][] = $materialType;
+            }
+            if ($matTypeDesc !== '' && !in_array($matTypeDesc, $p['mat_type_descs'], true)) {
+                $p['mat_type_descs'][] = $matTypeDesc;
+            }
+            if ($materialGroup !== '' && !in_array($materialGroup, $p['material_groups'], true)) {
+                $p['material_groups'][] = $materialGroup;
             }
             $qty = $this->sapNumber($row['OrderQuantity'] ?? '');
             $price = $this->sapNumber($row['NetPriceAmount'] ?? '');
@@ -404,6 +478,11 @@ class SapPurchaseOrderService
             $r['total_qty'] = round($r['total_qty'], 3);
             $r['total_value'] = round($r['total_value'], 2);
             $r['materials_count'] = count($r['materials']);
+            // List view Material column: unique materials on the PO (search/export friendly string)
+            $r['material'] = implode(', ', $r['materials']);
+            $r['material_type'] = implode(', ', $r['material_types']);
+            $r['mat_type_desc'] = implode(', ', $r['mat_type_descs']);
+            $r['material_group'] = implode(', ', $r['material_groups']);
         }
         unset($r);
 
@@ -443,7 +522,11 @@ class SapPurchaseOrderService
                 'suppliers_count' => count($uniqueSuppliers),
             ],
             'suppliers' => array_values($uniqueSuppliers),
+            'mat_cat' => $matCat,
             'range'   => $range,
+            'truncated' => $truncated,
+            'items_fetched' => $itemsFetched,
+            'max_rows' => $maxRows,
             'error'   => null,
         ];
 
@@ -545,6 +628,10 @@ class SapPurchaseOrderService
             $rowTypeName = self::documentTypeMap()[$rowPoType];
         }
 
+        $materialType = trim((string) ($row['MaterialType'] ?? ''));
+        $matTypeDesc = trim((string) ($row['MatTypeDesc'] ?? ''));
+        $materialGroup = trim((string) ($row['MaterialGroup'] ?? ''));
+
         return [
             'item'                    => $this->displayNumber((string) ($row['PurchaseOrderItem'] ?? '')),
             'purchase_order_category' => trim((string) ($row['PurchaseOrderCategory'] ?? '')),
@@ -554,6 +641,10 @@ class SapPurchaseOrderService
             'supplier_full_name'      => trim((string) ($row['SupplierFullName'] ?? '')),
             'material'                => trim((string) ($row['Material'] ?? '')),
             'description'             => trim((string) ($row['PurchaseOrderItemText'] ?? '')),
+            'material_type'           => $materialType,
+            'mat_type_desc'           => $matTypeDesc,
+            'material_group'          => $materialGroup,
+            'mat_category'            => self::classifyMaterial($materialType, $matTypeDesc, $materialGroup),
             'plant'                   => trim((string) ($row['Plant'] ?? '')),
             'storage_location'        => trim((string) ($row['StorageLocation'] ?? '')),
             'order_qty'               => $qty,

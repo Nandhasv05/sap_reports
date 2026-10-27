@@ -42,9 +42,11 @@ return [
     'password'         => 'Api@321',
     'page_size'        => 500,
     'max_rows'         => 10000,
+    // PO list is item-level CDS; one month can exceed 1k lines — allow a higher ceiling.
+    'po_max_rows'      => 25000,
     'timeout'          => 60,
     'cache_ttl'        => 0,
-    'cache_version'    => 5,
+    'cache_version'    => 8,
     'currency'         => 'INR',
     'currency_symbol'  => '₹',
     'division_labels'  => [

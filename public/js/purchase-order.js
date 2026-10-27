@@ -48,6 +48,12 @@
     let items = [];
     let totals = {};
     let currentSort = { col: null, dir: null };
+    let currentPage = 1;
+    let pageSize = 50;
+    try {
+        const savedSize = parseInt(localStorage.getItem('po_table_page_size') || '50', 10);
+        if ([25, 50, 100, 200].includes(savedSize)) pageSize = savedSize;
+    } catch (e) {}
 
     function syncHeaderHeight() {
         const headerRow = table.querySelector('thead tr.rpt-header-row');
@@ -520,6 +526,14 @@
             });
         }
 
+        const matCatSelect = form.querySelector('[data-mat-cat-select]');
+        if (matCatSelect) {
+            matCatSelect.addEventListener('change', () => {
+                showSpinner(true);
+                form.submit();
+            });
+        }
+
         bindDocTypeDropdown(form);
         bindSupplierDropdown(form);
 
@@ -578,6 +592,18 @@
         });
     }
 
+    function listChipCell(values, fallbackStr, chipClass) {
+        const mats = Array.isArray(values)
+            ? values.filter(Boolean)
+            : String(fallbackStr || '').split(',').map((s) => s.trim()).filter(Boolean);
+        if (!mats.length) return `<td>—</td>`;
+        const shown = mats.slice(0, 3);
+        const extra = mats.length - shown.length;
+        const chips = shown.map((m) => `<span class="${chipClass}" title="${P.esc(m)}">${P.esc(m)}</span>`).join('');
+        const more = extra > 0 ? `<span class="po-mat-more" title="${P.esc(mats.join(', '))}">+${extra}</span>` : '';
+        return `<td class="po-col-materials"><div class="po-mats-inline">${chips}${more}</div></td>`;
+    }
+
     function renderListCell(key, rec, index) {
         switch (key) {
             case 'sno':
@@ -590,6 +616,15 @@
                 return `<td><span class="po-plant-badge">${P.dash(rec.plant)}</span></td>`;
             case 'supplier':
                 return `<td>${P.dash(rec.supplier)}</td>`;
+            case 'materials':
+            case 'material':
+                return listChipCell(rec.materials, rec.material, 'po-mat-chip');
+            case 'material_type':
+                return listChipCell(rec.material_types, rec.material_type, 'po-mat-chip is-type');
+            case 'mat_type_desc':
+                return listChipCell(rec.mat_type_descs, rec.mat_type_desc, 'po-mat-chip is-type-desc');
+            case 'material_group':
+                return listChipCell(rec.material_groups, rec.material_group, 'po-mat-chip is-group');
             case 'items_count':
                 return `<td class="num"><span class="po-items-badge">${fmtRound(rec.items_count)}</span></td>`;
             case 'total_qty':
@@ -856,6 +891,9 @@
             case 'item': return `<td><span class="po-item-tag">${P.dash(rec.item)}</span></td>`;
             case 'material': return `<td class="rpt-mat">${P.dash(rec.material)}</td>`;
             case 'description': return `<td class="po-desc" title="${P.esc(rec.description)}">${P.dash(rec.description)}</td>`;
+            case 'material_type': return `<td><span class="po-mat-chip is-type">${P.dash(rec.material_type)}</span></td>`;
+            case 'mat_type_desc': return `<td>${P.dash(rec.mat_type_desc)}</td>`;
+            case 'material_group': return `<td><span class="po-mat-chip is-group">${P.dash(rec.material_group)}</span></td>`;
             case 'order_qty': return `<td class="num"><span class="qty-val">${P.qty(rec.order_qty)}</span></td>`;
             case 'net_price': return `<td class="num"><span class="qty-val">${P.money(rec.net_price)}</span></td>`;
             case 'net_value': return `<td class="num po-value"><span class="qty-val">${P.money(rec.net_value)}</span></td>`;
@@ -952,32 +990,105 @@
         if (th) th.innerHTML = html;
     }
 
-    function applyFilterAndSearch() {
+    function pageWindow(totalPages, page) {
+        if (totalPages <= 7) {
+            return Array.from({ length: totalPages }, (_, i) => i + 1);
+        }
+        const pages = new Set([1, totalPages, page, page - 1, page + 1, page - 2, page + 2]);
+        const sorted = [...pages].filter((p) => p >= 1 && p <= totalPages).sort((a, b) => a - b);
+        const out = [];
+        let prev = 0;
+        sorted.forEach((p) => {
+            if (prev && p - prev > 1) out.push('…');
+            out.push(p);
+            prev = p;
+        });
+        return out;
+    }
+
+    function renderPagination(matchedCount) {
+        const bar = $('rptPagination');
+        const info = $('rptPageInfo');
+        const nums = $('rptPageNumbers');
+        const firstBtn = $('rptPageFirst');
+        const prevBtn = $('rptPagePrev');
+        const nextBtn = $('rptPageNext');
+        const lastBtn = $('rptPageLast');
+        const sizeSel = $('rptPageSize');
+        if (!bar) return;
+
+        if (sizeSel && String(pageSize) !== sizeSel.value) sizeSel.value = String(pageSize);
+
+        const totalPages = Math.max(1, Math.ceil(matchedCount / pageSize) || 1);
+        if (currentPage > totalPages) currentPage = totalPages;
+        if (currentPage < 1) currentPage = 1;
+
+        bar.hidden = matchedCount === 0;
+        const from = matchedCount === 0 ? 0 : ((currentPage - 1) * pageSize) + 1;
+        const to = Math.min(matchedCount, currentPage * pageSize);
+        if (info) {
+            info.textContent = matchedCount === 0
+                ? 'No rows'
+                : `Page ${currentPage} of ${totalPages} · ${from}–${to} of ${matchedCount}`;
+        }
+
+        if (nums) {
+            nums.innerHTML = pageWindow(totalPages, currentPage).map((p) => {
+                if (p === '…') return '<span class="rpt-page-ellipsis">…</span>';
+                const active = p === currentPage ? ' is-active' : '';
+                return `<button type="button" class="rpt-page-btn${active}" data-page="${p}" aria-label="Page ${p}">${p}</button>`;
+            }).join('');
+        }
+
+        if (firstBtn) firstBtn.disabled = currentPage <= 1;
+        if (prevBtn) prevBtn.disabled = currentPage <= 1;
+        if (nextBtn) nextBtn.disabled = currentPage >= totalPages;
+        if (lastBtn) lastBtn.disabled = currentPage >= totalPages;
+    }
+
+    function applyFilterAndSearch(options = {}) {
+        const resetPage = options.resetPage !== false;
         const query = (searchInput?.value || '').trim().toLowerCase();
         const filters = colFilters();
         if (searchClear) searchClear.style.display = query !== '' ? 'flex' : 'none';
 
-        let visible = 0;
+        if (resetPage) currentPage = 1;
+
+        const matched = [];
         const sums = isList
             ? { items_count: 0, total_qty: 0, total_value: 0 }
             : { order_qty: 0, net_value: 0 };
 
         items.forEach((item) => {
             item.visible = matches(item, query, filters);
-            item.tr.style.display = item.visible ? '' : 'none';
-            if (!item.visible) return;
-            visible++;
-            const sno = item.tr.querySelector('td.sno');
-            if (sno) sno.textContent = String(visible);
+            if (!item.visible) {
+                item.tr.style.display = 'none';
+                return;
+            }
+            matched.push(item);
             Object.keys(sums).forEach((k) => { sums[k] += Number(item.rec[k]) || 0; });
         });
 
+        const totalPages = Math.max(1, Math.ceil(matched.length / pageSize) || 1);
+        if (currentPage > totalPages) currentPage = totalPages;
+        const start = (currentPage - 1) * pageSize;
+        const end = start + pageSize;
+
+        matched.forEach((item, idx) => {
+            const onPage = idx >= start && idx < end;
+            item.tr.style.display = onPage ? '' : 'none';
+            if (!onPage) return;
+            const sno = item.tr.querySelector('td.sno');
+            if (sno) sno.textContent = String(idx + 1);
+        });
+
+        const visibleOnPage = Math.max(0, Math.min(pageSize, matched.length - start));
         const isFiltered = query !== '' || filters.length > 0;
-        if (noMatchRow) noMatchRow.style.display = items.length > 0 && visible === 0 ? '' : 'none';
+        if (noMatchRow) noMatchRow.style.display = items.length > 0 && matched.length === 0 ? '' : 'none';
         if (countBadge) {
             countBadge.textContent = isList
-                ? `Showing ${visible} of ${items.length} purchase orders`
-                : `Showing ${visible} of ${items.length} items`;
+                ? `Showing ${visibleOnPage} of ${matched.length} purchase orders` + (isFiltered ? ` (filtered from ${items.length})` : '')
+                : `Showing ${visibleOnPage} of ${matched.length} items` + (isFiltered ? ` (filtered from ${items.length})` : '');
             countBadge.classList.toggle('is-filtered', isFiltered);
         }
         if (activeFilterBadge) {
@@ -987,8 +1098,8 @@
         if (clearAllBtn) clearAllBtn.style.display = isFiltered || currentSort.col !== null ? 'inline-flex' : 'none';
         if (footTotalLabel) {
             footTotalLabel.textContent = isFiltered
-                ? `Total (${visible} of ${items.length})`
-                : `Total (${items.length})`;
+                ? `Total (${matched.length} of ${items.length})`
+                : `Total (${matched.length})`;
         }
 
         if (isList) {
@@ -1003,6 +1114,28 @@
             setFoot('net_value', sameCurrency ? `<span class="foot-val">${P.money(sums.net_value)}</span>` : '');
             setFoot('currency', sameCurrency ? P.esc(totals.currency || '') : '');
         }
+
+        renderPagination(matched.length);
+
+        // Excel export must include all filtered rows, not only the current page
+        table._getAllExportRows = (visibleCols, convert) => {
+            const cellText = (cell) => {
+                if (!cell) return '';
+                const chips = cell.querySelectorAll('.so-chip');
+                if (chips.length) {
+                    return Array.from(chips)
+                        .map((c) => (c.dataset.export || c.textContent).trim())
+                        .filter(Boolean)
+                        .join(', ');
+                }
+                const val = cell.querySelector('.qty-val, .bom-val, .foot-val');
+                return (val ? val.textContent : cell.textContent).replace(/\s+/g, ' ').trim();
+            };
+            return matched.map((item) => visibleCols.map(({ i, th }) => {
+                const numeric = !!(th && th.classList.contains('num'));
+                return convert(cellText(item.tr.children[i]), numeric);
+            }));
+        };
     }
 
     function clearAllFilters() {
@@ -1024,9 +1157,47 @@
         syncHeaderHeight();
     }
 
+    function goToPage(page) {
+        const matchedCount = items.filter((item) => item.visible).length;
+        const totalPages = Math.max(1, Math.ceil(matchedCount / pageSize) || 1);
+        currentPage = Math.min(totalPages, Math.max(1, page));
+        applyFilterAndSearch({ resetPage: false });
+        tableWrap?.scrollTo?.({ top: 0, behavior: 'smooth' });
+    }
+
+    function bindPaginationControls() {
+        const sizeSel = $('rptPageSize');
+        if (sizeSel) {
+            sizeSel.value = String(pageSize);
+            sizeSel.addEventListener('change', () => {
+                const next = parseInt(sizeSel.value, 10);
+                pageSize = [25, 50, 100, 200].includes(next) ? next : 50;
+                try { localStorage.setItem('po_table_page_size', String(pageSize)); } catch (e) {}
+                currentPage = 1;
+                applyFilterAndSearch({ resetPage: false });
+            });
+        }
+        $('rptPageFirst')?.addEventListener('click', () => goToPage(1));
+        $('rptPagePrev')?.addEventListener('click', () => goToPage(currentPage - 1));
+        $('rptPageNext')?.addEventListener('click', () => goToPage(currentPage + 1));
+        $('rptPageLast')?.addEventListener('click', () => {
+            const matchedCount = items.filter((item) => item.visible).length;
+            goToPage(Math.max(1, Math.ceil(matchedCount / pageSize) || 1));
+        });
+        $('rptPageNumbers')?.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-page]');
+            if (!btn) return;
+            goToPage(parseInt(btn.getAttribute('data-page'), 10));
+        });
+    }
+
+    let controlsBound = false;
     function bindControls() {
+        if (controlsBound) return;
+        controlsBound = true;
         let searchTimer = null;
         let filterTimer = null;
+        bindPaginationControls();
         searchInput?.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(applyFilterAndSearch, 80); });
         searchInput?.addEventListener('keydown', (e) => { if (e.key === 'Escape') { searchInput.value = ''; applyFilterAndSearch(); } else if (e.key === 'Enter') e.preventDefault(); });
         searchClear?.addEventListener('click', () => { searchInput.value = ''; searchInput.focus(); applyFilterAndSearch(); });
@@ -1097,6 +1268,7 @@
             supplier: cfg.supplier || '',
             so: cfg.salesOrder || '',
             po_type: cfg.poType || '',
+            mat_cat: cfg.matCat || 'all',
             _: String(Date.now()),
         });
 
@@ -1126,6 +1298,18 @@
                 }
                 totals = data.totals || {};
                 fillListStats(totals);
+                const alertBox = $('poAlert');
+                if (alertBox) {
+                    if (data.truncated) {
+                        const fetched = fmtRound(data.items_fetched || 0);
+                        const cap = fmtRound(data.max_rows || 0);
+                        alertBox.textContent = `Showing the latest ${fetched} PO line items (SAP page limit ${cap}). Narrow the date range if you need older rows.`;
+                        alertBox.hidden = false;
+                    } else {
+                        alertBox.hidden = true;
+                        alertBox.textContent = '';
+                    }
+                }
                 if (supplierDropdownApi) {
                     const supList = (Array.isArray(data.suppliers) && data.suppliers.length > 0)
                         ? data.suppliers
@@ -1162,6 +1346,33 @@
     } else {
         // Detail Mode
         bindDetailFilterControls();
+        let allDetailRecords = [];
+        const detailMatCatSelect = document.querySelector('[data-detail-mat-cat]');
+        function applyDetailCategory(cat) {
+            const selected = cat || 'all';
+            const filtered = selected === 'all'
+                ? allDetailRecords
+                : allDetailRecords.filter((r) => String(r.mat_category || '') === selected);
+            renderDetailRows(filtered);
+            columnFeatures.refresh();
+            applyFilterAndSearch();
+            fillCharts(filtered, {
+                items: filtered.length,
+                materials: new Set(filtered.map((r) => r.material).filter(Boolean)).size,
+                order_qty: filtered.reduce((s, r) => s + (Number(r.order_qty) || 0), 0),
+                net_value: filtered.reduce((s, r) => s + (Number(r.net_value) || 0), 0),
+                currency: totals.currency || '',
+                unit: totals.unit || '',
+            });
+            if ($('poStat-items')) $('poStat-items').textContent = fmtRound(filtered.length);
+            if ($('poStat-materials')) $('poStat-materials').textContent = fmtRound(new Set(filtered.map((r) => r.material).filter(Boolean)).size);
+            if ($('poStat-qty')) $('poStat-qty').textContent = fmtRound(filtered.reduce((s, r) => s + (Number(r.order_qty) || 0), 0));
+            if ($('poStat-value')) $('poStat-value').textContent = fmtRound(filtered.reduce((s, r) => s + (Number(r.net_value) || 0), 0));
+        }
+        if (detailMatCatSelect) {
+            detailMatCatSelect.value = cfg.matCat || 'all';
+            detailMatCatSelect.addEventListener('change', () => applyDetailCategory(detailMatCatSelect.value));
+        }
         P.fetchPo(cfg.po)
             .then((data) => {
                 const records = Array.isArray(data.records) ? data.records : [];
@@ -1173,13 +1384,11 @@
                 }
                 const h = data.header || {};
                 totals = data.totals || {};
+                allDetailRecords = records;
                 document.title = `EVOLV | Purchase Order ${h.purchase_order}`;
                 fillHero(h, totals);
                 fillDetailStats(data);
-                renderDetailRows(records);
-                columnFeatures.refresh();
-                applyFilterAndSearch();
-                fillCharts(records, totals);
+                applyDetailCategory(detailMatCatSelect?.value || cfg.matCat || 'all');
             })
             .catch((err) => {
                 const message = err.message || 'Unable to load SAP data.';

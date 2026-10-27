@@ -629,6 +629,10 @@ class ReportsController extends Controller
             $poTypes = array_values(array_unique(array_filter(array_map('strtoupper', array_map('trim', explode(',', (string) $rawPoType))))));
         }
         $poType = implode(',', $poTypes);
+        $matCat = strtolower(trim((string) ($_GET['mat_cat'] ?? 'all')));
+        if (!array_key_exists($matCat, SapPurchaseOrderService::materialCategories())) {
+            $matCat = 'all';
+        }
 
         $listColumns = SapPurchaseOrderService::listColumns();
         $detailColumns = SapPurchaseOrderService::columns();
@@ -636,7 +640,14 @@ class ReportsController extends Controller
         if (strtolower((string) ($_GET['export'] ?? '')) === 'csv') {
             if ($mode === 'detail') {
                 $detail = $service->report($input);
-                $this->sendPurchaseOrderCsv($input, $detail['records'] ?? []);
+                $records = $detail['records'] ?? [];
+                if ($matCat !== 'all') {
+                    $records = array_values(array_filter(
+                        $records,
+                        static fn (array $r): bool => ($r['mat_category'] ?? '') === $matCat
+                    ));
+                }
+                $this->sendPurchaseOrderCsv($input, $records);
             } else {
                 $listData = $service->listReport([
                     'range'    => $rangePreset,
@@ -646,6 +657,7 @@ class ReportsController extends Controller
                     'supplier' => $suppliers,
                     'so'       => $salesOrder,
                     'po_type'  => $poTypes,
+                    'mat_cat'  => $matCat,
                 ]);
                 $this->sendPurchaseOrderListCsv($listData['records'] ?? []);
             }
@@ -674,6 +686,8 @@ class ReportsController extends Controller
             'salesOrder'    => $salesOrder,
             'poType'        => $poType,
             'poTypes'       => $poTypes,
+            'matCat'        => $matCat,
+            'matCategories' => SapPurchaseOrderService::materialCategories(),
             'docTypes'      => SapPurchaseOrderService::documentTypes(),
             'columns'       => $mode === 'detail' ? $detailColumns : $listColumns,
             'detailColumns' => $detailColumns,
@@ -689,7 +703,7 @@ class ReportsController extends Controller
         header('Content-Disposition: attachment; filename="' . $filename . '"');
         $out = fopen('php://output', 'w');
         fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF));
-        fputcsv($out, ['S.No', 'Purchase Order', 'PO Date', 'Plant', 'Supplier', 'Items', 'Order Qty', 'Unit', 'Net Value', 'Currency', 'Linked Sales Orders', 'Created By']);
+        fputcsv($out, ['S.No', 'Purchase Order', 'PO Date', 'Plant', 'Supplier', 'Material', 'MaterialType', 'MatTypeDesc', 'MaterialGroup', 'Items', 'Order Qty', 'Unit', 'Net Value', 'Currency', 'Linked Sales Orders', 'Created By']);
         foreach ($records as $i => $row) {
             fputcsv($out, [
                 $i + 1,
@@ -697,6 +711,10 @@ class ReportsController extends Controller
                 $row['date'] ?? '',
                 $row['plant'] ?? '',
                 $row['supplier'] ?? '',
+                $row['material'] ?? implode(', ', (array) ($row['materials'] ?? [])),
+                $row['material_type'] ?? implode(', ', (array) ($row['material_types'] ?? [])),
+                $row['mat_type_desc'] ?? implode(', ', (array) ($row['mat_type_descs'] ?? [])),
+                $row['material_group'] ?? implode(', ', (array) ($row['material_groups'] ?? [])),
                 $row['items_count'] ?? 0,
                 $row['total_qty'] ?? 0,
                 $row['unit'] ?? '',

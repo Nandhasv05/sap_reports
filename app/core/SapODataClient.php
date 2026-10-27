@@ -35,16 +35,21 @@ class SapODataClient
      * @param callable(array<int, array>):void $onBatch
      * @return array{row_count: int, error: ?string}
      */
-    public function eachPage(callable $onBatch, array $extraQuery = [], ?string $servicePath = null): array
+    public function eachPage(callable $onBatch, array $extraQuery = [], ?string $servicePath = null, ?int $maxRowsOverride = null): array
     {
         if (!$this->isEnabled()) {
             return ['row_count' => 0, 'error' => 'SAP integration is disabled.'];
         }
 
         $pageSize = max(1, (int) ($this->cfg['page_size'] ?? 500));
-        $maxRows = max($pageSize, (int) ($this->cfg['max_rows'] ?? 10000));
+        $maxRows = max($pageSize, (int) ($maxRowsOverride ?? $this->cfg['max_rows'] ?? 10000));
+        // Only honor an explicit $top from callers that truly want a hard cap on ONE page.
+        // If $top is present it also becomes the pagination ceiling (legacy behavior).
+        $hardTop = null;
         if (isset($extraQuery['$top']) && is_numeric($extraQuery['$top'])) {
-            $maxRows = min($maxRows, max(1, (int) $extraQuery['$top']));
+            $hardTop = max(1, (int) $extraQuery['$top']);
+            $maxRows = min($maxRows, $hardTop);
+            unset($extraQuery['$top']);
         }
         $skip = 0;
         $total = 0;
@@ -100,7 +105,7 @@ class SapODataClient
      *
      * @return array{rows: array<int, array>, error: ?string, row_count: int}
      */
-    public function fetchResults(string $servicePath, array $extraQuery = []): array
+    public function fetchResults(string $servicePath, array $extraQuery = [], ?int $maxRowsOverride = null): array
     {
         $saved = (string) ($this->cfg['service'] ?? '');
         $this->cfg['service'] = $servicePath;
@@ -113,7 +118,7 @@ class SapODataClient
                         $rows[] = $row;
                     }
                 }
-            }, $extraQuery);
+            }, $extraQuery, null, $maxRowsOverride);
         } finally {
             $this->cfg['service'] = $saved;
         }

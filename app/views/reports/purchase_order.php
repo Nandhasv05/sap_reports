@@ -27,6 +27,8 @@ $suppliers = is_array($suppliers ?? null) ? $suppliers : array_values(array_filt
 $salesOrder = (string) ($salesOrder ?? '');
 $poType = (string) ($poType ?? '');
 $poTypes = is_array($poTypes ?? null) ? $poTypes : array_values(array_filter(array_map('trim', explode(',', $poType))));
+$matCat = (string) ($matCat ?? 'all');
+$matCategories = is_array($matCategories ?? null) ? $matCategories : SapPurchaseOrderService::materialCategories();
 $docTypes = is_array($docTypes ?? null) ? $docTypes : SapPurchaseOrderService::documentTypes();
 $columns = is_array($columns ?? null) ? $columns : [];
 $colCount = count($columns);
@@ -40,6 +42,7 @@ $csvUrl = $pageUrl . '?' . http_build_query(array_filter([
     'supplier' => $supplier,
     'so'       => $salesOrder,
     'po_type'  => $poType,
+    'mat_cat'  => $matCat !== 'all' ? $matCat : '',
     'export'   => 'csv',
 ], static fn ($v): bool => $v !== ''));
 
@@ -91,6 +94,16 @@ $listCards = [
                     <select name="range" data-range-select aria-label="PO date range">
                         <?php foreach ($presets as $key => $label): ?>
                             <option value="<?= e($key) ?>"<?= $key === $rangePreset ? ' selected' : '' ?>><?= e($label) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+
+                <!-- Material category: All / Fabric / Trims -->
+                <label class="rpt-field rpt-field-mat-cat" title="Filter by Fabric, Trims, or All materials">
+                    <span class="material-icons-round">category</span>
+                    <select name="mat_cat" data-mat-cat-select aria-label="Material category">
+                        <?php foreach ($matCategories as $key => $label): ?>
+                            <option value="<?= e($key) ?>"<?= $key === $matCat ? ' selected' : '' ?>><?= e($label) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </label>
@@ -342,6 +355,16 @@ $listCards = [
                     <i class="fas fa-times"></i>
                 </button>
             </div>
+            <?php if (!$isList): ?>
+                <label class="rpt-field rpt-field-mat-cat po-detail-mat-cat" title="Show All, Fabric, or Trims lines">
+                    <span class="material-icons-round">category</span>
+                    <select data-detail-mat-cat aria-label="Material category">
+                        <?php foreach ($matCategories as $key => $label): ?>
+                            <option value="<?= e($key) ?>"<?= $key === $matCat ? ' selected' : '' ?>><?= e($label) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+            <?php endif; ?>
             <div class="rpt-tb-actions">
                 <span class="rpt-tb-count" id="rptTableCount">Loading…</span>
 
@@ -444,6 +467,34 @@ $listCards = [
                 </tfoot>
             </table>
         </div>
+
+        <div class="rpt-pagination" id="rptPagination" hidden>
+            <div class="rpt-page-size">
+                <label for="rptPageSize">Rows</label>
+                <select id="rptPageSize" aria-label="Rows per page">
+                    <option value="25">25</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                    <option value="200">200</option>
+                </select>
+            </div>
+            <div class="rpt-page-info" id="rptPageInfo">Page 1 of 1</div>
+            <div class="rpt-page-controls" role="navigation" aria-label="Table pagination">
+                <button type="button" class="rpt-page-btn" id="rptPageFirst" title="First page" aria-label="First page">
+                    <i class="fas fa-angles-left"></i>
+                </button>
+                <button type="button" class="rpt-page-btn" id="rptPagePrev" title="Previous page" aria-label="Previous page">
+                    <i class="fas fa-angle-left"></i>
+                </button>
+                <div class="rpt-page-numbers" id="rptPageNumbers"></div>
+                <button type="button" class="rpt-page-btn" id="rptPageNext" title="Next page" aria-label="Next page">
+                    <i class="fas fa-angle-right"></i>
+                </button>
+                <button type="button" class="rpt-page-btn" id="rptPageLast" title="Last page" aria-label="Last page">
+                    <i class="fas fa-angles-right"></i>
+                </button>
+            </div>
+        </div>
     </main>
 
     <?php require base_path('app/views/partials/footer.php'); ?>
@@ -458,6 +509,7 @@ $listCards = [
     'suppliers'   => $suppliers,
     'salesOrder'  => $salesOrder,
     'poType'      => $poType,
+    'matCat'      => $matCat,
     'presetDates' => $presetDates,
     'dataUrl'     => url('purchase-order/data'),
     'pageUrl'     => $pageUrl,
