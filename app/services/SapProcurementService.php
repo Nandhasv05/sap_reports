@@ -210,7 +210,9 @@ class SapProcurementService
         $poStatus = strtoupper(trim((string) ($row['Po_status'] ?? $row['PoStatus'] ?? $row['PO_STATUS'] ?? '')));
         $poCreatedQty = $this->sapNumber($row['PO_CREATED_QTY'] ?? $row['PoCreatedQty'] ?? 0);
         $createdPo = trim((string) ($row['CREATED_PO'] ?? $row['CreatedPo'] ?? ''));
-        $isPoDone = $poStatus === 'YES' || $poCreatedQty > 0 || ($createdPo !== '' && $createdPo !== '-' && $createdPo !== '—');
+
+        // Status = Po_status only: YES → Yes, blank → —
+        $statusYes = ($poStatus === 'YES' || $poStatus === 'Y');
 
         return [
             'sales_doc'             => $this->displayNumber((string) ($row['SalesDoc'] ?? '')),
@@ -231,13 +233,7 @@ class SapProcurementService
             'po_status'             => $poStatus,
             'po_created_qty'        => $poCreatedQty,
             'created_po'            => $createdPo,
-            'stock_status'          => $isPoDone
-                ? 'PO Already Done'
-                : (($q('StockQty') >= $q('RequirementQty') && $q('RequirementQty') > 0)
-                    ? 'In Stock'
-                    : ((($q('StockQty') + $q('TotalPOQty')) >= $q('RequirementQty') && $q('RequirementQty') > 0)
-                        ? 'PO Pipeline'
-                        : (($q('BalancePRQty') > 0 || ($q('StockQty') + $q('TotalPOQty')) < $q('RequirementQty')) ? 'Shortage' : 'Available'))),
+            'stock_status'          => $statusYes ? 'Yes' : '—',
             'unit'                  => trim((string) ($row['BaseUnit'] ?? $row['Unit'] ?? $row['Meins'] ?? '')),
             'customer'              => trim((string) ($row['CustomerName'] ?? $row['Customer'] ?? $row['Name1'] ?? $row['Kunnr'] ?? '')),
             'plant'                 => trim((string) ($row['Plant'] ?? $row['Werks'] ?? '')),

@@ -5248,6 +5248,20 @@ body.po-drawer-open { overflow: hidden; }
 }
 .proc-badge-status.is-po-done i { color: #7c3aed; }
 
+.proc-badge-status.is-po-yes {
+    background: #ecfdf5;
+    color: #047857;
+    border: 1px solid #a7f3d0;
+}
+.proc-badge-status.is-po-yes i { color: #10b981; }
+
+.proc-badge-status.is-po-blank {
+    background: #f8fafc;
+    color: #94a3b8;
+    border: 1px solid #e2e8f0;
+    font-weight: 600;
+}
+
 .proc-badge-status.is-info {
     background: #f0f9ff;
     color: #0369a1;

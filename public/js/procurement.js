@@ -88,41 +88,38 @@
         return m ? `${m[3]}-${m[2]}-${m[1]}` : '—';
     }
 
-    function getStockStatus(rec) {
-        const req = Number(rec.requirement_qty) || 0;
-        const stock = Number(rec.stock_qty) || 0;
-        const po = Number(rec.total_po_qty) || 0;
-        const pr = Number(rec.total_pr_qty) || 0;
-        const bal = Number(rec.balance_pr_qty) || 0;
-
+    /**
+     * Status column = SAP Po_status only.
+     * YES → "Yes" | blank / anything else → "—"
+     * (No PO Already Done / Pipeline / In Stock / Shortage badges.)
+     */
+    function resolvePoStatusFlag(rec) {
         const poStatus = String(rec.po_status ?? rec.Po_status ?? rec.PO_STATUS ?? '').trim().toUpperCase();
-        const poCreatedQty = Number(rec.po_created_qty ?? rec.PO_CREATED_QTY ?? rec.PoCreatedQty) || 0;
-        const createdPo = String(rec.created_po ?? rec.CREATED_PO ?? rec.CreatedPo ?? '').trim();
-        const isPoDone = poStatus === 'YES' || poCreatedQty > 0 || (createdPo !== '' && createdPo !== '—' && createdPo !== '-');
+        if (poStatus === 'YES' || poStatus === 'Y') return 'YES';
+        return '';
+    }
 
-        if (isPoDone) {
+    function getStockStatus(rec) {
+        const flag = resolvePoStatusFlag(rec);
+        const createdPo = String(rec.created_po ?? rec.CREATED_PO ?? rec.CreatedPo ?? '').trim();
+        const poCreatedQty = Number(rec.po_created_qty ?? rec.PO_CREATED_QTY ?? rec.PoCreatedQty) || 0;
+
+        if (flag === 'YES') {
             return {
-                label: 'PO Already Done',
-                tone: 'po-done',
-                icon: 'fas fa-clipboard-check',
+                label: 'Yes',
+                tone: 'po-yes',
+                icon: 'fas fa-check',
                 poNumber: createdPo,
                 poQty: poCreatedQty,
             };
         }
-
-        if (stock >= req && req > 0) {
-            return { label: 'In Stock', tone: 'success', icon: 'fas fa-circle-check' };
-        }
-        if ((stock + po) >= req && req > 0) {
-            return { label: 'PO Pipeline', tone: 'info', icon: 'fas fa-truck-fast' };
-        }
-        if (bal > 0 || (stock + po) < req) {
-            return { label: 'Shortage', tone: 'danger', icon: 'fas fa-triangle-exclamation' };
-        }
-        if (pr > 0 && po <= 0) {
-            return { label: 'PR Pending', tone: 'warning', icon: 'fas fa-clock' };
-        }
-        return { label: 'Available', tone: 'neutral', icon: 'fas fa-circle-info' };
+        return {
+            label: '—',
+            tone: 'po-blank',
+            icon: '',
+            poNumber: '',
+            poQty: 0,
+        };
     }
 
     function displayValue(col, rec, index) {
@@ -259,9 +256,10 @@
                 if (col.key === 'stock_status') {
                     const st = getStockStatus(rec);
                     const titleAttr = st.poNumber ? `title="Created PO: ${escapeHtml(st.poNumber)}${st.poQty > 0 ? ` (Qty: ${fmtQty(st.poQty)})` : ''}"` : '';
+                    const iconHtml = st.icon ? `<i class="${st.icon}"></i>` : '';
                     return `<td class="proc-cell-status">`
                         + `<span class="proc-badge-status is-${st.tone}" ${titleAttr}>`
-                        + `<i class="${st.icon}"></i><span>${escapeHtml(st.label)}</span>`
+                        + `${iconHtml}<span>${escapeHtml(st.label)}</span>`
                         + `</span></td>`;
                 }
 
@@ -2133,7 +2131,8 @@
         if (statusEl) {
             const st = getStockStatus(rec);
             statusEl.className = `proc-badge-status is-${st.tone}`;
-            statusEl.innerHTML = `<i class="${st.icon}"></i><span>${escapeHtml(st.label)}</span>`;
+            const iconHtml = st.icon ? `<i class="${st.icon}"></i>` : '';
+            statusEl.innerHTML = `${iconHtml}<span>${escapeHtml(st.label)}</span>`;
         }
 
         renderDrawerStats(rec);
