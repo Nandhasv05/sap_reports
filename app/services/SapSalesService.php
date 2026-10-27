@@ -1716,4 +1716,144 @@ class SapSalesService
             'error'        => count($records) > 0 ? null : ($queryResult['error'] ?? null),
         ];
     }
+
+    /**
+     * Sales orders created within a date range from ZI_SalesApi_HUB.
+     * Filter: CreationDate ge datetime'{from}T00:00:00' and CreationDate lt datetime'{nextDay}T00:00:00'
+     */
+    public function listOrdersByDateRange(string $from, string $to): array
+    {
+        $from = trim($from);
+        $to = trim($to !== '' ? $to : $from);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from) || strtotime($from) === false
+            || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $to) || strtotime($to) === false) {
+            return [
+                'success' => false,
+                'message' => 'Choose a valid created date.',
+                'orders'  => [],
+            ];
+        }
+        $fromDt = new DateTime($from);
+        $toDt = new DateTime($to);
+        if ($toDt < $fromDt) {
+            return [
+                'success' => false,
+                'message' => 'The end date must be on or after the start date.',
+                'orders'  => [],
+            ];
+        }
+        if ($toDt > (clone $fromDt)->modify('+6 months')) {
+            return [
+                'success' => false,
+                'message' => 'A custom date range can cover at most 6 months.',
+                'orders'  => [],
+            ];
+        }
+
+        $nextDay = date('Y-m-d', strtotime($to . ' +1 day'));
+        $filterExpr = sprintf(
+            "CreationDate ge datetime'%sT00:00:00' and CreationDate lt datetime'%sT00:00:00'",
+            $from,
+            $nextDay
+        );
+
+        $service = '/sap/opu/odata/sap/ZI_SALESAPI_HUB_CDS/ZI_SalesApi_HUB';
+        $rows = [];
+        $queryResult = $this->client->eachPage(function (array $batch) use (&$rows): void {
+            foreach ($batch as $row) {
+                if (is_array($row)) {
+                    $rows[] = $row;
+                }
+            }
+        }, [
+            '$filter'  => $filterExpr,
+            '$orderby' => 'CreationDate desc, SalesOrder',
+        ], $service);
+
+        $grouped = [];
+        $totalQty = 0.0;
+        $uniquePlants = [];
+        $uniqueCustomers = [];
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $rawSo = trim((string) $this->field($row, ['SalesOrder'], ''));
+            $so = ltrim($rawSo, '0');
+            if ($so === '') {
+                continue;
+            }
+
+            $plant = (string) $this->field($row, ['Plant'], '—');
+            $customer = (string) $this->field($row, ['SoldToParty', 'Customer', 'CustomerGroup'], '—');
+            if ($plant !== '' && $plant !== '—') {
+                $uniquePlants[$plant] = true;
+            }
+            if ($customer !== '' && $customer !== '—') {
+                $uniqueCustomers[$customer] = true;
+            }
+
+            if (!isset($grouped[$so])) {
+                $rawDate = (string) $this->field($row, ['CreationDate'], '');
+                $formattedDate = '';
+                if (preg_match('/\/Date\((\d+)\)\//', $rawDate, $m)) {
+                    $formattedDate = date('d M Y', (int) ($m[1] / 1000));
+                } elseif (preg_match('/^\d{4}-\d{2}-\d{2}/', $rawDate)) {
+                    $formattedDate = date('d M Y', strtotime($rawDate));
+                }
+
+                $grouped[$so] = [
+                    'sales_order'   => $so,
+                    'creation_date' => $formattedDate ?: ($from ? date('d M Y', strtotime($from)) : '—'),
+                    'customer'      => $customer,
+                    'plant'         => $plant,
+                    'material'      => (string) $this->field($row, ['OriginallyRequestedMaterial', 'Material'], '—'),
+                    'created_by'    => (string) $this->field($row, ['CreatedByUser'], '—'),
+                    'lines'         => 0,
+                    'quantity'      => 0.0,
+                ];
+            }
+
+            $lineQty = $this->number($this->field($row, ['OrderQuantity', 'RequestedQuantity'], 0));
+            $grouped[$so]['lines']++;
+            $grouped[$so]['quantity'] += $lineQty;
+            $totalQty += $lineQty;
+        }
+
+        $orders = array_values($grouped);
+        usort($orders, static function (array $a, array $b): int {
+            return strnatcmp((string) $a['sales_order'], (string) $b['sales_order']);
+        });
+
+        foreach ($orders as &$order) {
+            $order['quantity'] = round((float) $order['quantity'], 2);
+        }
+        unset($order);
+
+        $sapError = count($rows) > 0 ? null : ($queryResult['error'] ?? null);
+        if ($orders === [] && $sapError) {
+            return [
+                'success' => false,
+                'message' => (string) $sapError,
+                'from'    => $from,
+                'to'      => $to,
+                'orders'  => [],
+            ];
+        }
+
+        return [
+            'success'     => true,
+            'message'     => $orders === [] ? 'No sales orders found for this period.' : 'Sales orders loaded successfully.',
+            'from'        => $from,
+            'to'          => $to,
+            'count'       => count($orders),
+            'line_count'  => count($rows),
+            'total_qty'   => round($totalQty, 2),
+            'plants'      => array_keys($uniquePlants),
+            'customers'   => array_keys($uniqueCustomers),
+            'orders'      => $orders,
+            'error'       => count($rows) > 0 ? null : ($queryResult['error'] ?? null),
+        ];
+    }
 }

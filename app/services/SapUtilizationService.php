@@ -42,6 +42,20 @@ class SapUtilizationService
     {
         $tz = new DateTimeZone(self::RANGE_TIMEZONE);
         $today = new DateTimeImmutable('today', $tz);
+
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $preset)) {
+            $dt = self::parseDate($preset, $tz);
+            if ($dt !== null) {
+                return [
+                    'preset' => $preset,
+                    'from'   => $preset,
+                    'to'     => $preset,
+                    'label'  => $dt->format('d M Y'),
+                    'error'  => null,
+                ];
+            }
+        }
+
         $preset = array_key_exists($preset, self::rangePresets()) ? $preset : 'this_month';
         $out = ['preset' => $preset, 'from' => '', 'to' => '', 'label' => self::rangePresets()[$preset], 'error' => null];
 
@@ -63,6 +77,10 @@ class SapUtilizationService
             [$start, $end] = [$end, $start];
         }
 
+        if ($preset === 'custom' && $end > $start->modify('+6 months')) {
+            $out['error'] = 'A custom date range can cover at most 6 months.';
+            return $out;
+        }
         $out['from'] = $start->format('Y-m-d');
         $out['to'] = $end->format('Y-m-d');
         if ($preset === 'custom') {

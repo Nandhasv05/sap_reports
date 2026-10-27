@@ -2,7 +2,7 @@
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 03/09/2026
  * DESCRIPTION : Utilization JavaScript
- */
+*/
 (function () {
     const app = document.querySelector('.rpt-app');
     const boot = document.getElementById('rptBoot');
@@ -44,7 +44,35 @@
         const totalsEl = document.getElementById('rptTotalsChart');
         const mixEl = document.getElementById('rptMixChart');
         if (totalsEl) {
-            totalsChart = new Chart(totalsEl, { type: 'bar', data: { labels: data.totals_labels || [], datasets: [{ label: 'Quantity', data: data.totals || [], backgroundColor: ['#0f766e','#0284c7','#16a34a','#d97706','#7c3aed','#e11d48'], borderRadius: 8, maxBarThickness: 42 }] }, options: { responsive: true, maintainAspectRatio: false, animation: { duration: 600 }, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true } } } });
+            totalsChart = new Chart(totalsEl, {
+                type: 'bar',
+                data: {
+                    labels: data.totals_labels || [],
+                    datasets: [{
+                        label: 'Quantity',
+                        data: data.totals || [],
+                        backgroundColor: ['#0f766e','#0284c7','#16a34a','#d97706','#7c3aed','#e11d48'],
+                        borderRadius: 8,
+                        barPercentage: 0.62,
+                        categoryPercentage: 0.78,
+                        maxBarThickness: 56,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 600 },
+                    layout: { padding: { top: 4, right: 8, bottom: 0, left: 4 } },
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            ticks: { maxRotation: 0, autoSkip: false, padding: 6 },
+                        },
+                        y: { beginAtZero: true, grace: '4%' },
+                    },
+                },
+            });
         }
         if (mixEl) {
             const hasCat = isTrims && (data.cat_labels || []).length > 0;
@@ -161,11 +189,445 @@
     } else {
         initDataTable();
     }
+    bindDateRangeFilter(pageCfg);
+    initOrdersListTable(pageCfg);
 
     function readPageConfig() {
         const node = document.getElementById('rptPageConfig');
         if (!node) return {};
         try { return JSON.parse(node.textContent || '{}'); } catch (e) { return {}; }
+    }
+
+    function bindDateRangeFilter(cfg) {
+        const presetDates = cfg.presetDates || {};
+        document.querySelectorAll('[data-date-filter]').forEach((form) => {
+            const select = form.querySelector('[data-range-select]');
+            const customBlocks = form.querySelectorAll('[data-date-custom]');
+            const fromInput = form.querySelector('input[name="from"]');
+            const toInput = form.querySelector('input[name="to"]');
+            const soInput = form.querySelector('input[name="so"]');
+
+            if (!select) return;
+
+            function updateState(key) {
+                const isCustom = key === 'custom';
+                customBlocks.forEach((el) => { el.hidden = !isCustom; });
+                if (!isCustom && presetDates[key]) {
+                    if (fromInput) fromInput.value = presetDates[key].from || '';
+                    if (toInput) toInput.value = presetDates[key].to || '';
+                } else if (!isCustom && /^\d{4}-\d{2}-\d{2}$/.test(key)) {
+                    if (fromInput) fromInput.value = key;
+                    if (toInput) toInput.value = key;
+                } else if (key === '') {
+                    if (fromInput) fromInput.value = '';
+                    if (toInput) toInput.value = '';
+                }
+                if (isCustom && fromInput) {
+                    fromInput.focus();
+                }
+            }
+
+            select.addEventListener('change', () => {
+                updateState(select.value);
+            });
+
+            form.addEventListener('submit', (e) => {
+                const soVal = (soInput?.value || '').trim();
+                const rangeVal = select.value;
+                if (soVal) {
+                    select.disabled = true;
+                    customBlocks.forEach((el) => el.querySelectorAll('input').forEach((input) => { input.disabled = true; }));
+                    return;
+                }
+                if (!rangeVal) {
+                    e.preventDefault();
+                    select.focus();
+                    return;
+                }
+                if (rangeVal === 'custom') {
+                    const fromVal = fromInput?.value || '';
+                    const toVal = toInput?.value || '';
+                    if (!fromVal || !toVal) {
+                        e.preventDefault();
+                        fromInput?.focus();
+                        return;
+                    }
+                    if (toVal < fromVal) {
+                        e.preventDefault();
+                        return;
+                    }
+                    const max = new Date(fromVal + 'T00:00:00');
+                    max.setMonth(max.getMonth() + 6);
+                    const end = new Date(toVal + 'T00:00:00');
+                    if (end > max) {
+                        e.preventDefault();
+                        window.alert('A custom date range can cover at most 6 months.');
+                        return;
+                    }
+                }
+            });
+            [fromInput, toInput].forEach((input) => {
+                input?.addEventListener('change', () => {
+                    if (!form.classList.contains('rpt-search') || select.value !== 'custom') return;
+                    if (!fromInput?.value || !toInput?.value) return;
+                    if (soInput) soInput.value = '';
+                    if (form.requestSubmit) form.requestSubmit();
+                    else form.submit();
+                });
+            });
+            select.addEventListener('change', () => {
+                if (select.value && select.value !== 'custom' && soInput && form.classList.contains('rpt-search')) {
+                    soInput.value = '';
+                    form.requestSubmit ? form.requestSubmit() : form.submit();
+                }
+            });
+        });
+    }
+
+    function initOrdersListTable(cfg) {
+        const table = document.getElementById('soOrdersTable');
+        if (!table) return;
+
+        const tableWrap = document.getElementById('ordersTableWrap');
+        const searchInput = document.getElementById('ordersTableSearch');
+        const searchClear = document.getElementById('ordersSearchClear');
+        const countBadge = document.getElementById('ordersTableCount');
+        const stickyScrollBtn = document.getElementById('ordersToggleStickyScroll');
+        const colFilterBtn = document.getElementById('ordersBtnColFilter');
+        const colFilterBadge = document.getElementById('ordersActiveFilterBadge');
+        const clearAllBtn = document.getElementById('ordersClearAllFilters');
+        const clearColFiltersBtn = document.getElementById('ordersBtnClearColFilters');
+        const colToggleBtn = document.getElementById('ordersColumnToggleBtn');
+        const colToggleDropdown = document.getElementById('ordersColumnToggleDropdown');
+        const colToggleMenu = document.getElementById('ordersColumnToggleMenu');
+        const canvas = document.getElementById('soCanvas');
+        const frame = document.getElementById('soCanvasFrame');
+        const title = document.getElementById('soCanvasTitle');
+
+        const allRows = Array.from(table.querySelectorAll('tbody tr[data-so]'));
+        const totalRows = allRows.length;
+        const colFilterInputs = Array.from(table.querySelectorAll('.col-filter-input'));
+
+        let currentSort = { col: -1, dir: 'asc' };
+
+        // 1. Quick Global Search & Column Filtering
+        function evaluateNumericFilter(valueStr, filterStr) {
+            const num = parseFloat(String(valueStr).replace(/[^\d.-]/g, ''));
+            if (isNaN(num)) return false;
+            const trimmed = filterStr.trim();
+            const matchComp = trimmed.match(/^([><]=?|=)\s*([-\d.]+)/);
+            if (matchComp) {
+                const op = matchComp[1];
+                const target = parseFloat(matchComp[2]);
+                if (op === '>') return num > target;
+                if (op === '>=') return num >= target;
+                if (op === '<') return num < target;
+                if (op === '<=') return num <= target;
+                if (op === '=') return num === target;
+            }
+            return String(num).includes(trimmed) || String(valueStr).toLowerCase().includes(trimmed.toLowerCase());
+        }
+
+        function applyFilters() {
+            const query = (searchInput?.value || '').trim().toLowerCase();
+            const activeColMap = {};
+            let activeColCount = 0;
+
+            colFilterInputs.forEach((input) => {
+                const val = input.value.trim();
+                const colIdx = parseInt(input.getAttribute('data-col'), 10);
+                const clearBtn = input.parentElement?.querySelector('.rpt-col-clear');
+                if (val) {
+                    activeColMap[colIdx] = val;
+                    activeColCount++;
+                    input.classList.add('has-val');
+                    if (clearBtn) clearBtn.style.display = 'block';
+                } else {
+                    input.classList.remove('has-val');
+                    if (clearBtn) clearBtn.style.display = 'none';
+                }
+            });
+
+            if (colFilterBadge) {
+                if (activeColCount > 0) {
+                    colFilterBadge.textContent = String(activeColCount);
+                    colFilterBadge.style.display = 'inline-flex';
+                } else {
+                    colFilterBadge.style.display = 'none';
+                }
+            }
+
+            if (searchClear) {
+                searchClear.style.display = query ? 'block' : 'none';
+            }
+
+            let visibleCount = 0;
+            allRows.forEach((row) => {
+                let matches = true;
+
+                // Check global query across text
+                if (query) {
+                    const rowText = row.textContent.toLowerCase();
+                    if (!rowText.includes(query)) matches = false;
+                }
+
+                // Check each active column filter
+                if (matches && activeColCount > 0) {
+                    for (const [colIdxStr, filterVal] of Object.entries(activeColMap)) {
+                        const colIdx = parseInt(colIdxStr, 10);
+                        const cell = row.querySelector(`td[data-col="${colIdx}"]`);
+                        const cellText = (cell ? cell.textContent : '').trim();
+
+                        if (colIdx === 6 || colIdx === 7) { // Lines or Quantity (numeric)
+                            if (!evaluateNumericFilter(cellText, filterVal)) {
+                                matches = false;
+                                break;
+                            }
+                        } else {
+                            if (!cellText.toLowerCase().includes(filterVal.toLowerCase())) {
+                                matches = false;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                row.style.display = matches ? '' : 'none';
+                if (matches) visibleCount++;
+            });
+
+            // Renumber S.No for visible rows
+            let sNo = 1;
+            allRows.forEach((row) => {
+                if (row.style.display !== 'none') {
+                    const snoCell = row.querySelector('td.col-sno');
+                    if (snoCell) snoCell.textContent = String(sNo++);
+                }
+            });
+
+            // Update count badge & clear all button
+            if (countBadge) {
+                countBadge.textContent = `Showing ${visibleCount} of ${totalRows} orders`;
+                if (visibleCount < totalRows || query || activeColCount > 0) {
+                    countBadge.classList.add('is-filtered');
+                    if (clearAllBtn) clearAllBtn.style.display = 'inline-flex';
+                } else {
+                    countBadge.classList.remove('is-filtered');
+                    if (clearAllBtn) clearAllBtn.style.display = 'none';
+                }
+            }
+        }
+
+        if (searchInput) {
+            searchInput.addEventListener('input', applyFilters);
+        }
+        if (searchClear) {
+            searchClear.addEventListener('click', () => {
+                searchInput.value = '';
+                applyFilters();
+                searchInput.focus();
+            });
+        }
+
+        colFilterInputs.forEach((input) => {
+            input.addEventListener('input', applyFilters);
+            const clearBtn = input.parentElement?.querySelector('.rpt-col-clear');
+            if (clearBtn) {
+                clearBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    input.value = '';
+                    applyFilters();
+                    input.focus();
+                });
+            }
+        });
+
+        if (clearColFiltersBtn) {
+            clearColFiltersBtn.addEventListener('click', () => {
+                colFilterInputs.forEach((input) => { input.value = ''; });
+                applyFilters();
+            });
+        }
+
+        if (clearAllBtn) {
+            clearAllBtn.addEventListener('click', () => {
+                if (searchInput) searchInput.value = '';
+                colFilterInputs.forEach((input) => { input.value = ''; });
+                applyFilters();
+            });
+        }
+
+        // 2. Toggle Column Filters Row
+        if (colFilterBtn) {
+            colFilterBtn.addEventListener('click', () => {
+                const isOpen = table.classList.toggle('show-col-filters');
+                colFilterBtn.classList.toggle('is-active', isOpen);
+                colFilterBtn.setAttribute('aria-pressed', isOpen ? 'true' : 'false');
+            });
+        }
+
+        // 3. Scroll Body Only Toggle
+        if (stickyScrollBtn && tableWrap) {
+            stickyScrollBtn.addEventListener('click', () => {
+                const isSticky = tableWrap.classList.toggle('is-scroll-body');
+                stickyScrollBtn.classList.toggle('is-active', isSticky);
+                const label = document.getElementById('ordersStickyScrollLabel');
+                if (label) label.textContent = isSticky ? 'Scroll Body Only' : 'Expand Full Table';
+            });
+        }
+
+        // 4. Columns Dropdown Toggle & Column Checkboxes
+        const columnDefinitions = [
+            { id: 0, label: 'S.No' },
+            { id: 1, label: 'Sales Order' },
+            { id: 2, label: 'Customer' },
+            { id: 3, label: 'Material / Style' },
+            { id: 4, label: 'Creation Date' },
+            { id: 5, label: 'Plant' },
+            { id: 6, label: 'Lines' },
+            { id: 7, label: 'Quantity' }
+        ];
+
+        if (colToggleMenu) {
+            colToggleMenu.innerHTML = '';
+            const head = document.createElement('div');
+            head.className = 'sales-col-menu-head';
+            head.textContent = 'Show columns';
+            colToggleMenu.appendChild(head);
+            columnDefinitions.forEach((col) => {
+                const item = document.createElement('label');
+                item.className = 'sales-col-menu-item';
+                item.setAttribute('role', 'menuitemcheckbox');
+                item.setAttribute('aria-checked', 'true');
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.setAttribute('data-toggle-col', String(col.id));
+                checkbox.checked = true;
+                const text = document.createElement('span');
+                text.textContent = col.label;
+                item.appendChild(checkbox);
+                item.appendChild(text);
+                checkbox.addEventListener('change', () => {
+                    const isVisible = checkbox.checked;
+                    item.setAttribute('aria-checked', isVisible ? 'true' : 'false');
+                    table.querySelectorAll(`th[data-col="${col.id}"], td[data-col="${col.id}"]`).forEach((cell) => {
+                        cell.style.display = isVisible ? '' : 'none';
+                    });
+                });
+                colToggleMenu.appendChild(item);
+            });
+        }
+
+        if (colToggleBtn && colToggleDropdown) {
+            colToggleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isOpen = colToggleDropdown.classList.toggle('is-open');
+                colToggleBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            });
+            document.addEventListener('click', (e) => {
+                if (!colToggleDropdown.contains(e.target)) {
+                    colToggleDropdown.classList.remove('is-open');
+                    colToggleBtn.setAttribute('aria-expanded', 'false');
+                }
+            });
+        }
+
+        // 5. Column Header Sorting
+        const sortableHeaders = Array.from(table.querySelectorAll('th.col-sortable'));
+        sortableHeaders.forEach((th) => {
+            th.addEventListener('click', () => {
+                const colIdx = parseInt(th.getAttribute('data-col'), 10);
+                if (isNaN(colIdx)) return;
+
+                const isAsc = currentSort.col === colIdx && currentSort.dir === 'asc';
+                currentSort = { col: colIdx, dir: isAsc ? 'desc' : 'asc' };
+
+                // Update sort arrows on headers
+                sortableHeaders.forEach((h) => {
+                    const span = h.querySelector('.th-content span');
+                    if (span) {
+                        span.textContent = span.textContent.replace(/ [▲▼]$/, '');
+                        if (h === th) {
+                            span.textContent += currentSort.dir === 'asc' ? ' ▲' : ' ▼';
+                        }
+                    }
+                });
+
+                const tbody = table.querySelector('tbody');
+                const isNumericCol = colIdx === 6 || colIdx === 7;
+
+                allRows.sort((a, b) => {
+                    const aCell = a.querySelector(`td[data-col="${colIdx}"]`);
+                    const bCell = b.querySelector(`td[data-col="${colIdx}"]`);
+                    const aText = (aCell ? aCell.textContent : '').trim();
+                    const bText = (bCell ? bCell.textContent : '').trim();
+
+                    if (isNumericCol) {
+                        const aNum = parseFloat(aText.replace(/[^\d.-]/g, '')) || 0;
+                        const bNum = parseFloat(bText.replace(/[^\d.-]/g, '')) || 0;
+                        return currentSort.dir === 'asc' ? aNum - bNum : bNum - aNum;
+                    }
+                    return currentSort.dir === 'asc'
+                        ? aText.localeCompare(bText, undefined, { numeric: true, sensitivity: 'base' })
+                        : bText.localeCompare(aText, undefined, { numeric: true, sensitivity: 'base' });
+                });
+
+                allRows.forEach((row) => tbody.appendChild(row));
+                applyFilters();
+            });
+        });
+
+        // 6. 90% Screen Offcanvas Canvas for Fabric Utilization
+        function closeCanvas() {
+            if (canvas) canvas.hidden = true;
+            if (frame) frame.removeAttribute('src');
+            document.body.classList.remove('so-canvas-open');
+        }
+
+        function openFabric(so) {
+            if (!so || !canvas || !frame) return;
+            if (title) title.textContent = `Sales Order: ${so}`;
+            const baseUrl = cfg.pageUrl || window.location.pathname;
+            const sep = baseUrl.includes('?') ? '&' : '?';
+            const modeParam = cfg.mode ? `&mode=${encodeURIComponent(cfg.mode)}` : '';
+            const fullLink = document.getElementById('soCanvasFull');
+            if (fullLink) {
+                const modeQs = cfg.mode ? `&mode=${encodeURIComponent(cfg.mode)}` : '';
+                fullLink.href = `${baseUrl}${sep}so=${encodeURIComponent(so)}${modeQs}`;
+                fullLink.hidden = false;
+            }
+            frame.src = `${baseUrl}${sep}so=${encodeURIComponent(so)}&embedded=1${modeParam}`;
+            canvas.hidden = false;
+            document.body.classList.add('so-canvas-open');
+        }
+
+        if (canvas) {
+            canvas.querySelectorAll('[data-so-close]').forEach((el) => {
+                el.addEventListener('click', closeCanvas);
+            });
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && canvas && !canvas.hidden) {
+                closeCanvas();
+            }
+        });
+
+        allRows.forEach((row) => {
+            const so = row.getAttribute('data-so');
+            const trigger = () => openFabric(so);
+            row.addEventListener('click', (e) => {
+                // Don't trigger if clicked on an interactive element
+                if (e.target.closest('input, button, a')) return;
+                trigger();
+            });
+            row.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    trigger();
+                }
+            });
+        });
     }
 
     function escapeHtml(value) {
@@ -465,6 +927,15 @@
         return [];
     }
 
+    function setNoDataVisible(visible, so) {
+        const panel = document.getElementById('rptNoData');
+        const body = document.getElementById('rptReportBody');
+        const soEl = document.getElementById('rptNoDataSo');
+        if (soEl && so) soEl.textContent = String(so);
+        if (panel) panel.hidden = !visible;
+        if (body) body.hidden = !!visible;
+    }
+
     function renderLiveRows(cfg, records) {
         const tbody = document.getElementById('rptTableBody');
         if (!tbody) return;
@@ -475,11 +946,11 @@
         tbody.querySelectorAll('tr.rpt-table-loading, tr[data-orig-sno]').forEach(tr => tr.remove());
 
         if (!records.length) {
-            const empty = document.createElement('tr');
-            empty.innerHTML = `<td colspan="${colSpan}" class="rpt-table-empty">No ${isFabric ? 'fabric' : 'trims'} utilization for sales order ${escapeHtml(cfg.so)}.</td>`;
-            tbody.prepend(empty);
+            setNoDataVisible(true, cfg.so || '');
             return;
         }
+
+        setNoDataVisible(false);
 
         const frag = document.createDocumentFragment();
         records.forEach((row, i) => {
@@ -677,7 +1148,9 @@
             })
             .then((json) => {
                 const data = json.data || {};
-                renderLiveRows(cfg, data.records || []);
+                const records = data.records || [];
+                renderLiveRows(cfg, records);
+                if (!records.length) return;
                 applyLiveSummary(data.summary || {});
                 if (dataNode) dataNode.textContent = JSON.stringify(data.chart || {});
                 chartsDrawn = false;
@@ -687,14 +1160,11 @@
                 initDataTable();
             })
             .catch((err) => {
-                const tbody = document.getElementById('rptTableBody');
-                if (tbody) {
-                    tbody.innerHTML = `<tr><td colspan="${TABLE_COLUMNS}" class="rpt-table-empty">${escapeHtml(err.message || 'Unable to load SAP data.')}</td></tr>`;
+                setNoDataVisible(true, cfg.so || '');
+                const lede = document.querySelector('#rptNoData .rpt-nodata-lede');
+                if (lede) {
+                    lede.textContent = err.message || 'Unable to load SAP data.';
                 }
-                const alertBox = document.createElement('div');
-                alertBox.className = 'rpt-alert';
-                alertBox.textContent = err.message || 'Unable to load SAP data.';
-                document.querySelector('.rpt-main')?.prepend(alertBox);
             })
             .finally(() => {
                 if (spinner) spinner.hidden = true;
@@ -1038,4 +1508,215 @@
             window.rptSetupColumnFeatures(table, { onChange: syncHeaderHeight });
         }
  }
+
+    function initLookupDateList(cfg) {
+        const rangeSelect = document.getElementById('soRange');
+        const customBox = document.getElementById('soCustomRange');
+        const fromInput = document.getElementById('soFrom');
+        const toInput = document.getElementById('soTo');
+        const rangeError = document.getElementById('soRangeError');
+        const rangeApply = document.getElementById('soRangeApply');
+        const listEl = document.getElementById('soDateList');
+        const lookup = document.querySelector('.lookup');
+        if (!rangeSelect || !listEl || !cfg.ordersUrl) return;
+
+        let orders = [];
+        let currentLabel = '';
+        let requestSeq = 0;
+
+        function ymd(d) {
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${d.getFullYear()}-${month}-${day}`;
+        }
+        function pretty(value) {
+            const parts = String(value || '').split('-');
+            if (parts.length !== 3) return value;
+            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            return `${parts[2]} ${months[parseInt(parts[1], 10) - 1] || parts[1]} ${parts[0]}`;
+        }
+        function addMonths(date, months) {
+            const next = new Date(date.getFullYear(), date.getMonth() + months, date.getDate());
+            if (next.getDate() !== date.getDate()) next.setDate(0);
+            return next;
+        }
+        function startOfWeek(date) {
+            const next = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+            const day = next.getDay();
+            next.setDate(next.getDate() - (day === 0 ? 6 : day - 1));
+            return next;
+        }
+        function periodRange(key) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            if (key === 'today') return { from: today, to: today };
+            if (key === 'yesterday') {
+                const day = new Date(today);
+                day.setDate(day.getDate() - 1);
+                return { from: day, to: day };
+            }
+            if (key === 'this_week') return { from: startOfWeek(today), to: today };
+            if (key === 'this_month') return { from: new Date(today.getFullYear(), today.getMonth(), 1), to: today };
+            if (key === 'prev_week') {
+                const start = startOfWeek(today);
+                start.setDate(start.getDate() - 7);
+                const end = new Date(start);
+                end.setDate(start.getDate() + 6);
+                return { from: start, to: end };
+            }
+            if (key === 'prev_month') {
+                return {
+                    from: new Date(today.getFullYear(), today.getMonth() - 1, 1),
+                    to: new Date(today.getFullYear(), today.getMonth(), 0),
+                };
+            }
+            return null;
+        }
+        function showError(message) {
+            if (!rangeError) return;
+            rangeError.hidden = !message;
+            rangeError.textContent = message || '';
+        }
+        function syncLimits() {
+            if (!fromInput || !toInput) return;
+            if (fromInput.value) {
+                toInput.min = fromInput.value;
+                toInput.max = ymd(addMonths(new Date(fromInput.value + 'T00:00:00'), 6));
+            }
+            if (toInput.value) {
+                fromInput.max = toInput.value;
+                fromInput.min = ymd(addMonths(new Date(toInput.value + 'T00:00:00'), -6));
+            }
+        }
+        function resetSearch() {
+            requestSeq += 1;
+            rangeSelect.value = '';
+            if (customBox) customBox.hidden = true;
+            if (fromInput) fromInput.value = '';
+            if (toInput) toInput.value = '';
+            showError('');
+            orders = [];
+            currentLabel = '';
+            listEl.hidden = true;
+            listEl.innerHTML = '';
+            lookup?.classList.remove('is-orders-screen');
+        }
+        function openFabric(so) {
+            if (!so || !cfg.pageUrl) return;
+            const params = new URLSearchParams({ so: String(so) });
+            if (cfg.mode) params.set('mode', cfg.mode);
+            window.location.href = `${cfg.pageUrl}?${params.toString()}`;
+        }
+        function render(filterText) {
+            const q = (filterText || '').trim().toLowerCase();
+            const rows = orders.filter((order) => !q || [order.sales_order, order.customer, order.plant, order.material, order.created_by, order.creation_date].join(' ').toLowerCase().includes(q));
+            const body = rows.map((order) => `
+                <tr data-so="${escapeHtml(order.sales_order)}">
+                    <td class="so-num">${escapeHtml(order.sales_order)}</td>
+                    <td>${escapeHtml(order.creation_date || '—')}</td>
+                    <td>${escapeHtml(order.customer || '—')}</td>
+                    <td>${escapeHtml(order.plant || '—')}</td>
+                    <td>${escapeHtml(order.material || '—')}</td>
+                    <td>${escapeHtml(order.lines)}</td>
+                    <td>${escapeHtml(order.quantity)}</td>
+                </tr>
+            `).join('');
+            listEl.innerHTML = `
+                <div class="lookup-orders-head">
+                    <div>
+                        <button type="button" class="lookup-back-search" id="soBackSearch">Back to search</button>
+                        <strong>Sales orders</strong>
+                        <span>${escapeHtml(currentLabel)} · ${rows.length} of ${orders.length}</span>
+                    </div>
+                    <input class="lookup-orders-search" id="soDateSearch" type="search" placeholder="Search orders" value="${escapeHtml(filterText || '')}">
+                </div>
+                <div class="lookup-orders-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Sales order</th><th>Created</th><th>Customer</th><th>Plant</th><th>Material</th><th>Lines</th><th>Qty</th>
+                            </tr>
+                        </thead>
+                        <tbody>${body || `<tr><td colspan="7" class="lookup-orders-empty">${orders.length ? 'No rows match that search.' : 'No sales orders were created in this period.'}</td></tr>`}</tbody>
+                    </table>
+                </div>
+            `;
+            const search = document.getElementById('soDateSearch');
+            if (search) {
+                search.addEventListener('input', () => render(search.value));
+            }
+            document.getElementById('soBackSearch')?.addEventListener('click', resetSearch);
+            listEl.querySelectorAll('tbody tr[data-so]').forEach((row) => {
+                row.addEventListener('click', () => openFabric(row.getAttribute('data-so')));
+            });
+        }
+        function loadRange(from, to, label) {
+            currentLabel = label;
+            const seq = ++requestSeq;
+            lookup?.classList.add('is-orders-screen');
+            listEl.hidden = false;
+            listEl.innerHTML = `<div class="lookup-orders-status">Loading sales orders ${escapeHtml(label)}…</div>`;
+            const params = new URLSearchParams({ from, to, _: String(Date.now()) });
+            fetch(`${cfg.ordersUrl}?${params.toString()}`, { headers: { Accept: 'application/json' }, cache: 'no-store', credentials: 'same-origin' })
+                .then(async (res) => {
+                    const json = JSON.parse(await res.text());
+                    if (!res.ok || json.success === false) throw new Error(json.message || json.error || 'Unable to load sales orders.');
+                    return json;
+                })
+                .then((json) => {
+                    if (seq !== requestSeq) return;
+                    orders = Array.isArray(json.orders) ? json.orders : [];
+                    render('');
+                })
+                .catch((err) => {
+                    if (seq !== requestSeq) return;
+                    orders = [];
+                    listEl.innerHTML = `<div class="lookup-orders-empty">${escapeHtml(err.message || 'Unable to load sales orders.')}<div><button type="button" class="lookup-back-search" id="soBackSearch">Back to search</button></div></div>`;
+                    document.getElementById('soBackSearch')?.addEventListener('click', resetSearch);
+                });
+        }
+
+        rangeSelect.addEventListener('change', () => {
+            const key = rangeSelect.value;
+            showError('');
+            if (!key) {
+                resetSearch();
+                return;
+            }
+            if (key === 'custom') {
+                if (customBox) customBox.hidden = false;
+                listEl.hidden = true;
+                lookup?.classList.remove('is-orders-screen');
+                syncLimits();
+                return;
+            }
+            if (customBox) customBox.hidden = true;
+            const range = periodRange(key);
+            if (!range) return;
+            const from = ymd(range.from);
+            const to = ymd(range.to);
+            loadRange(from, to, from === to ? pretty(from) : `${pretty(from)} – ${pretty(to)}`);
+        });
+        fromInput?.addEventListener('change', syncLimits);
+        toInput?.addEventListener('change', syncLimits);
+        rangeApply?.addEventListener('click', () => {
+            const from = (fromInput?.value || '').trim();
+            const to = (toInput?.value || '').trim();
+            if (!from || !to) {
+                showError('Choose both a start date and an end date.');
+                return;
+            }
+            if (to < from) {
+                showError('The end date must be on or after the start date.');
+                return;
+            }
+            const max = ymd(addMonths(new Date(from + 'T00:00:00'), 6));
+            if (to > max) {
+                showError('A custom date range can cover at most 6 months.');
+                return;
+            }
+            showError('');
+            loadRange(from, to, from === to ? pretty(from) : `${pretty(from)} – ${pretty(to)}`);
+        });
+    }
 })();

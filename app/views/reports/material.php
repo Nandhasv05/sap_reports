@@ -8,13 +8,22 @@ $isFabric = $report === 'fabric';
 $mode = (string) ($_GET['mode'] ?? 'unit');
 $showAllOptions = $mode === 'all';
 $salesOrder = (string) ($salesOrder ?? '');
+$isEmbedded = !empty($_GET['embedded']);
 $awaitLive = !empty($liveClient) && $salesOrder !== '';
 $home = sap_reports_evol_url('portal_dashboard.php');
 $logoUrl = sap_reports_logo_url();
 $summary = is_array($summary ?? null) ? $summary : [];
 $chart = is_array($chart ?? null) ? $chart : [];
 $hasData = $records !== [] || (int) $total > 0 || $awaitLive;
-$isLookup = $salesOrder === '' && !$hasData;
+$showNoData = $salesOrder !== '' && !$awaitLive && $records === [] && (int) $total === 0;
+$rangeOrders = is_array($rangeOrders ?? null) ? $rangeOrders : null;
+$isOrdersList = $isFabric && $rangeOrders !== null && !empty($rangeOrders['success']);
+$isLookup = $salesOrder === '' && !$hasData && !$isOrdersList;
+$presets = is_array($presets ?? null) ? $presets : [];
+$presetDates = is_array($presetDates ?? null) ? $presetDates : [];
+$range = is_array($range ?? null) ? $range : null;
+$datePreset = (string) ($rangePreset ?? ($range['preset'] ?? ''));
+$isCustom = $datePreset === 'custom';
 $kindLabel = $isFabric ? 'Fabric' : 'Trims';
 $catalogHome = url('/');
 $qs = static function (array $extra = []) use ($search, $salesOrder, $page, $perPage, $mode): string {
@@ -87,7 +96,7 @@ $cards = [
 ];
 $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
 ?>
-<div class="rpt-app <?= $isFabric ? 'is-fabric' : 'is-trims' ?> <?= $modeClass ?>">
+<div class="rpt-app <?= $isFabric ? 'is-fabric' : 'is-trims' ?> <?= $modeClass ?><?= $isEmbedded ? ' is-embedded' : '' ?>">
     <div class="rpt-boot" id="rptBoot" <?= $isLookup ? '' : 'hidden' ?>>
         <div class="rpt-boot-card">
             <div class="rpt-boot-brand"><img src="<?= e($logoUrl) ?>" alt="evolv"></div>
@@ -103,6 +112,7 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
         require base_path('app/views/partials/loader.php');
     ?>
 
+    <?php if (!$isEmbedded): ?>
     <header class="rpt-bar">
         <div class="rpt-bar-left">
             <a href="<?= e($catalogHome) ?>" class="rpt-brand" aria-label="EVOLV" title="SAP Reports">
@@ -152,9 +162,28 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                 </div>
             <?php endif; ?>
 
-            <form class="rpt-search" method="get" action="<?= e(url($report)) ?>" id="rptFilterForm">
+            <form class="rpt-search" method="get" action="<?= e(url($report)) ?>" id="rptFilterForm"<?= $isFabric ? ' data-date-filter' : '' ?>>
                 <input type="hidden" name="mode" value="<?= e($mode) ?>">
-                <label class="rpt-field">
+                <?php if ($isFabric): ?>
+                    <label class="rpt-field rpt-field-range">
+                        <span class="material-icons-round">date_range</span>
+                        <select name="range" data-range-select aria-label="Date range">
+                            <option value=""<?= $datePreset === '' ? ' selected' : '' ?>>Select Date Range…</option>
+                            <?php foreach ($presets as $key => $label): ?>
+                                <option value="<?= e($key) ?>"<?= $key === $datePreset ? ' selected' : '' ?>><?= e($label) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <label class="rpt-field rpt-field-date" data-date-custom<?= $isCustom ? '' : ' hidden' ?>>
+                        <span class="material-icons-round">calendar_today</span>
+                        <input type="date" name="from" value="<?= e($isCustom ? ($_GET['from'] ?? '') : '') ?>" aria-label="From date">
+                    </label>
+                    <label class="rpt-field rpt-field-date" data-date-custom<?= $isCustom ? '' : ' hidden' ?>>
+                        <span class="material-icons-round">event</span>
+                        <input type="date" name="to" value="<?= e($isCustom ? ($_GET['to'] ?? '') : '') ?>" aria-label="To date">
+                    </label>
+                <?php endif; ?>
+                <label class="rpt-field rpt-field-so">
                     <span class="material-icons-round">receipt_long</span>
                     <input id="so" name="so" value="<?= e($salesOrder) ?>" placeholder="Sales order" inputmode="numeric">
                 </label>
@@ -168,6 +197,7 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
 
         <?php require base_path('app/views/partials/header_nav_right.php'); ?>
     </header>
+    <?php endif; ?>
 
     <?php if ($loadError !== ''): ?>
         <div class="rpt-alert"><?= e($loadError) ?></div>
@@ -185,26 +215,282 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                         <a class="<?= $isFabric ? 'on' : '' ?>" href="<?= e(url('fabric') . '?mode=all') ?>">Fabric</a>
                         <a class="<?= !$isFabric ? 'on' : '' ?>" href="<?= e(url('trims') . '?mode=all') ?>">Trims</a>
                     </div>
-                <?php else: ?>
-                    <!-- <div class="lookup-unit-badge <?= $isFabric ? 'is-fabric' : 'is-trims' ?>">
-                        <i class="fas <?= $isFabric ? 'fa-scroll' : 'fa-tags' ?>"></i>
-                        <span><?= $isFabric ? 'Fabric Unit Only' : 'Trims Unit Only' ?></span>
-                    </div> -->
                 <?php endif; ?>
-                <form method="get" action="<?= e(url($report)) ?>" id="rptFilterForm" class="lookup-form">
+
+                <form method="get" action="<?= e(url($report)) ?>" id="rptFilterForm" class="lookup-filters"<?= $isFabric ? ' data-date-filter' : '' ?> novalidate>
                     <input type="hidden" name="mode" value="<?= e($mode) ?>">
-                    <label class="lookup-so">
-                        <span class="material-icons-round">receipt_long</span>
-                        <input id="so" name="so" value="" placeholder="Sales order number" inputmode="numeric" autofocus>
-                    </label>
-                    <button class="rpt-btn lookup-go" type="submit">
+
+                    <?php if ($isFabric): ?>
+                        <p class="lookup-label">Date range <span class="lookup-label-note">or sales order *</span></p>
+                        <div class="lookup-range-wrap">
+                            <label class="lookup-so lookup-range" title="Date Range">
+                                <span class="material-icons-round">date_range</span>
+                                <select name="range" data-range-select aria-label="Date Range">
+                                    <option value=""<?= empty($datePreset) ? ' selected' : '' ?>>Select Date Range…</option>
+                                    <?php foreach ($presets as $key => $label): ?>
+                                        <option value="<?= e($key) ?>"<?= $key === $datePreset ? ' selected' : '' ?>><?= e($label) ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </label>
+                        </div>
+
+                        <div class="date-custom" data-date-custom<?= $isCustom ? '' : ' hidden' ?>>
+                            <label class="lookup-so date-input">
+                                <span class="material-icons-round">calendar_today</span>
+                                <input type="date" name="from" value="<?= e($_GET['from'] ?? ($presetDates[$datePreset]['from'] ?? '')) ?>" placeholder="From Date" aria-label="From Date">
+                            </label>
+                            <label class="lookup-so date-input">
+                                <span class="material-icons-round">event</span>
+                                <input type="date" name="to" value="<?= e($_GET['to'] ?? ($presetDates[$datePreset]['to'] ?? '')) ?>" placeholder="To Date" aria-label="To Date">
+                            </label>
+                        </div>
+                    <?php endif; ?>
+
+                    <div class="lookup-form"<?= $isFabric ? ' style="margin-top: 10px;"' : '' ?>>
+                        <label class="lookup-so" title="Sales order number">
+                            <span class="material-icons-round">receipt_long</span>
+                            <input id="so" name="so" value="<?= e($salesOrder) ?>" placeholder="Sales order number" inputmode="numeric" autofocus autocomplete="off" required>
+                        </label>
+                    </div>
+
+                    <button class="rpt-btn lookup-submit" type="submit" style="margin-top: 16px; width: 100%;">
                         <span class="material-icons-round">sync</span>
+                        Show report
                     </button>
                 </form>
+
             </div>
         </main>
+    <?php elseif ($isOrdersList): ?>
+        <main class="rpt-main orders-list-main" id="rptMain">
+            <!-- First Row: Total Values Bento KPI Cards (Full Width with Modern Animations) -->
+            <div class="orders-kpi-grid">
+                <div class="orders-kpi-card tone-teal">
+                    <div class="orders-kpi-icon"><span class="material-icons-round">inventory_2</span></div>
+                    <div class="orders-kpi-info">
+                        <div class="orders-kpi-label">Total Sales Orders</div>
+                        <div class="orders-kpi-value"><?= number_format(count($rangeOrders['orders'] ?? [])) ?></div>
+                    </div>
+                </div>
+
+                <div class="orders-kpi-card tone-purple">
+                    <div class="orders-kpi-icon"><span class="material-icons-round">format_list_numbered</span></div>
+                    <div class="orders-kpi-info">
+                        <div class="orders-kpi-label">Total Items</div>
+                        <div class="orders-kpi-value"><?= number_format((int) ($rangeOrders['line_count'] ?? 0)) ?></div>
+                    </div>
+                </div>
+
+                <div class="orders-kpi-card tone-sky">
+                    <div class="orders-kpi-icon"><span class="material-icons-round">shopping_bag</span></div>
+                    <div class="orders-kpi-info">
+                        <div class="orders-kpi-label">Total Order Quantity</div>
+                        <div class="orders-kpi-value"><?= number_format((float) ($rangeOrders['total_qty'] ?? 0)) ?></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Second Row: Table View with Screenshot 2 Toolbar & Column Filters -->
+            <div class="orders-table-card card">
+                <div class="rpt-tb sales-qt-tb" id="ordersToolbar">
+                    <div class="rpt-tb-search">
+                        <i class="fas fa-search rpt-tb-icon"></i>
+                        <input type="text" class="rpt-tb-input" id="ordersTableSearch" placeholder="Quick search quotation, customer, material..." autocomplete="off">
+                        <button type="button" class="rpt-tb-clear" id="ordersSearchClear" style="display: none;" title="Clear search">&times;</button>
+                    </div>
+                    <div class="rpt-tb-actions">
+                        <span class="rpt-tb-count" id="ordersTableCount">Showing <?= count($rangeOrders['orders'] ?? []) ?> of <?= count($rangeOrders['orders'] ?? []) ?> orders</span>
+                        <button type="button" class="rpt-tb-btn is-active" id="ordersToggleStickyScroll" title="Keep the header fixed and scroll the rows">
+                            <i class="fas fa-arrows-up-down"></i>
+                            <span id="ordersStickyScrollLabel">Scroll Body Only</span>
+                        </button>
+                        <div class="rpt-cat-dropdown" id="ordersColumnToggleDropdown">
+                            <button type="button" class="rpt-tb-btn" id="ordersColumnToggleBtn" title="Show or hide columns" aria-expanded="false" aria-haspopup="true">
+                                <i class="fas fa-columns"></i>
+                                <span>Columns</span>
+                                <span class="material-icons-round rpt-cat-dd-arrow" style="font-size: 14px;">expand_more</span>
+                            </button>
+                            <div class="rpt-cat-dd-menu sales-col-menu" id="ordersColumnToggleMenu" role="menu"></div>
+                        </div>
+                        <button type="button" class="rpt-tb-btn rpt-tb-btn-excel" data-excel-export="soOrdersTable"
+                                data-excel-title="<?= e($kindLabel . ' Utilization — Sales Orders') ?>"
+                                data-excel-file="<?= e(strtolower($kindLabel) . '-sales-orders') ?>"
+                                data-excel-sheet="Orders"
+                                title="Download the visible columns as Excel">
+                            <i class="fas fa-file-excel"></i>
+                            <span>Excel</span>
+                        </button>
+                        <button type="button" class="rpt-tb-btn is-active" id="ordersBtnColFilter" aria-pressed="true" title="Show or hide a search box under each column">
+                            <i class="fas fa-filter"></i>
+                            <span>Column Filters</span>
+                            <span class="rpt-tb-badge" id="ordersActiveFilterBadge" style="display: none;">0</span>
+                        </button>
+                        <button type="button" class="rpt-tb-btn rpt-tb-btn-reset" id="ordersClearAllFilters" title="Clear all search, filters and sorting" style="display: none;">
+                            <i class="fas fa-rotate-left"></i>
+                            <span>Clear All</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="table-responsive table-wrap sales-table-wrap is-scroll-body" id="ordersTableWrap">
+                    <table class="sales-data-table rpt-table prod-table po-page-table text-nowrap show-col-filters" id="soOrdersTable">
+                        <thead>
+                            <tr class="sales-th-row rpt-header-row">
+                                <th class="col-sno sno" data-col="0" style="width: 55px; text-align: center;">
+                                    <div class="th-content"><span>S.No</span></div>
+                                </th>
+                                <th class="col-sortable is-sortable" data-col="1" data-sort="so" title="Sort by Sales Order">
+                                    <div class="th-content"><span>Sales Order</span></div>
+                                </th>
+                                <th class="col-sortable is-sortable" data-col="2" data-sort="customer" title="Sort by Customer">
+                                    <div class="th-content"><span>Customer</span></div>
+                                </th>
+                                <th class="col-sortable is-sortable" data-col="3" data-sort="material" title="Sort by Material / Style">
+                                    <div class="th-content"><span>Material / Style</span></div>
+                                </th>
+                                <th class="col-sortable is-sortable" data-col="4" data-sort="date" title="Sort by Creation Date">
+                                    <div class="th-content"><span>Creation Date</span></div>
+                                </th>
+                                <th class="col-sortable is-sortable" data-col="5" data-sort="plant" title="Sort by Plant">
+                                    <div class="th-content"><span>Plant</span></div>
+                                </th>
+                                <th class="col-sortable is-sortable col-num num" data-col="6" data-sort="lines" style="width: 85px; text-align: right;" title="Sort by Lines">
+                                    <div class="th-content num"><span>Lines</span></div>
+                                </th>
+                                <th class="col-sortable is-sortable col-num num" data-col="7" data-sort="qty" style="width: 120px; text-align: right;" title="Sort by Quantity">
+                                    <div class="th-content num"><span>Quantity</span></div>
+                                </th>
+                            </tr>
+                            <tr class="sales-col-filter-row rpt-filter-row" id="ordersFilterRow">
+                                <th class="col-filter-th num sno" data-col="0" style="text-align: center;">
+                                    <button type="button" class="rpt-col-filter-reset" id="ordersBtnClearColFilters" title="Clear all column filters" aria-label="Clear all column filters">
+                                        <i class="fas fa-eraser"></i>
+                                    </button>
+                                </th>
+                                <th class="col-filter-th" data-col="1">
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input col-filter-input" data-col="1" placeholder="Filter…" title="Filter Sales Order">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th class="col-filter-th" data-col="2">
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input col-filter-input" data-col="2" placeholder="Filter…" title="Filter Customer">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th class="col-filter-th" data-col="3">
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input col-filter-input" data-col="3" placeholder="Filter…" title="Filter Material / Style">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th class="col-filter-th" data-col="4">
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input col-filter-input" data-col="4" placeholder="Filter…" title="Filter Creation Date">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th class="col-filter-th" data-col="5">
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input col-filter-input" data-col="5" placeholder="Filter…" title="Filter Plant">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th class="col-filter-th" data-col="6">
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input col-filter-input" data-col="6" placeholder=">0, <10…" title="Filter Lines">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                                <th class="col-filter-th" data-col="7">
+                                    <div class="rpt-col-input-wrap">
+                                        <input type="text" class="rpt-col-input col-filter-input" data-col="7" placeholder=">0, <10…" title="Filter Quantity">
+                                        <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
+                                    </div>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($rangeOrders['orders'])): ?>
+                                <tr id="ordersEmptyRow">
+                                    <td colspan="8" style="text-align: center; padding: 48px; color: #64748b;">
+                                        <span class="material-icons-round" style="font-size: 40px; color: #cbd5e1; display: block; margin-bottom: 8px;">event_busy</span>
+                                        <strong>No sales orders found for this creation period.</strong>
+                                        <p style="margin: 4px 0 0; font-size: 13px;">Try another date range.</p>
+                                    </td>
+                                </tr>
+                            <?php else: ?>
+                                <?php foreach ($rangeOrders['orders'] as $idx => $ord): ?>
+                                    <tr data-so="<?= e($ord['sales_order']) ?>" tabindex="0" role="button" aria-label="Open sales order <?= e($ord['sales_order']) ?>">
+                                        <td class="col-sno sno" data-col="0" style="text-align: center; font-weight: 600; color: #64748b;"><?= $idx + 1 ?></td>
+                                        <td data-col="1">
+                                            <span class="so-badge">
+                                                <span class="material-icons-round">tag</span>
+                                                <strong><?= e($ord['sales_order']) ?></strong>
+                                            </span>
+                                        </td>
+                                        <td data-col="2" title="<?= e($ord['customer']) ?>"><?= e($ord['customer']) ?></td>
+                                        <td data-col="3" title="<?= e($ord['material']) ?>"><code class="mat-code"><?= e($ord['material']) ?></code></td>
+                                        <td data-col="4"><?= e($ord['creation_date']) ?></td>
+                                        <td data-col="5"><span class="plant-pill"><?= e($ord['plant']) ?></span></td>
+                                        <td data-col="6" style="text-align: right;"><span class="lines-pill"><?= e($ord['lines']) ?></span></td>
+                                        <td data-col="7" style="text-align: right; font-weight: 700; color: #0f172a;"><?= number_format((float) $ord['quantity']) ?></td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+
+        <!-- 90% Screen Offcanvas Canvas for Fabric Utilization -->
+        <div id="soCanvas" class="so-canvas" hidden>
+            <button type="button" class="so-canvas-backdrop" data-so-close aria-label="Close report"></button>
+            <aside class="so-canvas-panel is-90" role="dialog" aria-modal="true" aria-labelledby="soCanvasTitle">
+                <header class="so-canvas-head">
+                    <button type="button" class="so-canvas-back" data-so-close aria-label="Back to sales orders">
+                        <span class="material-icons-round">arrow_back</span>
+                        <span>Back</span>
+                    </button>
+                    <h2 id="soCanvasTitle" class="so-canvas-title">Sales Order</h2>
+                    <div class="so-canvas-actions">
+                        <a class="so-canvas-full" id="soCanvasFull" href="#" target="_blank" rel="noopener" title="Open the full utilization report in a new tab">
+                            <i class="fas fa-up-right-from-square"></i>
+                            <span>Full report</span>
+                        </a>
+                    </div>
+                </header>
+                <iframe id="soCanvasFrame" title="Fabric utilization report"></iframe>
+            </aside>
+        </div>
     <?php else: ?>
         <main class="rpt-main">
+            <div id="rptNoData" class="rpt-nodata"<?= $showNoData ? '' : ' hidden' ?> role="status" aria-live="polite">
+                <div class="rpt-nodata-card">
+                    <div class="rpt-nodata-orbits" aria-hidden="true">
+                        <span></span><span></span><span></span>
+                    </div>
+                    <div class="rpt-nodata-icon" aria-hidden="true">
+                        <span class="material-icons-round">search_off</span>
+                    </div>
+                    <p class="rpt-nodata-kicker">No results</p>
+                    <h2>Data not found</h2>
+                    <p class="rpt-nodata-lede">
+                        No <?= $isFabric ? 'fabric' : 'trims' ?> utilization for sales order
+                        <strong id="rptNoDataSo"><?= e($salesOrder) ?></strong>.
+                    </p>
+                    <?php if (!$isEmbedded): ?>
+                        <a class="rpt-nodata-btn" href="<?= e(url($report) . ($mode !== '' ? ('?mode=' . rawurlencode($mode)) : '')) ?>">
+                            <span class="material-icons-round">arrow_back</span>
+                            Try another sales order
+                        </a>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <div id="rptReportBody" class="rpt-report-body"<?= $showNoData ? ' hidden' : '' ?>>
             <div class="rpt-stats">
                 <?php foreach ($cards as $card): ?>
                     <?php
@@ -874,10 +1160,11 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
                     <?php endif; ?>
                 </table>
             </div>
+            </div>
         </main>
     <?php endif; ?>
 
-    <?php require base_path('app/views/partials/footer.php'); ?>
+    <?php if (!$isEmbedded) { require base_path('app/views/partials/footer.php'); } ?>
 </div>
 <script type="application/json" id="rptChartData"><?= json_encode($chart, JSON_UNESCAPED_UNICODE) ?></script>
 <script type="application/json" id="rptPageConfig"><?= json_encode([
@@ -888,7 +1175,10 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
     'search'      => $search,
     'live'        => $awaitLive,
     'dataUrl'     => url($report . '/data'),
+    'ordersUrl'   => url($report . '/orders'),
     'pageUrl'     => url($report),
+    'presetDates' => $presetDates ?? [],
+    'isOrdersList'=> $isOrdersList,
     'catIcons'    => $trimCatIcons ?? [],
     'catColors'   => $trimCatColors ?? [],
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
