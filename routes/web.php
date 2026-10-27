@@ -32,14 +32,12 @@ $router->get('open', function () {
 $router->get('division', function () {
     (new ReportsController())->show('division');
 });
-$router->get('fabric/orders', [ReportsController::class, 'salesOrdersByDate']);
 $router->get('fabric/data', function () {
     (new ReportsController())->data('fabric');
 });
 $router->get('fabric', function () {
     (new ReportsController())->show('fabric');
 });
-$router->get('trims/orders', [ReportsController::class, 'salesOrdersByDate']);
 $router->get('trims/data', function () {
     (new ReportsController())->data('trims');
 });

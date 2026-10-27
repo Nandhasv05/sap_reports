@@ -61,35 +61,7 @@ class ReportsController extends Controller
         $to = trim((string) ($_GET['to'] ?? date('Y-m-d')));
         $export = strtolower((string) ($_GET['export'] ?? '')) === 'csv';
 
-        $rangePreset = strtolower(trim((string) ($_GET['range'] ?? '')));
-        $customFrom = trim((string) ($_GET['from'] ?? ''));
-        $customTo = trim((string) ($_GET['to'] ?? ''));
-        $resolvedRange = null;
-        $rangeOrders = null;
         $isMaterialReport = in_array($report, ['fabric', 'trims'], true);
-        $isFabric = $report === 'fabric';
-
-        if ($isFabric) {
-            require_once base_path('app/services/SapUtilizationService.php');
-            $presets = SapUtilizationService::rangePresets();
-            $presetDates = SapUtilizationService::presetDates();
-
-            if ($salesOrder === '' && ($rangePreset !== '' || ($customFrom !== '' && $customTo !== ''))) {
-                $resolvedRange = SapUtilizationService::resolveRange($rangePreset ?: 'custom', $customFrom, $customTo);
-                if ($resolvedRange['error'] === null) {
-                    require_once base_path('app/services/SapSalesService.php');
-                    $rangeOrders = (new SapSalesService())->listOrdersByDateRange($resolvedRange['from'], $resolvedRange['to']);
-                    if (!empty($rangeOrders['error'])) {
-                        $loadError = (string) $rangeOrders['error'];
-                    }
-                } else {
-                    $loadError = (string) $resolvedRange['error'];
-                }
-            }
-        } else {
-            $presets = [];
-            $presetDates = [];
-        }
 
         $payload = [
             'records'     => [],
@@ -99,9 +71,9 @@ class ReportsController extends Controller
             'per_page'    => $perPage,
             'sales_order' => $salesOrder,
         ];
-        $loadError = $loadError ?? '';
-        $liveClient = $isMaterialReport && !$export && $rangeOrders === null;
-        if (!$liveClient && $rangeOrders === null) {
+        $loadError = '';
+        $liveClient = $isMaterialReport && !$export;
+        if (!$liveClient) {
             try {
                 $payload = $model->fetch($report, $year, $page, $perPage, $search, $from, $to, $export, $salesOrder);
             } catch (Throwable $e) {
@@ -139,11 +111,6 @@ class ReportsController extends Controller
             'salesOrder'  => $salesOrder !== '' ? $salesOrder : (string) ($payload['sales_order'] ?? ''),
             'from'        => $from,
             'to'          => $to,
-            'range'       => $resolvedRange,
-            'rangePreset' => $rangePreset,
-            'rangeOrders' => $rangeOrders,
-            'presets'     => $presets,
-            'presetDates' => $presetDates,
             'loadError'   => $loadError,
             'model'       => $model,
             'summary'     => $payload['summary'] ?? [],
@@ -802,27 +769,6 @@ class ReportsController extends Controller
     /*
      * JSON API — browser Network tab (Fetch/XHR)
      */
-    /*
-     * Sales orders created in a date range (ZI_SalesApi_HUB).
-     */
-    public function salesOrdersByDate(): void
-    {
-        require_once base_path('app/services/SapSalesService.php');
-        $from = trim((string) ($_GET['from'] ?? $_GET['date'] ?? ''));
-        $to = trim((string) ($_GET['to'] ?? $from));
-        try {
-            $result = (new SapSalesService())->listOrdersByDateRange($from, $to);
-        } catch (Throwable $e) {
-            $this->jsonResponse([
-                'success' => false,
-                'message' => 'Unable to load sales orders: ' . $e->getMessage(),
-                'orders'  => [],
-            ], 500);
-        }
-        $status = !empty($result['success']) ? 200 : 422;
-        $this->jsonResponse($result, $status);
-    }
-
     public function data(string $report = ''): void
     {
         $model = new ReportsModel();
