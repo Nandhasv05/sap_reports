@@ -9,6 +9,12 @@ require_once base_path('app/controllers/ErrorController.php');
 require_once base_path('app/controllers/TablePreferencesController.php');
 require_once base_path('app/controllers/SalesController.php');
 
+$auditController = base_path('app/controllers/AuditLogController.php');
+$hasAuditLog = is_file($auditController);
+if ($hasAuditLog) {
+    require_once $auditController;
+}
+
 /** @var Router $router */
 $router->get('/', [ReportsController::class, 'index']);
 $router->get('404', [ErrorController::class, 'notFound']);
@@ -60,7 +66,14 @@ $router->get('procurement', function () {
     (new ReportsController())->show('procurement');
 });
 $router->get('purchase-order/data', [ReportsController::class, 'purchaseOrderData']);
+if (method_exists(ReportsController::class, 'purchaseOrderValidate')) {
+    $router->get('purchase-order/validate', [ReportsController::class, 'purchaseOrderValidate']);
+}
 $router->get('purchase-order', [ReportsController::class, 'showPurchaseOrder']);
 $router->get('api/user/table-preferences/{tableKey}', [TablePreferencesController::class, 'show']);
 $router->put('api/user/table-preferences/{tableKey}', [TablePreferencesController::class, 'update']);
 $router->delete('api/user/table-preferences/{tableKey}', [TablePreferencesController::class, 'destroy']);
+if ($hasAuditLog) {
+    $router->get('audit-log', [AuditLogController::class, 'page']);
+    $router->get('api/audit-log', [AuditLogController::class, 'index']);
+}

@@ -25,8 +25,14 @@
 
     /* Resolves with the report payload ({header, records, totals}); rejects with a readable message. */
     async function fetchPo(po, signal) {
-        if (cache.has(po)) return cache.get(po);
-        const res = await fetch(`${cfg.dataUrl}?${new URLSearchParams({ po, _: String(Date.now()) })}`, {
+        const view = String(cfg.view || '').trim();
+        const cacheKey = view ? `${po}::${view}` : po;
+        if (cache.has(cacheKey)) return cache.get(cacheKey);
+        const params = new URLSearchParams({ po, _: String(Date.now()) });
+        if (view) params.set('view', view);
+        const so = String(cfg.salesOrder || '').replace(/\D/g, '');
+        if (so) params.set('so', so);
+        const res = await fetch(`${cfg.dataUrl}?${params}`, {
             headers: { Accept: 'application/json' },
             credentials: 'same-origin',
             cache: 'no-store',
@@ -40,7 +46,7 @@
         }
         if (!res.ok || json.success === false) throw new Error(json.message || json.error || `SAP API failed (HTTP ${res.status}).`);
         const data = json.data || {};
-        if (Array.isArray(data.records) && data.records.length) cache.set(po, data);
+        if (Array.isArray(data.records) && data.records.length) cache.set(cacheKey, data);
         return data;
     }
 
@@ -373,7 +379,11 @@
         drawer.querySelector('#poDrawerSub').textContent = current.item ? `Item ${current.item}` : '';
         const full = drawer.querySelector('#poDrawerFull');
         full.hidden = !cfg.pageUrl;
-        if (cfg.pageUrl) full.href = `${cfg.pageUrl}?${new URLSearchParams({ po })}`;
+        if (cfg.pageUrl) {
+            const params = new URLSearchParams({ po });
+            if (cfg.view) params.set('view', cfg.view);
+            full.href = `${cfg.pageUrl}?${params}`;
+        }
         drawer.hidden = false;
         requestAnimationFrame(() => drawer.classList.add('is-open'));
         document.body.classList.add('po-drawer-open');

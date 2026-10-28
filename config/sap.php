@@ -38,6 +38,7 @@ return [
     'production_so_pattern'  => '/^\d{1,7}$/',
     'procurement_service' => '/sap/opu/odata/sap/ZBUSINESS_API_SRV/ProcurementDashboardSet',
     'purchase_order_service' => '/sap/opu/odata/sap/ZI_PURCHASEORDERAPI_HUB_CDS/ZI_PurchaseOrderAPI_HUB',
+    'cost_service'           => '/sap/opu/odata/sap/ZCOST_SRV/ZCOSTHSet',
     'username'         => 'APIUSER',
     'password'         => 'Api@321',
     'page_size'        => 500,

@@ -61,6 +61,9 @@ class Controller
         while (ob_get_level() > 0) {
             @ob_end_clean();
         }
+        if (function_exists('sap_reports_audit_api_response')) {
+            sap_reports_audit_api_response($payload, $status);
+        }
         http_response_code($status);
         header('Content-Type: application/json; charset=utf-8');
         header('Cache-Control: no-store, no-cache, must-revalidate');

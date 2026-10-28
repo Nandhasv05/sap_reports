@@ -7,6 +7,8 @@
 require_once base_path('app/services/SapProcurementService.php');
 require_once base_path('app/services/SapProductionService.php');
 require_once base_path('app/services/SapPurchaseOrderService.php');
+require_once base_path('app/services/SapCostService.php');
+require_once base_path('app/services/PoValidationStatusService.php');
 
 final class TableColumnRegistry
 {
@@ -48,6 +50,12 @@ final class TableColumnRegistry
             'production_range_table' => $fromService(SapProductionService::columns(), SapProductionService::defaultHiddenRangeColumns()),
             'purchase_order_table' => $fromService(SapPurchaseOrderService::columns(), []),
             'purchase_order_list_table' => $fromService(SapPurchaseOrderService::listColumns(), []),
+            'purchase_order_costing_table' => $fromService(SapCostService::costingColumns(), [
+                'overhead', 'markup', 'subtot', 'total_fr', 'freight', 'duty', 'fin_cost',
+            ]),
+            'purchase_order_costing_list_table' => $fromService(PoValidationStatusService::costingListColumns(), [
+                'material_type', 'mat_type_desc', 'material_group', 'created_by',
+            ]),
             'fabric_utilization_table' => self::define([
                 'sno'                     => 'S.No',
                 'sales_order'             => 'Sales Order',

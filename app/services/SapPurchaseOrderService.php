@@ -11,7 +11,7 @@ class SapPurchaseOrderService
 {
     use SapValueFormat;
 
-    public const MAX_RANGE_DAYS = 186;
+    public const MAX_RANGE_DAYS = 100;
     private const DEFAULT_SERVICE = '/sap/opu/odata/sap/ZI_PURCHASEORDERAPI_HUB_CDS/ZI_PurchaseOrderAPI_HUB';
     private const SALES_ORDER_FIELDS = 20;
     private const RANGE_TIMEZONE = 'Asia/Kolkata';
@@ -89,7 +89,7 @@ class SapPurchaseOrderService
     }
 
     /*
-     * Resolve date range preset or custom From/To into Y-m-d format (max 6 months range)
+     * Resolve date range preset or custom From/To into Y-m-d format (custom max 100 days)
      *
      * @return array{preset: string, from: string, to: string, label: string, error: ?string}
      */
@@ -124,13 +124,13 @@ class SapPurchaseOrderService
             $out['error'] = 'The date range is in the future.';
             return $out;
         }
-        $sixMonthsAgo = $today->modify('-186 days');
-        if ($start < $sixMonthsAgo) {
-            $out['error'] = 'Select dates within the last 6 months.';
+        $minAllowed = $today->modify('-' . self::MAX_RANGE_DAYS . ' days');
+        if ($start < $minAllowed) {
+            $out['error'] = 'Select dates within the last ' . self::MAX_RANGE_DAYS . ' days.';
             return $out;
         }
         if ((int) $start->diff($end)->days + 1 > self::MAX_RANGE_DAYS) {
-            $out['error'] = 'Choose a range of 6 months (186 days) or less.';
+            $out['error'] = 'Custom Date allows a maximum of ' . self::MAX_RANGE_DAYS . ' days.';
             return $out;
         }
 
@@ -301,6 +301,27 @@ class SapPurchaseOrderService
             $matCat = 'all';
         }
 
+        $emptyTotals = [
+            'pos_count'       => 0,
+            'items_count'     => 0,
+            'total_qty'       => 0,
+            'total_value'     => 0,
+            'currency'        => 'INR',
+            'suppliers_count' => 0,
+        ];
+
+        if (!empty($range['error'])) {
+            return [
+                'records'       => [],
+                'total'         => 0,
+                'totals'        => $emptyTotals,
+                'range'         => $range,
+                'truncated'     => false,
+                'items_fetched' => 0,
+                'error'         => $range['error'],
+            ];
+        }
+
         $typesKey = $poTypes;
         sort($typesKey);
         $supKey = $suppliers;
@@ -352,125 +373,143 @@ class SapPurchaseOrderService
 
         $service = (string) ($this->cfg['purchase_order_service'] ?? self::DEFAULT_SERVICE);
         $maxRows = max(1, (int) ($this->cfg['po_max_rows'] ?? $this->cfg['max_rows'] ?? 10000));
-        $result = $this->client->fetchResults($service, $query, $maxRows);
-        if (($result['error'] ?? null) !== null) {
-            return [
-                'records' => [],
-                'total'   => 0,
-                'totals'  => [
-                    'pos_count'       => 0,
-                    'items_count'     => 0,
-                    'total_qty'       => 0,
-                    'total_value'     => 0,
-                    'currency'        => 'INR',
-                    'suppliers_count' => 0,
-                ],
-                'range'   => $range,
-                'truncated' => false,
-                'items_fetched' => 0,
-                'error'   => $result['error'],
-            ];
-        }
 
-        $itemsFetched = (int) ($result['row_count'] ?? count($result['rows'] ?? []));
-        $truncated = $itemsFetched >= $maxRows;
-
+        // Stream pages and aggregate per-PO so wide Custom Date ranges do not OOM
+        // (fetchResults kept every SAP line in memory and exhausted 128MB).
         $pos = [];
         $currencies = [];
         $docTypeMap = self::documentTypeMap();
-        foreach ($result['rows'] as $row) {
-            if (!is_array($row)) continue;
-            $poNum = $this->displayNumber((string) ($row['PurchaseOrder'] ?? ''));
-            if ($poNum === '') continue;
-
-            $rowPoType = trim((string) ($row['PurchaseOrderType'] ?? ''));
-            if (!empty($poTypes) && !in_array(strtoupper($rowPoType), $poTypes, true)) {
-                continue;
-            }
-
-            $soList = [];
-            for ($i = 1; $i <= self::SALES_ORDER_FIELDS; $i++) {
-                $v = $this->displayNumber((string) ($row['zzvbeln' . $i] ?? ''));
-                if ($v !== '') $soList[] = $v;
-            }
-            if ($so !== '' && !in_array($so, $soList, true)) {
-                continue;
-            }
-
-            $materialType = trim((string) ($row['MaterialType'] ?? ''));
-            $matTypeDesc = trim((string) ($row['MatTypeDesc'] ?? ''));
-            $materialGroup = trim((string) ($row['MaterialGroup'] ?? ''));
-            $lineCat = self::classifyMaterial($materialType, $matTypeDesc, $materialGroup);
-            if ($matCat !== 'all' && $lineCat !== $matCat) {
-                continue;
-            }
-
-            if (!isset($pos[$poNum])) {
-                $typeName = trim((string) ($row['PurchasingDocumentTypeName'] ?? ''));
-                if ($typeName === '' && isset($docTypeMap[$rowPoType])) {
-                    $typeName = $docTypeMap[$rowPoType];
+        $pageResult = $this->client->eachPage(function (array $batch) use (
+            &$pos,
+            &$currencies,
+            $poTypes,
+            $so,
+            $matCat,
+            $docTypeMap
+        ): void {
+            foreach ($batch as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $poNum = $this->displayNumber((string) ($row['PurchaseOrder'] ?? ''));
+                if ($poNum === '') {
+                    continue;
                 }
 
-                $pos[$poNum] = [
-                    'purchase_order'   => $poNum,
-                    'purchase_order_category' => trim((string) ($row['PurchaseOrderCategory'] ?? '')),
-                    'purchase_order_type' => $rowPoType,
-                    'po_type_name'     => $typeName,
-                    'date'             => $this->sapDate((string) ($row['PurchaseOrderDate'] ?? '')),
-                    'supplier'         => $this->displayNumber((string) ($row['Supplier'] ?? '')),
-                    'supplier_full_name' => trim((string) ($row['SupplierFullName'] ?? '')),
-                    'company_code'     => trim((string) ($row['CompanyCode'] ?? '')),
-                    'purchasing_org'   => trim((string) ($row['PurchasingOrganization'] ?? '')),
-                    'purchasing_group' => trim((string) ($row['PurchasingGroup'] ?? '')),
-                    'created_by'       => trim((string) ($row['CreatedByUser'] ?? '')),
-                    'plant'            => trim((string) ($row['Plant'] ?? '')),
-                    'plants'           => [],
-                    'items_count'      => 0,
-                    'materials'        => [],
-                    'material_types'   => [],
-                    'mat_type_descs'   => [],
-                    'material_groups'  => [],
-                    'total_qty'        => 0.0,
-                    'unit'             => trim((string) ($row['PurchaseOrderQuantityUnit'] ?? '')),
-                    'total_value'      => 0.0,
-                    'currency'         => trim((string) ($row['DocumentCurrency'] ?? '')),
-                    'sales_orders'     => [],
-                ];
-            }
-
-            $p = &$pos[$poNum];
-            $p['items_count']++;
-            $plantVal = trim((string) ($row['Plant'] ?? ''));
-            if ($plantVal !== '' && !in_array($plantVal, $p['plants'], true)) {
-                $p['plants'][] = $plantVal;
-            }
-            $mat = trim((string) ($row['Material'] ?? ''));
-            if ($mat !== '' && !in_array($mat, $p['materials'], true)) {
-                $p['materials'][] = $mat;
-            }
-            if ($materialType !== '' && !in_array($materialType, $p['material_types'], true)) {
-                $p['material_types'][] = $materialType;
-            }
-            if ($matTypeDesc !== '' && !in_array($matTypeDesc, $p['mat_type_descs'], true)) {
-                $p['mat_type_descs'][] = $matTypeDesc;
-            }
-            if ($materialGroup !== '' && !in_array($materialGroup, $p['material_groups'], true)) {
-                $p['material_groups'][] = $materialGroup;
-            }
-            $qty = $this->sapNumber($row['OrderQuantity'] ?? '');
-            $price = $this->sapNumber($row['NetPriceAmount'] ?? '');
-            $p['total_qty'] += $qty;
-            $p['total_value'] += round($qty * $price, 2);
-            foreach ($soList as $s) {
-                if (!in_array($s, $p['sales_orders'], true)) {
-                    $p['sales_orders'][] = $s;
+                $rowPoType = trim((string) ($row['PurchaseOrderType'] ?? ''));
+                if (!empty($poTypes) && !in_array(strtoupper($rowPoType), $poTypes, true)) {
+                    continue;
                 }
+
+                $soList = [];
+                for ($i = 1; $i <= self::SALES_ORDER_FIELDS; $i++) {
+                    $v = $this->displayNumber((string) ($row['zzvbeln' . $i] ?? ''));
+                    if ($v !== '') {
+                        $soList[] = $v;
+                    }
+                }
+                if ($so !== '' && !in_array($so, $soList, true)) {
+                    continue;
+                }
+
+                $materialType = trim((string) ($row['MaterialType'] ?? ''));
+                $matTypeDesc = trim((string) ($row['MatTypeDesc'] ?? ''));
+                $materialGroup = trim((string) ($row['MaterialGroup'] ?? ''));
+                $lineCat = self::classifyMaterial($materialType, $matTypeDesc, $materialGroup);
+                if ($matCat !== 'all' && $lineCat !== $matCat) {
+                    continue;
+                }
+
+                if (!isset($pos[$poNum])) {
+                    $typeName = trim((string) ($row['PurchasingDocumentTypeName'] ?? ''));
+                    if ($typeName === '' && isset($docTypeMap[$rowPoType])) {
+                        $typeName = $docTypeMap[$rowPoType];
+                    }
+
+                    $pos[$poNum] = [
+                        'purchase_order'         => $poNum,
+                        'purchase_order_category'=> trim((string) ($row['PurchaseOrderCategory'] ?? '')),
+                        'purchase_order_type'    => $rowPoType,
+                        'po_type_name'           => $typeName,
+                        'date'                   => $this->sapDate((string) ($row['PurchaseOrderDate'] ?? '')),
+                        'supplier'               => $this->displayNumber((string) ($row['Supplier'] ?? '')),
+                        'supplier_full_name'     => trim((string) ($row['SupplierFullName'] ?? '')),
+                        'company_code'           => trim((string) ($row['CompanyCode'] ?? '')),
+                        'purchasing_org'         => trim((string) ($row['PurchasingOrganization'] ?? '')),
+                        'purchasing_group'       => trim((string) ($row['PurchasingGroup'] ?? '')),
+                        'created_by'             => trim((string) ($row['CreatedByUser'] ?? '')),
+                        'plant'                  => trim((string) ($row['Plant'] ?? '')),
+                        'plants'                 => [],
+                        'items_count'            => 0,
+                        'materials'              => [],
+                        'material_types'         => [],
+                        'mat_categories'         => [],
+                        'mat_type_descs'         => [],
+                        'material_groups'        => [],
+                        'total_qty'              => 0.0,
+                        'unit'                   => trim((string) ($row['PurchaseOrderQuantityUnit'] ?? '')),
+                        'total_value'            => 0.0,
+                        'currency'               => trim((string) ($row['DocumentCurrency'] ?? '')),
+                        'sales_orders'           => [],
+                    ];
+                }
+
+                $p = &$pos[$poNum];
+                $p['items_count']++;
+                $plantVal = trim((string) ($row['Plant'] ?? ''));
+                if ($plantVal !== '' && !in_array($plantVal, $p['plants'], true)) {
+                    $p['plants'][] = $plantVal;
+                }
+                $mat = trim((string) ($row['Material'] ?? ''));
+                if ($mat !== '' && !in_array($mat, $p['materials'], true)) {
+                    $p['materials'][] = $mat;
+                }
+                if ($lineCat !== 'other' && !in_array($lineCat, $p['mat_categories'], true)) {
+                    $p['mat_categories'][] = $lineCat;
+                }
+                if ($materialType !== '' && !in_array($materialType, $p['material_types'], true)) {
+                    $p['material_types'][] = $materialType;
+                }
+                if ($matTypeDesc !== '' && !in_array($matTypeDesc, $p['mat_type_descs'], true)) {
+                    $p['mat_type_descs'][] = $matTypeDesc;
+                }
+                if ($materialGroup !== '' && !in_array($materialGroup, $p['material_groups'], true)) {
+                    $p['material_groups'][] = $materialGroup;
+                }
+                $qty = $this->sapNumber($row['OrderQuantity'] ?? '');
+                $price = $this->sapNumber($row['NetPriceAmount'] ?? '');
+                $p['total_qty'] += $qty;
+                $p['total_value'] += round($qty * $price, 2);
+                foreach ($soList as $s) {
+                    if (!in_array($s, $p['sales_orders'], true)) {
+                        $p['sales_orders'][] = $s;
+                    }
+                }
+                if ($p['currency'] !== '') {
+                    $currencies[$p['currency']] = ($currencies[$p['currency']] ?? 0) + 1;
+                }
+                unset($p);
             }
-            if ($p['currency'] !== '') {
-                $currencies[$p['currency']] = ($currencies[$p['currency']] ?? 0) + 1;
-            }
+        }, $query, $service, $maxRows);
+
+        $fetchError = $pageResult['error'] ?? null;
+        if (is_string($fetchError) && str_starts_with($fetchError, 'No records')) {
+            $fetchError = null;
         }
-        unset($p);
+        if ($fetchError !== null) {
+            return [
+                'records'       => [],
+                'total'         => 0,
+                'totals'        => $emptyTotals,
+                'range'         => $range,
+                'truncated'     => false,
+                'items_fetched' => 0,
+                'error'         => $fetchError,
+            ];
+        }
+
+        $itemsFetched = (int) ($pageResult['row_count'] ?? 0);
+        $truncated = $itemsFetched >= $maxRows;
 
         $records = array_values($pos);
         foreach ($records as &$r) {
@@ -483,6 +522,14 @@ class SapPurchaseOrderService
             $r['material_type'] = implode(', ', $r['material_types']);
             $r['mat_type_desc'] = implode(', ', $r['mat_type_descs']);
             $r['material_group'] = implode(', ', $r['material_groups']);
+            $cats = $r['mat_categories'] ?? [];
+            if (count($cats) > 1) {
+                $r['mat_category'] = 'mixed';
+            } elseif (count($cats) === 1) {
+                $r['mat_category'] = $cats[0];
+            } else {
+                $r['mat_category'] = 'other';
+            }
         }
         unset($r);
 

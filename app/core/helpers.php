@@ -91,13 +91,35 @@ function sap_reports_wants_json(): bool
 }
 
 /*
+ * Persist API audit row (url, status, username, user_id, datetime, ip, response_payload only)
+ */
+function sap_reports_audit_api_response(array|string|null $payload, int $status = 200, ?string $url = null): void
+{
+    static $loaded = false;
+    if (!$loaded) {
+        $serviceFile = base_path('app/services/ApiAuditLogService.php');
+        if (!is_file($serviceFile)) {
+            return;
+        }
+        require_once $serviceFile;
+        $loaded = true;
+    }
+    if (!class_exists('ApiAuditLogService', false)) {
+        return;
+    }
+    ApiAuditLogService::log($status, $payload, $url);
+}
+
+/*
  * JSON error for data calls (a login redirect would reach the page as HTML)
  */
 function sap_reports_json_error(int $status, string $message, string $code): void
 {
+    $payload = ['success' => false, 'code' => $code, 'message' => $message, 'error' => $message, 'data' => []];
+    sap_reports_audit_api_response($payload, $status);
     http_response_code($status);
     header('Content-Type: application/json; charset=utf-8');
-    echo json_encode(['success' => false, 'code' => $code, 'message' => $message, 'error' => $message, 'data' => []], JSON_UNESCAPED_SLASHES);
+    echo json_encode($payload, JSON_UNESCAPED_SLASHES);
     exit;
 }
 

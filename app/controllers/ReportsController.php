@@ -3,7 +3,7 @@
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 03/09/2026
  * DESCRIPTION : Reports controller
- */
+*/
 require_once base_path('app/models/ReportsModel.php');
 
 class ReportsController extends Controller
@@ -580,6 +580,7 @@ class ReportsController extends Controller
         $service = new SapPurchaseOrderService();
         $rangePreset = strtolower(trim((string) ($_GET['range'] ?? 'this_month')));
         $range = SapPurchaseOrderService::resolveRange($rangePreset, (string) ($_GET['from'] ?? ''), (string) ($_GET['to'] ?? ''));
+        $rangePreset = (string) ($range['preset'] ?? $rangePreset);
         $plant = strtoupper(trim((string) ($_GET['plant'] ?? '')));
         $rawSupplier = $_GET['supplier'] ?? $_GET['vendor'] ?? '';
         if (is_array($rawSupplier)) {
@@ -603,18 +604,53 @@ class ReportsController extends Controller
 
         $listColumns = SapPurchaseOrderService::listColumns();
         $detailColumns = SapPurchaseOrderService::columns();
+        $viewMode = strtolower(trim((string) ($_GET['view'] ?? '')));
+        $isCostingView = $viewMode === 'costing';
+        $hasCostService = is_file(base_path('app/services/SapCostService.php'));
+        $hasValidationStatus = is_file(base_path('app/services/PoValidationStatusService.php'));
+        if ($isCostingView && !$hasCostService) {
+            $isCostingView = false;
+        }
+
+        $costingColumns = [];
+        $costingListColumns = [];
+        if ($hasCostService) {
+            require_once base_path('app/services/SapCostService.php');
+            $costingColumns = SapCostService::costingColumns();
+        }
+        if ($hasValidationStatus) {
+            require_once base_path('app/services/PoValidationStatusService.php');
+            $costingListColumns = PoValidationStatusService::costingListColumns();
+        }
 
         if (strtolower((string) ($_GET['export'] ?? '')) === 'csv') {
             if ($mode === 'detail') {
                 $detail = $service->report($input);
-                $records = $detail['records'] ?? [];
-                if ($matCat !== 'all') {
-                    $records = array_values(array_filter(
-                        $records,
-                        static fn (array $r): bool => ($r['mat_category'] ?? '') === $matCat
-                    ));
+                $exportView = strtolower(trim((string) ($_GET['view'] ?? '')));
+                if ($exportView === 'costing' && $hasCostService) {
+                    $soOverride = preg_replace('/\D/', '', (string) ($_GET['so'] ?? '')) ?? '';
+                    $detail = (new SapCostService())->attachToPurchaseOrder(
+                        $detail,
+                        $soOverride !== '' ? [$soOverride] : []
+                    );
+                    $records = $detail['records'] ?? [];
+                    if ($matCat !== 'all') {
+                        $records = array_values(array_filter(
+                            $records,
+                            static fn (array $r): bool => ($r['mat_category'] ?? '') === $matCat
+                        ));
+                    }
+                    $this->sendPurchaseOrderCsv($input, $records, $costingColumns);
+                } else {
+                    $records = $detail['records'] ?? [];
+                    if ($matCat !== 'all') {
+                        $records = array_values(array_filter(
+                            $records,
+                            static fn (array $r): bool => ($r['mat_category'] ?? '') === $matCat
+                        ));
+                    }
+                    $this->sendPurchaseOrderCsv($input, $records);
                 }
-                $this->sendPurchaseOrderCsv($input, $records);
             } else {
                 $listData = $service->listReport([
                     'range'    => $rangePreset,
@@ -631,12 +667,21 @@ class ReportsController extends Controller
             return;
         }
 
+        $listTitle = $isCostingView ? 'PO Costing Validation' : 'Purchase Order Report';
+        $detailTitle = $isCostingView
+            ? ('PO Costing ' . $input)
+            : ('Purchase Order ' . $input);
+        $activeColumns = $mode === 'detail'
+            ? ($isCostingView && $costingColumns !== [] ? $costingColumns : $detailColumns)
+            : ($isCostingView && $costingListColumns !== [] ? $costingListColumns : $listColumns);
+
         $this->view('reports/purchase_order', [
-            'pageTitle'     => $mode === 'detail' ? ('Purchase Order ' . $input) : 'Purchase Order Report',
+            'pageTitle'     => $mode === 'detail' ? $detailTitle : $listTitle,
             'layoutWide'    => true,
             'appShell'      => true,
-            'item'          => ['title' => 'Purchase Order Report'],
+            'item'          => ['title' => $listTitle],
             'report'        => 'purchase-order',
+            'isCostingView' => $isCostingView,
             'mode'          => $mode,
             'purchaseOrder' => $error === null ? $input : '',
             'poInput'       => $input,
@@ -656,8 +701,10 @@ class ReportsController extends Controller
             'matCat'        => $matCat,
             'matCategories' => SapPurchaseOrderService::materialCategories(),
             'docTypes'      => SapPurchaseOrderService::documentTypes(),
-            'columns'       => $mode === 'detail' ? $detailColumns : $listColumns,
+            'columns'       => $activeColumns,
             'detailColumns' => $detailColumns,
+            'costingColumns'=> $costingColumns,
+            'costingListColumns' => $costingListColumns,
             'listColumns'   => $listColumns,
             'extraHead'     => '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>',
         ]);
@@ -694,14 +741,14 @@ class ReportsController extends Controller
         fclose($out);
     }
 
-    private function sendPurchaseOrderCsv(string $po, array $records): void
+    private function sendPurchaseOrderCsv(string $po, array $records, ?array $columns = null): void
     {
         $filename = 'sap-purchase-order-' . ($po !== '' ? $po . '-' : '') . date('Ymd-His') . '.csv';
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="' . $filename . '"');
         $out = fopen('php://output', 'w');
         fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF));
-        $columns = SapPurchaseOrderService::columns();
+        $columns = is_array($columns) && $columns !== [] ? $columns : SapPurchaseOrderService::columns();
         fputcsv($out, array_column($columns, 'label'));
         foreach ($records as $i => $row) {
             $line = [];
@@ -720,50 +767,119 @@ class ReportsController extends Controller
     }
 
     /*
+     * PO Costing Validation workbench — PO lines vs ZCOST expected rates
+     * GET purchase-order/validate?po=1000027905&mat_cat=trims&so=22000914
+     */
+    public function purchaseOrderValidate(): void
+    {
+        if (!is_file(base_path('app/services/PoCostValidationService.php'))) {
+            $message = 'PO costing validation is not deployed on this server.';
+            $this->jsonResponse(['success' => false, 'message' => $message, 'error' => $message, 'data' => []], 503);
+        }
+        require_once base_path('app/services/PoCostValidationService.php');
+        $po = preg_replace('/\D/', '', (string) ($_GET['po'] ?? '')) ?? '';
+        if ($po === '' || !preg_match('/^\d{1,10}$/', $po)) {
+            $message = 'Purchase order must be a number of up to 10 digits.';
+            $this->jsonResponse(['success' => false, 'message' => $message, 'error' => $message, 'data' => []], 422);
+        }
+        $category = strtolower(trim((string) ($_GET['mat_cat'] ?? $_GET['category'] ?? 'all')));
+        $so = preg_replace('/\D/', '', (string) ($_GET['so'] ?? '')) ?? '';
+        try {
+            $payload = (new PoCostValidationService())->validate($po, $category, $so);
+        } catch (Throwable $e) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Validation failed: ' . $e->getMessage(),
+                'error'   => $e->getMessage(),
+                'data'    => [],
+            ], 502);
+        }
+        $this->jsonResponse([
+            'success' => !empty($payload['success']),
+            'message' => $payload['error']
+                ?? (($payload['summary']['exceptions'] ?? 0) > 0
+                    ? (($payload['summary']['exceptions'] ?? 0) . ' exceptions require review')
+                    : 'Validation complete'),
+            'error'   => $payload['error'] ?? null,
+            'data'    => $payload,
+        ], !empty($payload['success']) ? 200 : 502);
+    }
+
+    /*
      * Purchase order header and items as JSON for the report page and the PO drawer (?po=4000006524 or ?list=1)
      */
     public function purchaseOrderData(): void
     {
-        $service = new SapPurchaseOrderService();
-        $po = trim((string) ($_GET['po'] ?? ''));
+        try {
+            @ini_set('memory_limit', '512M');
+            $service = new SapPurchaseOrderService();
+            $po = trim((string) ($_GET['po'] ?? ''));
+            $isCostingView = strtolower(trim((string) ($_GET['view'] ?? ''))) === 'costing';
 
-        if ($po !== '') {
-            if (!preg_match('/^\d{1,10}$/', $po)) {
-                $message = 'Purchase order must be a number of up to 10 digits.';
-                $this->jsonResponse(['success' => false, 'message' => $message, 'error' => $message, 'data' => []], 422);
+            if ($po !== '') {
+                if (!preg_match('/^\d{1,10}$/', $po)) {
+                    $message = 'Purchase order must be a number of up to 10 digits.';
+                    $this->jsonResponse(['success' => false, 'message' => $message, 'error' => $message, 'data' => []], 422);
+                }
+
+                $payload = $service->report($po);
+                if ($payload['error'] !== null) {
+                    $this->jsonResponse([
+                        'success' => false,
+                        'message' => 'Unable to fetch SAP data: ' . $payload['error'],
+                        'error'   => $payload['error'],
+                        'data'    => [],
+                    ], 502);
+                }
+                if ($isCostingView && is_file(base_path('app/services/SapCostService.php'))) {
+                    require_once base_path('app/services/SapCostService.php');
+                    $soOverride = preg_replace('/\D/', '', (string) ($_GET['so'] ?? '')) ?? '';
+                    $extraSos = $soOverride !== '' ? [$soOverride] : [];
+                    $payload = (new SapCostService())->attachToPurchaseOrder($payload, $extraSos);
+                    $payload['columns'] = SapCostService::costingColumns();
+                }
+                $this->jsonResponse([
+                    'success' => true,
+                    'message' => $payload['records'] === [] ? 'No purchase order found.' : 'Live SAP data',
+                    'data'    => $payload,
+                ]);
             }
 
-            $payload = $service->report($po);
+            // List mode (condition-wise)
+            $payload = $service->listReport($_GET);
             if ($payload['error'] !== null) {
+                $status = str_contains((string) $payload['error'], 'date') ? 422 : 502;
                 $this->jsonResponse([
                     'success' => false,
                     'message' => 'Unable to fetch SAP data: ' . $payload['error'],
                     'error'   => $payload['error'],
                     'data'    => [],
-                ], 502);
+                ], $status);
+            }
+            if ($isCostingView && is_file(base_path('app/services/PoValidationStatusService.php'))) {
+                require_once base_path('app/services/PoValidationStatusService.php');
+                $payload = (new PoValidationStatusService())->enrichListPayload($payload);
+                $payload['columns'] = PoValidationStatusService::costingListColumns();
             }
             $this->jsonResponse([
                 'success' => true,
-                'message' => $payload['records'] === [] ? 'No purchase order found.' : 'Live SAP data',
+                'message' => $payload['records'] === [] ? 'No purchase orders match the selected criteria.' : 'Live SAP data',
                 'data'    => $payload,
             ]);
-        }
-
-        // List mode (condition-wise)
-        $payload = $service->listReport($_GET);
-        if ($payload['error'] !== null) {
+        } catch (Throwable $e) {
+            $message = $e->getMessage();
+            if (stripos($message, 'Allowed memory size') !== false || stripos($message, 'memory') !== false) {
+                $message = 'This date range returns too much data. Narrow the Custom Date From/To range and try again.';
+            } else {
+                $message = 'Unable to load purchase orders. Please try a shorter date range.';
+            }
             $this->jsonResponse([
                 'success' => false,
-                'message' => 'Unable to fetch SAP data: ' . $payload['error'],
-                'error'   => $payload['error'],
+                'message' => $message,
+                'error'   => $message,
                 'data'    => [],
-            ], 502);
+            ], 500);
         }
-        $this->jsonResponse([
-            'success' => true,
-            'message' => $payload['records'] === [] ? 'No purchase orders match the selected criteria.' : 'Live SAP data',
-            'data'    => $payload,
-        ]);
     }
 
     /*

@@ -15,6 +15,11 @@ $home = sap_reports_evol_url('portal_dashboard.php');
 $logoUrl = sap_reports_logo_url();
 $catalogHome = url('/');
 $pageUrl = url('purchase-order');
+$isCostingView = !empty($isCostingView);
+$pageHeading = $isCostingView
+    ? ($isList ? 'PO Costing Validation' : ('PO Costing Workbench · ' . e($purchaseOrder)))
+    : ($isList ? 'Purchase Order Report' : ('PO ' . e($purchaseOrder)));
+$isCostingBulk = $isCostingView && $isList;
 $plant = (string) ($plant ?? '');
 $plants = is_array($plants ?? null) ? $plants : [];
 $range = is_array($range ?? null) ? $range : ['preset' => 'this_month', 'from' => '', 'to' => '', 'label' => 'This Month'];
@@ -34,6 +39,7 @@ $columns = is_array($columns ?? null) ? $columns : [];
 $colCount = count($columns);
 
 $csvUrl = $pageUrl . '?' . http_build_query(array_filter([
+    'view'     => $isCostingView ? 'costing' : '',
     'po'       => $purchaseOrder,
     'range'    => $rangePreset,
     'from'     => $range['from'] ?? '',
@@ -44,7 +50,7 @@ $csvUrl = $pageUrl . '?' . http_build_query(array_filter([
     'po_type'  => $poType,
     'mat_cat'  => $matCat !== 'all' ? $matCat : '',
     'export'   => 'csv',
-], static fn ($v): bool => $v !== ''));
+], static fn ($v): bool => $v !== null && $v !== ''));
 
 $detailCards = [
     ['id' => 'items',     'label' => 'Items',           'icon' => 'format_list_numbered', 'tone' => 'indigo'],
@@ -54,20 +60,34 @@ $detailCards = [
     ['id' => 'so',        'label' => 'Sales Orders',    'icon' => 'receipt_long',         'tone' => 'amber'],
 ];
 
-$listCards = [
-    ['id' => 'pos',       'label' => 'Purchase Orders', 'icon' => 'receipt_long',         'tone' => 'indigo'],
-    ['id' => 'items',     'label' => 'Total Items',     'icon' => 'format_list_numbered', 'tone' => 'teal'],
-    ['id' => 'qty',       'label' => 'Total Order Qty', 'icon' => 'straighten',           'tone' => 'sky'],
-    ['id' => 'value',     'label' => 'Total Net Value', 'icon' => 'payments',             'tone' => 'mint'],
-    ['id' => 'suppliers', 'label' => 'Suppliers',       'icon' => 'storefront',           'tone' => 'amber'],
-];
+$listCards = $isCostingView
+    ? [
+        ['id' => 'pos',           'label' => 'Purchase Orders',    'icon' => 'receipt_long',  'tone' => 'indigo'],
+        ['id' => 'validated',     'label' => 'Validated',          'icon' => 'verified',      'tone' => 'mint'],
+        ['id' => 'in_review',     'label' => 'In Review',          'icon' => 'pending_actions','tone' => 'sky'],
+        ['id' => 'pending_val',   'label' => 'Pending Validation', 'icon' => 'hourglass_top', 'tone' => 'amber'],
+        ['id' => 'not_started',   'label' => 'Not Started',        'icon' => 'radio_button_unchecked', 'tone' => 'indigo'],
+        ['id' => 'rejected',      'label' => 'Rejected',           'icon' => 'cancel',        'tone' => 'rose'],
+    ]
+    : [
+        ['id' => 'pos',       'label' => 'Purchase Orders', 'icon' => 'receipt_long',         'tone' => 'indigo'],
+        ['id' => 'items',     'label' => 'Total Items',     'icon' => 'format_list_numbered', 'tone' => 'teal'],
+        ['id' => 'qty',       'label' => 'Total Order Qty', 'icon' => 'straighten',           'tone' => 'sky'],
+        ['id' => 'value',     'label' => 'Total Net Value', 'icon' => 'payments',             'tone' => 'mint'],
+        ['id' => 'suppliers', 'label' => 'Suppliers',       'icon' => 'storefront',           'tone' => 'amber'],
+    ];
 ?>
-<div class="rpt-app is-purchase-order <?= $isList ? 'is-po-list' : 'is-po-detail' ?>">
+<?php $isCostingWorkbench = $isCostingView && !$isList; ?>
+<div class="rpt-app is-purchase-order <?= $isList ? 'is-po-list' : 'is-po-detail' ?><?= $isCostingWorkbench ? ' is-costing-workbench' : '' ?><?= $isCostingBulk ? ' is-costing-bulk' : '' ?><?= $isCostingView ? ' is-costing-view' : '' ?>">
     <?php
         $loaderIcon = 'receipt';
-        $loaderSteps = $isList
-            ? ['Connecting to SAP…', 'Fetching purchase orders…', 'Reading items & suppliers…', 'Preparing report…']
-            : ['Connecting to SAP…', 'Fetching purchase order ' . ($purchaseOrder ?: '…'), 'Reading items & sales orders…', 'Preparing report…'];
+        $loaderSteps = $isCostingBulk
+            ? ['Connecting to SAP…', 'Fetching purchase orders…', 'Preparing bulk validation…']
+            : ($isList
+                ? ['Connecting to SAP…', 'Fetching purchase orders…', 'Reading items & suppliers…', 'Preparing report…']
+                : ($isCostingWorkbench
+                    ? ['Connecting to SAP…', 'Fetching purchase order…', 'Loading ZCOST sheet…', 'Validating costs…']
+                    : ['Connecting to SAP…', 'Fetching purchase order ' . ($purchaseOrder ?: '…'), 'Reading items & sales orders…', 'Preparing report…']));
         require base_path('app/views/partials/loader.php');
     ?>
 
@@ -82,12 +102,86 @@ $listCards = [
             <a href="<?= e($home) ?>" class="rpt-home" aria-label="Portal home" title="Portal Dashboard">
                 <span class="material-icons-round">home</span>
             </a>
-            <div class="rpt-name"><?= $isList ? 'Purchase Order Report' : ('PO ' . e($purchaseOrder)) ?></div>
+            <div class="rpt-name"><?= $pageHeading ?></div>
         </div>
 
-        <?php if ($isList): ?>
+        <?php if ($isCostingBulk): ?>
+            <?php
+                $bulkPresets = is_array($presets ?? null) && $presets !== [] ? $presets : SapPurchaseOrderService::rangePresets();
+                $bulkRangePreset = (string) ($rangePreset ?? ($range['preset'] ?? 'this_month'));
+                if (!array_key_exists($bulkRangePreset, $bulkPresets)) {
+                    $bulkRangePreset = 'this_month';
+                }
+                $bulkMatHeader = (string) ($matCat ?? 'all');
+                $dateMin = date('Y-m-d', strtotime('-' . SapPurchaseOrderService::MAX_RANGE_DAYS . ' days'));
+                $dateMax = date('Y-m-d');
+            ?>
+            <form class="rpt-search prod-filters po-filters pcb-header-filters" id="pcbFilterForm" autocomplete="off" novalidate>
+                <input type="hidden" name="view" value="costing">
+                <label class="rpt-field rpt-field-range" title="PO creation date range">
+                    <span class="material-icons-round">date_range</span>
+                    <select id="pcbRange" name="range" aria-label="PO date range">
+                        <?php foreach ($bulkPresets as $key => $label): ?>
+                            <option value="<?= e($key) ?>"<?= $key === $bulkRangePreset ? ' selected' : '' ?>><?= e($label) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <div class="date-custom pcb-header-custom" id="pcbCustomDates"<?= $bulkRangePreset === 'custom' ? '' : ' hidden' ?> style="display: <?= $bulkRangePreset === 'custom' ? 'flex' : 'none' ?>; gap: 6px;">
+                    <label class="rpt-field rpt-field-date" title="From date (max <?= (int) SapPurchaseOrderService::MAX_RANGE_DAYS ?> days)">
+                        <span class="date-cap">From</span>
+                        <input type="date" id="pcbFrom" name="from" min="<?= e($dateMin) ?>" max="<?= e($dateMax) ?>" value="<?= e($range['from'] ?? '') ?>" aria-label="From date">
+                    </label>
+                    <label class="rpt-field rpt-field-date" title="To date (max <?= (int) SapPurchaseOrderService::MAX_RANGE_DAYS ?> days)">
+                        <span class="date-cap">To</span>
+                        <input type="date" id="pcbTo" name="to" min="<?= e($dateMin) ?>" max="<?= e($dateMax) ?>" value="<?= e($range['to'] ?? '') ?>" aria-label="To date">
+                    </label>
+                </div>
+                <label class="rpt-field rpt-field-mat-cat" title="Material type">
+                    <span class="material-icons-round">category</span>
+                    <select id="pcbMat" name="mat_cat" aria-label="Material type">
+                        <option value="all"<?= !in_array($bulkMatHeader, ['fabric', 'trims'], true) ? ' selected' : '' ?>>All Materials</option>
+                        <option value="fabric"<?= $bulkMatHeader === 'fabric' ? ' selected' : '' ?>>Fabric</option>
+                        <option value="trims"<?= $bulkMatHeader === 'trims' ? ' selected' : '' ?>>Trims</option>
+                    </select>
+                </label>
+                <label class="rpt-field rpt-field-supplier" title="Vendor">
+                    <span class="material-icons-round">storefront</span>
+                    <select id="pcbSupplier" name="supplier" aria-label="Vendor">
+                        <option value="">All Vendors</option>
+                        <?php foreach ($suppliers as $code): ?>
+                            <option value="<?= e($code) ?>"<?= $supplier === $code ? ' selected' : '' ?>>Supplier <?= e($code) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label class="rpt-field rpt-field-status" title="Validation status">
+                    <span class="material-icons-round">verified</span>
+                    <select id="pcbValStatus" aria-label="Validation status">
+                        <option value="all">All Status</option>
+                        <option value="PASSED">Passed</option>
+                        <option value="EXCEPTION">Exception</option>
+                        <option value="PENDING">Pending</option>
+                    </select>
+                </label>
+                <label class="rpt-field po-direct-search pcb-header-search" title="Search PO number">
+                    <span class="material-icons-round">search</span>
+                    <input type="search" id="pcbPoSearch" value="" placeholder="Search PO #" inputmode="numeric" maxlength="10" autocomplete="off" aria-label="Search purchase order number">
+                </label>
+                <button type="button" class="rpt-btn po-direct-search-btn" id="pcbPoSearchBtn" title="Open purchase order">
+                    <span class="material-icons-round">arrow_forward</span>
+                </button>
+                <button type="submit" class="rpt-btn" id="pcbFetchBtn" title="Fetch POs">
+                    <span class="material-icons-round">download</span>
+                </button>
+                <button type="button" class="rpt-btn rpt-btn-ghost" id="pcbResetBtn" title="Reset filters">
+                    <span class="material-icons-round">restart_alt</span>
+                </button>
+            </form>
+        <?php elseif ($isList): ?>
             <!-- Condition-wise filter form for PO List -->
             <form class="rpt-search prod-filters po-filters" method="get" action="<?= e($pageUrl) ?>" id="poFilterForm" novalidate>
+                <?php if ($isCostingView): ?>
+                    <input type="hidden" name="view" value="costing">
+                <?php endif; ?>
                 <!-- Date Range Preset -->
                 <label class="rpt-field rpt-field-range" title="PO creation date range">
                     <span class="material-icons-round">date_range</span>
@@ -97,6 +191,15 @@ $listCards = [
                         <?php endforeach; ?>
                     </select>
                 </label>
+
+                <!-- Custom dates stay hidden; modal collects From/To (max 100 days) -->
+                <?php
+                    $poDateMin = date('Y-m-d', strtotime('-' . SapPurchaseOrderService::MAX_RANGE_DAYS . ' days'));
+                    $poDateMax = date('Y-m-d');
+                    $poMaxDays = (int) SapPurchaseOrderService::MAX_RANGE_DAYS;
+                ?>
+                <input type="hidden" name="from" id="poFromHidden" value="<?= e($rangePreset === 'custom' ? ($range['from'] ?? '') : '') ?>"<?= $rangePreset === 'custom' ? '' : ' disabled' ?>>
+                <input type="hidden" name="to" id="poToHidden" value="<?= e($rangePreset === 'custom' ? ($range['to'] ?? '') : '') ?>"<?= $rangePreset === 'custom' ? '' : ' disabled' ?>>
 
                 <!-- Material category: All / Fabric / Trims -->
                 <label class="rpt-field rpt-field-mat-cat" title="Filter by Fabric, Trims, or All materials">
@@ -220,35 +323,36 @@ $listCards = [
                     </div>
                 </div>
 
-                <!-- Custom Date Inputs (shown only when Custom Date is picked - up to 6 months) -->
-                <div class="date-custom" data-date-custom<?= $rangePreset === 'custom' ? '' : ' hidden' ?> style="display: <?= $rangePreset === 'custom' ? 'flex' : 'none' ?>; gap: 6px;">
-                    <label class="rpt-field rpt-field-date" title="From date (within last 6 months)">
-                        <span class="date-cap">From</span>
-                        <input type="date" name="from" min="<?= e(date('Y-m-d', strtotime('-186 days'))) ?>" max="<?= e(date('Y-m-d')) ?>" value="<?= e($range['from'] ?? '') ?>" aria-label="From date">
-                    </label>
-                    <label class="rpt-field rpt-field-date" title="To date (within last 6 months)">
-                        <span class="date-cap">To</span>
-                        <input type="date" name="to" min="<?= e(date('Y-m-d', strtotime('-186 days'))) ?>" max="<?= e(date('Y-m-d')) ?>" value="<?= e($range['to'] ?? '') ?>" aria-label="To date">
-                    </label>
-                </div>
                 <!-- Direct PO Search -->
-                <label class="rpt-field" title="Search particular PO Number to view its details" style="max-width: 140px;">
+                <label class="rpt-field po-direct-search" title="Search particular PO Number to view its details">
                     <span class="material-icons-round">search</span>
-                    <input id="po" name="po" value="" placeholder="Search PO #" inputmode="numeric" maxlength="10" autocomplete="off">
+                    <input id="po" name="po" value="" placeholder="Search PO #" inputmode="numeric" maxlength="10" autocomplete="off" aria-label="Search purchase order number">
                 </label>
+                <button type="submit" class="rpt-btn po-direct-search-btn" id="poDirectSearchBtn" title="Open purchase order">
+                    <span class="material-icons-round">arrow_forward</span>
+                </button>
             </form>
         <?php else: ?>
-            <!-- Detail view header with Back to List & PO Search -->
+            <!-- Detail / Workbench header with Back to List & PO Search -->
             <div style="display: flex; align-items: center; gap: 10px;">
-                <a href="<?= e($pageUrl) ?>" class="po-back-nav" title="Back to Purchase Orders List">
+                <a href="<?= e($pageUrl . ($isCostingView ? '?view=costing' : '')) ?>" class="po-back-nav" title="Back to Bulk Validation">
                     <span class="material-icons-round">arrow_back</span>
-                    <span>PO List</span>
+                    <span><?= $isCostingView ? 'Bulk List' : 'PO List' ?></span>
                 </a>
                 <form class="rpt-search" method="get" action="<?= e($pageUrl) ?>" id="poFilterForm" novalidate>
+                    <?php if ($isCostingView): ?>
+                        <input type="hidden" name="view" value="costing">
+                    <?php endif; ?>
                     <label class="rpt-field">
                         <span class="material-icons-round">receipt</span>
                         <input id="po" name="po" value="<?= e($purchaseOrder) ?>" placeholder="Purchase order" inputmode="numeric" maxlength="10" autocomplete="off" required>
                     </label>
+                    <?php if ($isCostingView): ?>
+                        <label class="rpt-field" title="Sales order for ZCOST sheet (used when PO has no linked SO)">
+                            <span class="material-icons-round">sell</span>
+                            <input id="so" name="so" value="<?= e($salesOrder) ?>" placeholder="Sales Order #" inputmode="numeric" maxlength="10" autocomplete="off">
+                        </label>
+                    <?php endif; ?>
                     <button class="rpt-btn" type="submit" title="Load report">
                         <span class="material-icons-round">sync</span>
                     </button>
@@ -262,12 +366,56 @@ $listCards = [
         <?php require base_path('app/views/partials/header_nav_right.php'); ?>
     </header>
 
+    <?php if ($isList && !$isCostingBulk): ?>
+        <?php
+            $poDateMin = $poDateMin ?? date('Y-m-d', strtotime('-' . SapPurchaseOrderService::MAX_RANGE_DAYS . ' days'));
+            $poDateMax = $poDateMax ?? date('Y-m-d');
+            $poMaxDays = $poMaxDays ?? (int) SapPurchaseOrderService::MAX_RANGE_DAYS;
+        ?>
+        <div class="modal-backdrop po-custom-modal" id="poCustomDateModal" hidden data-max-days="<?= (int) $poMaxDays ?>">
+            <div class="modal-card po-custom-modal-card" role="dialog" aria-modal="true" aria-labelledby="poCustomDateTitle">
+                <div class="modal-header">
+                    <div>
+                        <span class="modal-kicker po-custom-modal-kicker">Purchase Order</span>
+                        <h3 id="poCustomDateTitle">Custom Date</h3>
+                        <p>Choose From and To within the last <?= (int) $poMaxDays ?> days.</p>
+                    </div>
+                    <button type="button" class="modal-close" id="poCustomDateClose" title="Close" aria-label="Close">
+                        <span class="material-icons-round">close</span>
+                    </button>
+                </div>
+                <div class="modal-body po-custom-modal-body">
+                    <div class="po-custom-modal-fields">
+                        <label class="po-custom-modal-field">
+                            <span class="date-cap">From</span>
+                            <input type="date" id="poCustomModalFrom" min="<?= e($poDateMin) ?>" max="<?= e($poDateMax) ?>" value="<?= e($rangePreset === 'custom' ? ($range['from'] ?? '') : '') ?>" aria-label="From date">
+                        </label>
+                        <label class="po-custom-modal-field">
+                            <span class="date-cap">To</span>
+                            <input type="date" id="poCustomModalTo" min="<?= e($poDateMin) ?>" max="<?= e($poDateMax) ?>" value="<?= e($rangePreset === 'custom' ? ($range['to'] ?? '') : '') ?>" aria-label="To date">
+                        </label>
+                    </div>
+                    <p class="po-custom-modal-hint" id="poCustomDateHint">Maximum range: <?= (int) $poMaxDays ?> days</p>
+                    <p class="po-custom-modal-error" id="poCustomDateError" hidden></p>
+                    <div class="po-custom-modal-actions">
+                        <button type="button" class="rpt-btn rpt-btn-ghost" id="poCustomDateCancel">Cancel</button>
+                        <button type="button" class="rpt-btn" id="poCustomDateApply">
+                            <span class="material-icons-round">check</span>
+                            <span>Apply &amp; Load</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    <?php endif; ?>
+
     <main class="rpt-main">
         <div class="rpt-alert" id="poAlert" hidden></div>
 
-        <?php if ($isList): ?>
+        <?php if ($isCostingBulk): ?>
+            <?php require base_path('app/views/reports/partials/po_costing_bulk.php'); ?>
+        <?php elseif ($isList): ?>
             <!-- ===================== PO LIST VIEW ===================== -->
-            <!-- 5 KPI Summary Stat Cards for PO List -->
             <div class="rpt-stats po-stat-row">
                 <?php foreach ($listCards as $card): ?>
                     <article class="rpt-stat tone-<?= e($card['tone']) ?>">
@@ -283,6 +431,8 @@ $listCards = [
                 <?php endforeach; ?>
             </div>
 
+        <?php elseif ($isCostingWorkbench): ?>
+            <?php require base_path('app/views/reports/partials/po_costing_workbench.php'); ?>
         <?php else: ?>
             <!-- ===================== PO DETAIL VIEW ===================== -->
             <section class="po-hero" id="poHero">
@@ -344,6 +494,9 @@ $listCards = [
             </div>
         <?php endif; ?>
 
+        <?php if ($isCostingWorkbench || $isCostingBulk): ?>
+            <!-- Costing bulk / workbench render their own tables -->
+        <?php else: ?>
         <!-- Table Toolbar (shared for both list & detail with appropriate columns) -->
         <div class="rpt-table-toolbar">
             <div class="rpt-tb-search">
@@ -495,29 +648,55 @@ $listCards = [
                 </button>
             </div>
         </div>
+        <?php endif; /* not costing workbench */ ?>
     </main>
 
     <?php require base_path('app/views/partials/footer.php'); ?>
 </div>
 
+<?php
+$pcbCurrentUser = trim((string) (
+    $_SESSION['username']
+    ?? $_SESSION['user_name']
+    ?? $_SESSION['name']
+    ?? $_SESSION['email']
+    ?? ''
+));
+?>
 <script type="application/json" id="poConfig"><?= json_encode([
-    'mode'        => $mode,
-    'po'          => $purchaseOrder,
-    'range'       => $range,
-    'plant'       => $plant,
-    'supplier'    => $supplier,
-    'suppliers'   => $suppliers,
-    'salesOrder'  => $salesOrder,
-    'poType'      => $poType,
-    'matCat'      => $matCat,
-    'presetDates' => $presetDates,
-    'dataUrl'     => url('purchase-order/data'),
-    'pageUrl'     => $pageUrl,
-    'columns'     => $columns,
+    'mode'               => $mode,
+    'po'                 => $purchaseOrder,
+    'range'              => $range,
+    'rangeError'         => $rangeError,
+    'plant'              => $plant,
+    'supplier'           => $supplier,
+    'suppliers'          => $suppliers,
+    'salesOrder'         => $salesOrder,
+    'poType'             => $poType,
+    'matCat'             => $matCat,
+    'presetDates'        => $presetDates,
+    'dataUrl'            => url('purchase-order/data'),
+    'validateUrl'        => url('purchase-order/validate'),
+    'pageUrl'            => $pageUrl,
+    'view'               => $isCostingView ? 'costing' : '',
+    'isCostingView'      => $isCostingView,
+    'isCostingWorkbench' => $isCostingWorkbench,
+    'isCostingBulk'      => $isCostingBulk,
+    'columns'            => $columns,
+    'currentUser'        => $pcbCurrentUser,
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
 <script src="<?= e(asset('js/loader.js')) ?>"></script>
+<?php if ($isCostingWorkbench): ?>
+<script src="<?= e(asset('js/po-costing-workbench.js')) ?>"></script>
+<?php elseif ($isCostingBulk): ?>
+<script src="<?= e(asset('js/po-costing-bulk.js')) ?>"></script>
+<?php else: ?>
 <script src="<?= e(asset('js/po-report.js')) ?>"></script>
-<?php $prefTableKey = $isList ? 'purchase_order_list_table' : 'purchase_order_table'; require base_path('app/views/partials/table_preferences.php'); ?>
+<?php
+    $prefTableKey = $isList ? 'purchase_order_list_table' : 'purchase_order_table';
+    require base_path('app/views/partials/table_preferences.php');
+?>
 <script src="<?= e(asset('js/table-columns.js')) ?>"></script>
 <script src="<?= e(asset('js/excel-export.js')) ?>"></script>
 <script src="<?= e(asset('js/purchase-order.js')) ?>"></script>
+<?php endif; ?>

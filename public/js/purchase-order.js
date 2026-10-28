@@ -19,6 +19,17 @@
     const $ = (id) => document.getElementById(id);
     const spinner = $('rptSpinner');
     const isList = cfg.mode === 'list';
+    const viewParam = String(cfg.view || '').trim();
+
+    function poPageHref(params) {
+        const qs = new URLSearchParams();
+        if (viewParam) qs.set('view', viewParam);
+        Object.entries(params || {}).forEach(([k, v]) => {
+            if (v !== undefined && v !== null && String(v) !== '') qs.set(k, String(v));
+        });
+        const q = qs.toString();
+        return q ? `${cfg.pageUrl}?${q}` : cfg.pageUrl;
+    }
 
     function showSpinner(on) {
         if (spinner) spinner.hidden = !on;
@@ -211,7 +222,7 @@
             openDropdown(false);
             if (val !== oldVal) {
                 showSpinner(true);
-                form.submit();
+                form.requestSubmit();
             }
         });
 
@@ -373,7 +384,7 @@
             openDropdown(false);
             if (val !== oldVal) {
                 showSpinner(true);
-                form.submit();
+                form.requestSubmit();
             }
         });
 
@@ -506,86 +517,241 @@
         if (!form) return;
 
         const rangeSelect = form.querySelector('[data-range-select]');
-        const customDateBlock = form.querySelector('[data-date-custom]');
-        const fromInput = form.querySelector('[name="from"]');
-        const toInput = form.querySelector('[name="to"]');
+        const fromHidden = $('poFromHidden') || form.querySelector('[name="from"]');
+        const toHidden = $('poToHidden') || form.querySelector('[name="to"]');
         const poSearchInput = form.querySelector('#po');
+        const presetDates = cfg.presetDates || {};
+        const modal = $('poCustomDateModal');
+        const modalFrom = $('poCustomModalFrom');
+        const modalTo = $('poCustomModalTo');
+        const modalError = $('poCustomDateError');
+        const modalApply = $('poCustomDateApply');
+        const modalCancel = $('poCustomDateCancel');
+        const modalClose = $('poCustomDateClose');
+        let lastNonCustomRange = rangeSelect && rangeSelect.value !== 'custom'
+            ? rangeSelect.value
+            : 'this_month';
 
-        if (rangeSelect && customDateBlock) {
+        function ymdDaysAgo(days) {
+            const d = new Date();
+            d.setHours(0, 0, 0, 0);
+            d.setDate(d.getDate() - days);
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
+        }
+
+        function maxCustomDays() {
+            const raw = parseInt(modal?.getAttribute('data-max-days') || '100', 10);
+            return Number.isFinite(raw) && raw > 0 ? raw : 100;
+        }
+
+        function daysBetweenYmd(fromYmd, toYmd) {
+            const a = new Date(`${fromYmd}T00:00:00`);
+            const b = new Date(`${toYmd}T00:00:00`);
+            if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return null;
+            return Math.floor((b.getTime() - a.getTime()) / 86400000) + 1;
+        }
+
+        function setCustomDateError(message) {
+            if (!modalError) return;
+            if (!message) {
+                modalError.hidden = true;
+                modalError.textContent = '';
+                return;
+            }
+            modalError.textContent = message;
+            modalError.hidden = false;
+        }
+
+        function validateModalDates() {
+            const fVal = modalFrom ? modalFrom.value.trim() : '';
+            const tVal = modalTo ? modalTo.value.trim() : '';
+            const maxDays = maxCustomDays();
+            setCustomDateError('');
+            if (!fVal || !tVal) {
+                setCustomDateError(!fVal ? 'Select a From date.' : 'Select a To date.');
+                (!fVal ? modalFrom : modalTo)?.focus();
+                return false;
+            }
+            if (fVal > tVal) {
+                setCustomDateError('To date must be on or after From date.');
+                modalTo?.focus();
+                return false;
+            }
+            const minYmd = ymdDaysAgo(maxDays);
+            if (fVal < minYmd) {
+                setCustomDateError(`Select dates within the last ${maxDays} days.`);
+                modalFrom?.focus();
+                return false;
+            }
+            const span = daysBetweenYmd(fVal, tVal);
+            if (span !== null && span > maxDays) {
+                setCustomDateError(`Custom Date allows a maximum of ${maxDays} days.`);
+                modalTo?.focus();
+                return false;
+            }
+            return true;
+        }
+
+        function setHiddenCustomDates(enabled, fromVal, toVal) {
+            if (fromHidden) {
+                fromHidden.disabled = !enabled;
+                if (enabled && fromVal !== undefined) fromHidden.value = fromVal;
+            }
+            if (toHidden) {
+                toHidden.disabled = !enabled;
+                if (enabled && toVal !== undefined) toHidden.value = toVal;
+            }
+        }
+
+        function openCustomDateModal() {
+            if (!modal) return;
+            setCustomDateError('');
+            const today = ymdDaysAgo(0);
+            if (modalFrom) modalFrom.value = (fromHidden?.value || modalFrom.value || today);
+            if (modalTo) modalTo.value = (toHidden?.value || modalTo.value || today);
+            modal.hidden = false;
+            document.body.classList.add('po-modal-open');
+            setTimeout(() => modalFrom?.focus(), 40);
+        }
+
+        function closeCustomDateModal({ revertSelect = false } = {}) {
+            if (!modal) return;
+            modal.hidden = true;
+            document.body.classList.remove('po-modal-open');
+            setCustomDateError('');
+            if (revertSelect && rangeSelect && rangeSelect.value === 'custom') {
+                rangeSelect.value = lastNonCustomRange || 'this_month';
+            }
+        }
+
+        function applyCustomDatesAndLoad() {
+            if (!validateModalDates()) return;
+            const fVal = modalFrom.value.trim();
+            const tVal = modalTo.value.trim();
+            if (rangeSelect) rangeSelect.value = 'custom';
+            setHiddenCustomDates(true, fVal, tVal);
+            closeCustomDateModal({ revertSelect: false });
+            showSpinner(true);
+            form.requestSubmit();
+        }
+
+        if (rangeSelect) {
+            if (rangeSelect.value !== 'custom') {
+                lastNonCustomRange = rangeSelect.value;
+                setHiddenCustomDates(false);
+            } else {
+                setHiddenCustomDates(true);
+            }
+
             rangeSelect.addEventListener('change', () => {
                 const val = rangeSelect.value;
-                const isCustom = val === 'custom';
-                customDateBlock.style.display = isCustom ? 'flex' : 'none';
-                customDateBlock.hidden = !isCustom;
-                if (!isCustom && cfg.presetDates && cfg.presetDates[val]) {
-                    if (fromInput) fromInput.value = cfg.presetDates[val].from;
-                    if (toInput) toInput.value = cfg.presetDates[val].to;
-                    showSpinner(true);
-                    form.submit();
+                if (val === 'custom') {
+                    openCustomDateModal();
+                    return;
                 }
+                lastNonCustomRange = val;
+                const dates = presetDates[val];
+                if (dates) {
+                    if (fromHidden) fromHidden.value = dates.from || '';
+                    if (toHidden) toHidden.value = dates.to || '';
+                }
+                setHiddenCustomDates(false);
+                closeCustomDateModal({ revertSelect: false });
+                showSpinner(true);
+                form.requestSubmit();
             });
         }
+
+        modalApply?.addEventListener('click', applyCustomDatesAndLoad);
+        modalCancel?.addEventListener('click', () => closeCustomDateModal({ revertSelect: true }));
+        modalClose?.addEventListener('click', () => closeCustomDateModal({ revertSelect: true }));
+        modal?.addEventListener('click', (e) => {
+            if (e.target === modal) closeCustomDateModal({ revertSelect: true });
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && modal && !modal.hidden) {
+                closeCustomDateModal({ revertSelect: true });
+            }
+        });
+        modalFrom?.addEventListener('input', () => setCustomDateError(''));
+        modalTo?.addEventListener('input', () => setCustomDateError(''));
+        modalFrom?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); applyCustomDatesAndLoad(); }
+        });
+        modalTo?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); applyCustomDatesAndLoad(); }
+        });
 
         const matCatSelect = form.querySelector('[data-mat-cat-select]');
         if (matCatSelect) {
             matCatSelect.addEventListener('change', () => {
                 showSpinner(true);
-                form.submit();
+                form.requestSubmit();
             });
         }
 
         bindDocTypeDropdown(form);
         bindSupplierDropdown(form);
 
-        form.addEventListener('submit', (e) => {
-            const typedPo = P.cleanPo(poSearchInput ? poSearchInput.value : '');
-            if (typedPo !== '') {
+        function openPoFromSearch() {
+            if (!poSearchInput) return false;
+            const typedPo = P.cleanPo(poSearchInput.value);
+            poSearchInput.setCustomValidity('');
+            if (typedPo === '') return false;
+            if (!P.validPo(typedPo)) {
+                poSearchInput.setCustomValidity('Purchase order must be a number of up to 10 digits.');
+                poSearchInput.reportValidity();
+                return true;
+            }
+            showSpinner(true);
+            window.location.href = poPageHref({ po: typedPo });
+            return true;
+        }
+
+        if (poSearchInput) {
+            poSearchInput.addEventListener('input', () => {
+                poSearchInput.setCustomValidity('');
+            });
+            poSearchInput.addEventListener('keydown', (e) => {
+                if (e.key !== 'Enter') return;
                 e.preventDefault();
-                if (!P.validPo(typedPo)) {
-                    poSearchInput.setCustomValidity('Purchase order must be a number of up to 10 digits.');
-                    poSearchInput.reportValidity();
-                    return;
-                }
-                showSpinner(true);
-                window.location.href = `${cfg.pageUrl}?po=${encodeURIComponent(typedPo)}`;
+                openPoFromSearch();
+            });
+        }
+
+        window.addEventListener('pageshow', (e) => {
+            if (fromHidden) fromHidden.disabled = rangeSelect?.value !== 'custom';
+            if (toHidden) toHidden.disabled = rangeSelect?.value !== 'custom';
+            if (poSearchInput) poSearchInput.disabled = false;
+            if (e && e.persisted) showSpinner(false);
+        });
+
+        form.addEventListener('submit', (e) => {
+            if (openPoFromSearch()) {
+                e.preventDefault();
+                showSpinner(false);
                 return;
             }
 
             if (rangeSelect && rangeSelect.value === 'custom') {
-                const fVal = fromInput ? fromInput.value.trim() : '';
-                const tVal = toInput ? toInput.value.trim() : '';
+                const fVal = fromHidden ? fromHidden.value.trim() : '';
+                const tVal = toHidden ? toHidden.value.trim() : '';
                 if (!fVal || !tVal) {
                     e.preventDefault();
-                    if (!fVal && fromInput) {
-                        fromInput.setCustomValidity('Select a From date.');
-                        fromInput.reportValidity();
-                        fromInput.focus();
-                    } else if (toInput) {
-                        toInput.setCustomValidity('Select a To date.');
-                        toInput.reportValidity();
-                        toInput.focus();
-                    }
+                    showSpinner(false);
+                    openCustomDateModal();
                     return;
                 }
-                const minAllowed = new Date();
-                minAllowed.setDate(minAllowed.getDate() - 186);
-                minAllowed.setHours(0, 0, 0, 0);
-                const fromD = new Date(fVal);
-                if (fromD < minAllowed) {
-                    e.preventDefault();
-                    fromInput.setCustomValidity('Select dates within the last 6 months.');
-                    fromInput.reportValidity();
-                    fromInput.focus();
-                    return;
-                }
-                const toD = new Date(tVal);
-                if (fromD > toD) {
-                    e.preventDefault();
-                    toInput.setCustomValidity('To date must be on or after From date.');
-                    toInput.reportValidity();
-                    toInput.focus();
-                    return;
-                }
+                setHiddenCustomDates(true);
+            } else {
+                setHiddenCustomDates(false);
+            }
+
+            if (poSearchInput && !String(poSearchInput.value || '').trim()) {
+                poSearchInput.disabled = true;
             }
 
             showSpinner(true);
@@ -609,7 +775,7 @@
             case 'sno':
                 return `<td class="num sno">${index + 1}</td>`;
             case 'purchase_order':
-                return `<td><a href="${cfg.pageUrl}?po=${P.esc(rec.purchase_order)}" class="po-num-link" data-po-open="${P.esc(rec.purchase_order)}" title="Open Purchase Order ${P.esc(rec.purchase_order)}"><span class="po-item-tag is-link"><i class="fas fa-file-invoice"></i> ${P.esc(rec.purchase_order)}</span></a></td>`;
+                return `<td><a href="${P.esc(poPageHref({ po: rec.purchase_order }))}" class="po-num-link" data-po-open="${P.esc(rec.purchase_order)}" title="Open Purchase Order ${P.esc(rec.purchase_order)}"><span class="po-item-tag is-link"><i class="fas fa-file-invoice"></i> ${P.esc(rec.purchase_order)}</span></a></td>`;
             case 'date':
                 return `<td>${P.fmtDate(rec.date)}</td>`;
             case 'plant':
@@ -639,9 +805,24 @@
                 return `<td class="po-col-sos"><div class="po-sos-inline">${P.soChips(rec.sales_orders, 3)}</div></td>`;
             case 'created_by':
                 return `<td>${P.dash(rec.created_by)}</td>`;
+            case 'validation_status':
+                return `<td>${statusBadge(rec.validation_status, rec.status_tone, rec.workflow_stage)}</td>`;
+            case 'esign_status':
+                return `<td>${statusBadge(rec.esign_status, rec.status_tone, rec.workflow_stage)}</td>`;
+            case 'workflow_stage':
+                return `<td class="po-workflow-stage" title="${P.esc(rec.workflow_stage || '')}">${P.dash(rec.workflow_stage)}</td>`;
+            case 'status_owner':
+                return `<td>${P.dash(rec.status_owner)}</td>`;
             default:
                 return `<td>${P.dash(rec[key])}</td>`;
         }
+    }
+
+    function statusBadge(label, tone, title) {
+        const text = String(label || '').trim();
+        if (!text || text === '—') return '—';
+        const t = String(tone || 'muted');
+        return `<span class="po-status-badge tone-${P.esc(t)}" title="${P.esc(title || text)}">${P.esc(text)}</span>`;
     }
 
     function renderListRows(records) {
@@ -668,7 +849,18 @@
         if ($('poStat-value')) $('poStat-value').textContent = fmtRound(t.total_value || 0);
         if ($('poStatUnit-value')) $('poStatUnit-value').textContent = t.currency || '';
         if ($('poStat-suppliers')) $('poStat-suppliers').textContent = fmtRound(t.suppliers_count || 0);
-        if ($('poListTotalBadge')) $('poListTotalBadge').textContent = `${fmtRound(t.pos_count || 0)} Purchase Orders found`;
+        if ($('poStat-validated')) $('poStat-validated').textContent = fmtRound(t.status_validated || t.status_completed || 0);
+        if ($('poStat-in_review')) $('poStat-in_review').textContent = fmtRound(t.status_in_review || 0);
+        if ($('poStat-pending_val')) $('poStat-pending_val').textContent = fmtRound(t.status_pending || 0);
+        if ($('poStat-not_started')) $('poStat-not_started').textContent = fmtRound(t.status_not_started || 0);
+        if ($('poStat-rejected')) $('poStat-rejected').textContent = fmtRound(t.status_rejected || 0);
+        if ($('poListTotalBadge')) {
+            const validated = Number(t.status_validated || t.status_completed || 0);
+            const pending = Number(t.status_pending || 0) + Number(t.status_in_review || 0);
+            $('poListTotalBadge').textContent = cfg.isCostingView
+                ? `${fmtRound(t.pos_count || 0)} POs · ${fmtRound(validated)} validated · ${fmtRound(pending)} pending`
+                : `${fmtRound(t.pos_count || 0)} Purchase Orders found`;
+        }
     }
 
     let listChartInstances = [];
@@ -885,18 +1077,46 @@
         });
     }
 
+    function sectionChip(section) {
+        const s = String(section || '').toLowerCase();
+        const tone = s === 'fabric' ? 'is-type' : (s === 'trim' || s === 'packing' ? 'is-group' : 'is-type-desc');
+        return `<span class="po-mat-chip ${tone}">${P.dash(section)}</span>`;
+    }
+
     function renderDetailCell(key, rec, index) {
         switch (key) {
             case 'sno': return `<td class="num sno">${index + 1}</td>`;
+            case 'section': return `<td>${sectionChip(rec.section)}</td>`;
             case 'item': return `<td><span class="po-item-tag">${P.dash(rec.item)}</span></td>`;
             case 'material': return `<td class="rpt-mat">${P.dash(rec.material)}</td>`;
             case 'description': return `<td class="po-desc" title="${P.esc(rec.description)}">${P.dash(rec.description)}</td>`;
             case 'material_type': return `<td><span class="po-mat-chip is-type">${P.dash(rec.material_type)}</span></td>`;
             case 'mat_type_desc': return `<td>${P.dash(rec.mat_type_desc)}</td>`;
             case 'material_group': return `<td><span class="po-mat-chip is-group">${P.dash(rec.material_group)}</span></td>`;
-            case 'order_qty': return `<td class="num"><span class="qty-val">${P.qty(rec.order_qty)}</span></td>`;
-            case 'net_price': return `<td class="num"><span class="qty-val">${P.money(rec.net_price)}</span></td>`;
-            case 'net_value': return `<td class="num po-value"><span class="qty-val">${P.money(rec.net_value)}</span></td>`;
+            case 'order_qty':
+            case 'net':
+            case 'waste':
+            case 'gross':
+            case 'convr':
+                return `<td class="num"><span class="qty-val">${P.qty(rec[key])}</span></td>`;
+            case 'net_price':
+            case 'purp':
+            case 'freight':
+            case 'duty':
+            case 'fin_cost':
+            case 'rate':
+            case 'sell_price':
+            case 'making':
+            case 'overhead':
+            case 'markup':
+            case 'subtot':
+            case 'total_fr':
+                return `<td class="num"><span class="qty-val">${P.money(rec[key])}</span></td>`;
+            case 'net_value':
+            case 'total_inr':
+                return `<td class="num po-value"><span class="qty-val">${P.money(rec[key])}</span></td>`;
+            case 'sales_order':
+                return `<td class="po-col-sos">${rec.sales_order ? P.soChips([rec.sales_order]) : '—'}</td>`;
             case 'sales_orders': return `<td class="po-col-sos">${P.soChips(rec.sales_orders)}</td>`;
             default: return `<td>${P.dash(rec[key])}</td>`;
         }
@@ -1259,6 +1479,18 @@
 
     if (isList) {
         bindListFilterControls();
+
+        if (cfg.rangeError) {
+            const alertBox = $('poAlert');
+            if (alertBox) {
+                alertBox.textContent = String(cfg.rangeError);
+                alertBox.hidden = false;
+            }
+            showMessage(P.esc(String(cfg.rangeError)));
+            showSpinner(false);
+            return;
+        }
+
         const params = new URLSearchParams({
             list: '1',
             range: cfg.range?.preset || '',
@@ -1271,6 +1503,7 @@
             mat_cat: cfg.matCat || 'all',
             _: String(Date.now()),
         });
+        if (cfg.view) params.set('view', cfg.view);
 
         fetch(`${cfg.dataUrl}?${params.toString()}`, {
             headers: { Accept: 'application/json' },
@@ -1379,15 +1612,34 @@
                 bindControls();
                 if (!records.length) {
                     $('poHeroSub').textContent = 'Not found in SAP';
-                    showMessage(`No purchase order <b>${P.esc(cfg.po)}</b> was found in SAP.`);
+                    const costingHint = data.costing?.error
+                        ? `<br><span class="po-muted">${P.esc(data.costing.error)}</span>`
+                        : '';
+                    showMessage(`No purchase order <b>${P.esc(cfg.po)}</b> was found in SAP.${costingHint}`);
                     return;
                 }
                 const h = data.header || {};
                 totals = data.totals || {};
                 allDetailRecords = records;
-                document.title = `EVOLV | Purchase Order ${h.purchase_order}`;
+                const titlePrefix = cfg.isCostingView ? 'PO Costing' : 'Purchase Order';
+                document.title = `EVOLV | ${titlePrefix} ${h.purchase_order || cfg.po}`;
                 fillHero(h, totals);
                 fillDetailStats(data);
+                const alertBox = $('poAlert');
+                if (cfg.isCostingView && data.costing?.error && !data.costing_mode) {
+                    if (alertBox) {
+                        alertBox.textContent = data.costing.error;
+                        alertBox.hidden = false;
+                    }
+                } else if (cfg.isCostingView && data.costing_mode && alertBox) {
+                    alertBox.hidden = true;
+                }
+                if (cfg.isCostingView && data.costing_mode && detailMatCatSelect) {
+                    const fabricOpt = detailMatCatSelect.querySelector('option[value="fabric"]');
+                    const trimsOpt = detailMatCatSelect.querySelector('option[value="trims"]');
+                    if (fabricOpt) fabricOpt.textContent = 'Fabric costing';
+                    if (trimsOpt) trimsOpt.textContent = 'Trim / Packing';
+                }
                 applyDetailCategory(detailMatCatSelect?.value || cfg.matCat || 'all');
             })
             .catch((err) => {
