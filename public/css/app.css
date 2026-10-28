@@ -6746,7 +6746,7 @@ body.hub-modal-open { overflow: hidden; }
 .hub-modal-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 1200;
+    z-index: 1400;
     display: none;
     align-items: center;
     justify-content: center;
@@ -6755,7 +6755,14 @@ body.hub-modal-open { overflow: hidden; }
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
 }
-.hub-modal-backdrop.is-open { display: flex; }
+.hub-modal-backdrop.is-open,
+.hub-modal-backdrop[style*="display: flex"],
+.hub-modal-backdrop[style*="display:flex"] {
+    display: flex !important;
+}
+.hub-modal-backdrop[hidden] {
+    display: none !important;
+}
 .hub-modal-card {
     width: min(720px, 100%);
     background: #fff;
@@ -6848,7 +6855,18 @@ body.hub-modal-open { overflow: hidden; }
     font-weight: 700;
     letter-spacing: .04em;
     text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 999px;
     color: #94a3b8;
+    background: #f1f5f9;
+}
+.hub-access-chip.is-on em {
+    color: #15803d;
+    background: #dcfce7;
+}
+.hub-access-chip.is-off em {
+    color: #b91c1c;
+    background: #fee2e2;
 }
 .hub-admin-actions {
     display: flex;

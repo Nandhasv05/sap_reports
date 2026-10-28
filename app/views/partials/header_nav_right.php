@@ -22,12 +22,12 @@ if ($userLower === 'kayal') {
 }
 
 $accessModules = [
+    'utilization' => 'Utilization Report',
     'fabric' => 'Fabric Utilization',
     'trims' => 'Trims Utilization',
     'production' => 'Production Report',
     'procurement' => 'Procurement Report',
     'purchase-order' => 'Purchase Order Report',
-    'utilization' => 'Utilization Report',
 ];
 ?>
 <div class="rpt-bar-right hub-header-right">
