@@ -456,6 +456,36 @@ class SalesController extends Controller
     }
 
     /**
+     * Step 1 for Fabric Sale Order:
+     * ZI_SalesApi_HUB filtered by CreationDate range
+     * e.g. CreationDate ge datetime'2026-09-25T00:00:00' and CreationDate lt datetime'2026-09-26T00:00:00'
+     */
+    public function ordersByDate(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        header('Pragma: no-cache');
+        header('Expires: 0');
+
+        $from = trim((string) ($_GET['from'] ?? $_GET['from_date'] ?? ''));
+        $to = trim((string) ($_GET['to'] ?? $_GET['to_date'] ?? $from));
+        if ($from === '') {
+            $from = date('Y-m-d', strtotime('-1 day'));
+        }
+        if ($to === '') {
+            $to = $from;
+        }
+
+        $result = $this->sapSalesService->listOrdersByDateRange($from, $to);
+        $status = !empty($result['success']) ? 200 : 422;
+        if (!empty($result['error']) && empty($result['orders'])) {
+            $status = 502;
+        }
+        http_response_code($status);
+        echo json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+
+    /**
      * Live ZI_SalesApi_HUB lines for one sales order (dashboard charts + table).
      */
     public function salesApiHubData(): void

@@ -103,7 +103,8 @@ final class TablePreferenceService
 
         $hidden = $payload['hiddenColumns'] ?? [];
         $error = self::listError($hidden, $known);
-        if ($error === null && array_intersect($hidden, TableColumnRegistry::LOCKED) !== []) {
+        $locked = TableColumnRegistry::lockedIds($definition);
+        if ($error === null && array_intersect($hidden, $locked) !== []) {
             $error = 'Locked columns cannot be hidden.';
         }
         if ($error !== null) {
@@ -146,7 +147,7 @@ final class TablePreferenceService
     {
         $known = TableColumnRegistry::columnIds($definition);
         $saved = array_values(array_intersect(array_unique(array_filter($order, 'is_string')), $known));
-        $locked = array_values(array_intersect($known, TableColumnRegistry::LOCKED));
+        $locked = array_values(array_intersect($known, TableColumnRegistry::lockedIds($definition)));
         $columnOrder = array_values(array_unique(array_merge($locked, $saved)));
         foreach ($known as $i => $id) {
             if (in_array($id, $columnOrder, true)) {

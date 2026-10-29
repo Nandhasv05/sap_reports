@@ -567,6 +567,55 @@ class ReportsController extends Controller
     }
 
     /*
+     * Fabric Sale Order:
+     * Landing → search modal (date presets) → full SO dashboard → 90% fabric offcanvas
+     */
+    public function showFabricSale(): void
+    {
+        require_once base_path('app/services/SapPurchaseOrderService.php');
+        $soQuery = trim((string) ($_GET['so'] ?? ''));
+        // Mutually exclusive: SO search OR date range — never both
+        $autoSearch = $soQuery !== '' || isset($_GET['from']) || isset($_GET['to']) || isset($_GET['range']);
+        $presets = SapPurchaseOrderService::rangePresets();
+        $presetIn = '';
+        $range = ['preset' => '', 'from' => '', 'to' => '', 'label' => ''];
+        if ($soQuery === '') {
+            $presetIn = strtolower(trim((string) ($_GET['range'] ?? '')));
+            if ($autoSearch && $presetIn === '') {
+                $presetIn = 'yesterday';
+            }
+            if ($presetIn !== '' && !array_key_exists($presetIn, $presets)) {
+                $presetIn = 'yesterday';
+            }
+            if ($presetIn !== '') {
+                $range = SapPurchaseOrderService::resolveRange(
+                    $presetIn,
+                    (string) ($_GET['from'] ?? ''),
+                    (string) ($_GET['to'] ?? '')
+                );
+            }
+        }
+        $preset = (string) ($range['preset'] ?? $presetIn);
+
+        $this->view('reports/fabric_sale', [
+            'pageTitle'    => 'Fabric Sale Order',
+            'appShell'     => true,
+            'layoutWide'   => true,
+            'from'         => (string) ($range['from'] ?? ''),
+            'to'           => (string) ($range['to'] ?? ''),
+            'rangePreset'  => $preset,
+            'presets'      => $presets,
+            'presetDates'  => SapPurchaseOrderService::presetDates(),
+            'soQuery'      => $soQuery,
+            'autoSearch'   => $autoSearch,
+            'home'         => sap_reports_evol_url('portal_dashboard.php'),
+            'catalogHome'  => url('/'),
+            'logoUrl'      => sap_reports_logo_url(),
+            'extraScripts' => '',
+        ]);
+    }
+
+    /*
      * Purchase Order report page:
      * - Without ?po: condition-wise PO list view (date range, plant, supplier, quick search)
      * - With ?po=4000006524: single PO details view (Hero, KPI cards, charts, items table)
@@ -794,12 +843,23 @@ class ReportsController extends Controller
                 'data'    => [],
             ], 502);
         }
+        $exceptions = (int) ($payload['summary']['exceptions'] ?? 0);
+        $needsReview = (int) ($payload['summary']['needs_review'] ?? 0);
+        $message = $payload['error'] ?? null;
+        if ($message === null) {
+            if ($exceptions > 0 && $needsReview > 0) {
+                $message = $exceptions . ' exceptions, ' . $needsReview . ' need review';
+            } elseif ($exceptions > 0) {
+                $message = $exceptions . ' exceptions require review';
+            } elseif ($needsReview > 0) {
+                $message = $needsReview . ' items need review';
+            } else {
+                $message = 'Validation complete';
+            }
+        }
         $this->jsonResponse([
             'success' => !empty($payload['success']),
-            'message' => $payload['error']
-                ?? (($payload['summary']['exceptions'] ?? 0) > 0
-                    ? (($payload['summary']['exceptions'] ?? 0) . ' exceptions require review')
-                    : 'Validation complete'),
+            'message' => $message,
             'error'   => $payload['error'] ?? null,
             'data'    => $payload,
         ], !empty($payload['success']) ? 200 : 502);

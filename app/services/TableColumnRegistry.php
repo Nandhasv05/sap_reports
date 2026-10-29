@@ -12,7 +12,7 @@ require_once base_path('app/services/PoValidationStatusService.php');
 
 final class TableColumnRegistry
 {
-    /** Columns that always stay first and visible */
+    /** Columns that always stay first and visible (tables may lock additional ids via define()) */
     public const LOCKED = ['sno'];
 
     /*
@@ -29,6 +29,20 @@ final class TableColumnRegistry
     public static function columnIds(array $definition): array
     {
         return array_column($definition['columns'], 'id');
+    }
+
+    /*
+     * Locked column ids for a table definition (always visible / pinned first)
+     */
+    public static function lockedIds(array $definition): array
+    {
+        $ids = [];
+        foreach ($definition['columns'] as $col) {
+            if (!empty($col['locked'])) {
+                $ids[] = (string) $col['id'];
+            }
+        }
+        return $ids !== [] ? $ids : self::LOCKED;
     }
 
     private static function tables(): array
@@ -105,25 +119,102 @@ final class TableColumnRegistry
                 'size1'               => 'SIZE1',
                 'size2'               => 'SIZE2',
             ]),
+            'fabric_sale_table' => self::define([
+                'sno'                  => 'S.No',
+                'so'                   => 'Sale Order',
+                'date'                 => 'Date',
+                'buyer'                => 'Buyer',
+                'customer_group'       => 'Customer Group',
+                'sales_district'       => 'Sales District',
+                'material'             => 'Material',
+                'style'                => 'Description',
+                'orig_material'        => 'Orig. Material',
+                'material_group'       => 'Mat. Group',
+                'material_by_customer' => 'Mat. by Customer',
+                'lines'                => 'Lines',
+                'qty'                  => 'Order Qty',
+                'requested_qty'        => 'Req. Qty',
+                'confd_deliv_qty'      => 'Conf. Deliv Qty',
+                'unit'                 => 'Unit',
+                'unit_price'           => 'Unit Price',
+                'value'                => 'Net Value',
+                'cost'                 => 'Cost',
+                'tax'                  => 'Tax',
+                'currency'             => 'Currency',
+                'status'               => 'Status',
+                'delivery_status'      => 'Delivery Status',
+                'rejection_status'     => 'Rejection Status',
+                'plant'                => 'Plant',
+                'storage_location'     => 'Storage Loc',
+                'shipping_point'       => 'Shipping Point',
+                'shipping_type'        => 'Shipping Type',
+                'route'                => 'Route',
+                'delivery_priority'    => 'Deliv. Priority',
+                'sales_org'            => 'Sales Org',
+                'channel'              => 'Channel',
+                'division'             => 'Division',
+                'so_type'              => 'SO Type',
+                'item_category'        => 'Item Category',
+                'item_type'            => 'Item Type',
+                'incoterms'            => 'Incoterms',
+                'payment_terms'        => 'Payment Terms',
+                'billing_date'         => 'Billing Date',
+                'pricing_date'         => 'Pricing Date',
+                'last_change_date'     => 'Last Change',
+                'created_by'           => 'Created By',
+            ], [
+                'customer_group',
+                'sales_district',
+                'style',
+                'orig_material',
+                'material_group',
+                'material_by_customer',
+                'requested_qty',
+                'confd_deliv_qty',
+                'cost',
+                'tax',
+                'rejection_status',
+                'storage_location',
+                'shipping_type',
+                'route',
+                'delivery_priority',
+                'sales_org',
+                'channel',
+                'division',
+                'so_type',
+                'item_category',
+                'item_type',
+                'incoterms',
+                'payment_terms',
+                'billing_date',
+                'pricing_date',
+                'last_change_date',
+            ], ['so']),
         ];
         return $tables;
     }
 
     /*
-     * Build a definition from id => label pairs (declaration order is the default order)
+     * Build a definition from id => label pairs (declaration order is the default order).
+     * $extraLocked pins additional columns with sno (always visible / first).
      */
-    private static function define(array $labels, array $defaultHidden = []): array
+    private static function define(array $labels, array $defaultHidden = [], array $extraLocked = []): array
     {
+        $lockedIds = array_values(array_unique(array_merge(self::LOCKED, $extraLocked)));
         $columns = [];
         foreach ($labels as $id => $label) {
-            $columns[] = ['id' => (string) $id, 'label' => (string) $label, 'locked' => in_array($id, self::LOCKED, true)];
+            $columns[] = [
+                'id'     => (string) $id,
+                'label'  => (string) $label,
+                'locked' => in_array((string) $id, $lockedIds, true),
+            ];
         }
-        $known = array_keys($labels);
+        $known = array_map('strval', array_keys($labels));
         return [
             'columns'       => $columns,
             'defaultHidden' => array_values(array_filter(
                 $defaultHidden,
-                static fn ($id): bool => in_array($id, $known, true) && !in_array($id, self::LOCKED, true)
+                static fn ($id): bool => in_array($id, $known, true) && !in_array($id, $lockedIds, true)
             )),
         ];
     }

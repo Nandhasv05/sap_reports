@@ -54,6 +54,7 @@
         if ($('pcwKpiItems')) $('pcwKpiItems').textContent = qty(s.po_items || 0);
         if ($('pcwKpiPassed')) $('pcwKpiPassed').textContent = qty(s.passed || 0);
         if ($('pcwKpiExceptions')) $('pcwKpiExceptions').textContent = qty(s.exceptions || 0);
+        if ($('pcwKpiReview')) $('pcwKpiReview').textContent = qty(s.needs_review || 0);
         if ($('pcwKpiValue')) {
             const cur = s.currency === 'INR' ? '₹ ' : '';
             $('pcwKpiValue').textContent = cur + money(s.total_po_value || 0);
@@ -64,8 +65,14 @@
 
     function statusPill(status) {
         const st = String(status || '').toUpperCase();
-        const cls = st === 'PASS' ? 'is-pass' : 'is-fail';
-        return `<span class="pcw-pill ${cls}">${esc(st || '—')}</span>`;
+        let cls = 'is-fail';
+        let label = st || '—';
+        if (st === 'PASS') cls = 'is-pass';
+        else if (st === 'NEEDS_REVIEW') {
+            cls = 'is-review';
+            label = 'NEEDS REVIEW';
+        }
+        return `<span class="pcw-pill ${cls}">${esc(label)}</span>`;
     }
 
     function varianceCell(pct) {
@@ -92,7 +99,7 @@
                     <td>${dash(r.po_item)}</td>
                     <td class="pcw-mat">${dash(r.material)}</td>
                     <td title="${esc(r.description)}">${dash(r.description)}</td>
-                    <td>${dash(r.sales_order)}</td>
+                    <td title="${esc((r.quotations || []).join(', ') || r.quotation || '')}">${dash(r.sales_order)}${r.quotation ? `<div class="pcw-sub">Q ${esc(r.quotation)}</div>` : ''}</td>
                     <td class="num">${qty(r.po_qty)}</td>
                     <td title="${esc(r.costing_ref)}">${dash(r.costing_ref)}</td>
                     <td class="num">${money(r.expected_unit_cost)}</td>
@@ -128,7 +135,10 @@
 
         if (quote) {
             quote.innerHTML =
-                dlRow('Quotation / Costing Ref', dash(r.costing_ref)) +
+                dlRow('Quotation No.', dash(r.quotation || (r.quotations || [])[0])) +
+                dlRow('Costing Ref', dash(r.costing_ref)) +
+                dlRow('ZCOST Material / Item', dash(r.cost_item || r.cost_material)) +
+                dlRow('ZCOST Description (Maktx)', dash(r.cost_description)) +
                 dlRow('Quoted Unit Cost', '₹ ' + money(r.expected_unit_cost)) +
                 dlRow('Currency', dash(r.quoted_currency || 'INR')) +
                 dlRow('UOM', dash(r.quoted_uom || r.unit)) +
@@ -138,6 +148,10 @@
             po.innerHTML =
                 dlRow('PO Number', dash(r.purchase_order)) +
                 dlRow('PO Item', dash(r.po_item)) +
+                dlRow('Material Code', dash(r.material)) +
+                dlRow('Material Group', dash(r.material_group)) +
+                dlRow('Material Description', dash(r.description)) +
+                dlRow('Sales Order', dash(r.sales_order)) +
                 dlRow('PO Unit Cost', '₹ ' + money(r.po_unit_cost)) +
                 dlRow('Currency', dash(r.currency || 'INR')) +
                 dlRow('UOM', dash(r.unit)) +

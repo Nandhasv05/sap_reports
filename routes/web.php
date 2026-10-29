@@ -28,6 +28,8 @@ $router->get('sales/procurement-pr', [SalesController::class, 'procurementPrData
 $router->get('sales/bom', [SalesController::class, 'bomData']);
 $router->get('sales/material-api', [SalesController::class, 'materialApiData']);
 $router->get('sales/sales-api', [SalesController::class, 'salesApiHubData']);
+$router->get('sales/orders-by-date', [SalesController::class, 'ordersByDate']);
+$router->get('fabric-sale', [ReportsController::class, 'showFabricSale']);
 $router->get('sale', function () {
     header('Location: ' . url('sales'));
     exit;

@@ -119,8 +119,15 @@
 
     function statusBadge(st) {
         const s = String(st || 'PENDING').toUpperCase();
-        const cls = s === 'PASSED' ? 'is-pass' : (s === 'EXCEPTION' ? 'is-fail' : 'is-pending');
-        return `<span class="pcb-badge ${cls}">${esc(s)}</span>`;
+        let cls = 'is-pending';
+        let label = s;
+        if (s === 'PASSED') cls = 'is-pass';
+        else if (s === 'EXCEPTION') cls = 'is-fail';
+        else if (s === 'NEEDS_REVIEW') {
+            cls = 'is-review';
+            label = 'NEEDS REVIEW';
+        }
+        return `<span class="pcb-badge ${cls}">${esc(label)}</span>`;
     }
 
     /*****
@@ -156,17 +163,22 @@
     function normalizeRow(rec) {
         const po = String(rec.purchase_order || '');
         const cached = itemCache[po];
-        let passed = 0, exceptions = 0, pending = 0;
+        let passed = 0, exceptions = 0, needsReview = 0, pending = 0;
         let validationStatus = 'PENDING';
         let lastValidated = '';
         let validatedBy = '';
         if (cached && Array.isArray(cached.records)) {
             cached.records.forEach((r) => {
-                if (r.status === 'PASS') passed++;
+                const st = String(r.status || '').toUpperCase();
+                if (st === 'PASS') passed++;
+                else if (st === 'NEEDS_REVIEW') needsReview++;
                 else exceptions++;
             });
             pending = 0;
-            validationStatus = exceptions > 0 ? 'EXCEPTION' : (passed > 0 ? 'PASSED' : 'PENDING');
+            if (exceptions > 0) validationStatus = 'EXCEPTION';
+            else if (needsReview > 0) validationStatus = 'NEEDS_REVIEW';
+            else if (passed > 0) validationStatus = 'PASSED';
+            else validationStatus = 'PENDING';
             lastValidated = cached._validated_at || '';
             validatedBy = cached._validated_by || '';
         } else {
@@ -179,6 +191,7 @@
             _mat_label: materialTypeLabel(rec),
             _passed: passed,
             _exceptions: exceptions,
+            _needs_review: needsReview,
             _pending: pending,
             _validation_status: validationStatus,
             _last_validated: lastValidated,

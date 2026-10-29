@@ -51,6 +51,10 @@ if (!in_array($wbMat, ['all', 'fabric', 'trims'], true)) {
             <span class="material-icons-round">error</span>
             <div><b id="pcwKpiExceptions">—</b><small>Exceptions</small></div>
         </article>
+        <article class="pcw-kpi is-review">
+            <span class="material-icons-round">rate_review</span>
+            <div><b id="pcwKpiReview">—</b><small>Needs Review</small></div>
+        </article>
         <article class="pcw-kpi is-value">
             <span class="material-icons-round">payments</span>
             <div><b id="pcwKpiValue">—</b><small>Total PO Value</small></div>

@@ -266,7 +266,11 @@ ${colsXml}
         const opts = options || {};
         const data = readTable(table);
         const now = stamp(new Date());
-        const count = (document.getElementById('rptTableCount')?.textContent || '').trim();
+        const count = (
+            document.getElementById('rptTableCount')?.textContent
+            || document.getElementById('fsoTableCount')?.textContent
+            || ''
+        ).trim();
         const blob = buildXlsx({
             title: opts.title || document.title,
             note: `Exported ${now.text}${count ? ' · ' + count : ''}`,

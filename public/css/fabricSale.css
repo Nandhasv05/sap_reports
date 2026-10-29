@@ -1,0 +1,289 @@
+/*
+ * AUTHOR : NANDHAKUMAR S V
+ * DATE : 29/10/2026
+ * DESCRIPTION : Dedicated Styles for Fabric Sale Order Report
+ *               KPI Cards (4 columns), Table Scroll Body & Sticky Headers, Column Filters
+ */
+
+/* 1. KPI CARDS (4 Column Grid Layout) */
+.rpt-app.is-fabric-sale .fso-stat-row,
+.fso-stat-row {
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 16px !important;
+    width: 100% !important;
+}
+
+.rpt-app.is-fabric-sale .fso-stat-row .rpt-stat {
+    display: flex !important;
+    align-items: center !important;
+    gap: 16px !important;
+    padding: 16px 20px !important;
+    background: #ffffff !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 14px !important;
+    box-shadow: 0 2px 8px -2px rgba(15, 23, 42, 0.05), 0 0 0 1px rgba(15, 23, 42, 0.03) !important;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease !important;
+}
+
+.rpt-app.is-fabric-sale .fso-stat-row .rpt-stat:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 8px 20px -4px rgba(15, 23, 42, 0.1), 0 0 0 1px rgba(14, 116, 144, 0.15) !important;
+    border-color: #cbd5e1 !important;
+}
+
+.rpt-app.is-fabric-sale .fso-stat-row .rpt-stat .material-icons-round {
+    width: 48px !important;
+    height: 48px !important;
+    border-radius: 12px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 24px !important;
+    flex-shrink: 0 !important;
+}
+
+.rpt-app.is-fabric-sale .fso-stat-row .rpt-stat.tone-indigo .material-icons-round {
+    background: #e0e7ff !important;
+    color: #4338ca !important;
+}
+
+.rpt-app.is-fabric-sale .fso-stat-row .rpt-stat.tone-teal .material-icons-round {
+    background: #ccfbf1 !important;
+    color: #0f766e !important;
+}
+
+.rpt-app.is-fabric-sale .fso-stat-row .rpt-stat.tone-sky .material-icons-round {
+    background: #e0f2fe !important;
+    color: #0284c7 !important;
+}
+
+.rpt-app.is-fabric-sale .fso-stat-row .rpt-stat.tone-mint .material-icons-round {
+    background: #dcfce7 !important;
+    color: #16a34a !important;
+}
+
+.rpt-app.is-fabric-sale .fso-stat-row .stat-value-wrap {
+    display: flex !important;
+    align-items: baseline !important;
+    flex-wrap: nowrap !important;
+}
+
+.rpt-app.is-fabric-sale .fso-stat-row .stat-value-wrap b {
+    font-size: 24px !important;
+    font-weight: 700 !important;
+    color: #0f172a !important;
+    letter-spacing: -0.02em !important;
+    line-height: 1.15 !important;
+    white-space: nowrap !important;
+}
+
+.rpt-app.is-fabric-sale .fso-stat-row .po-stat-unit {
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    color: #64748b !important;
+    margin-left: 6px !important;
+    font-style: normal !important;
+}
+
+.rpt-app.is-fabric-sale .fso-stat-row small {
+    display: block !important;
+    margin-top: 4px !important;
+    font-size: 11.5px !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.05em !important;
+    color: #64748b !important;
+}
+
+@media (max-width: 1200px) {
+    .rpt-app.is-fabric-sale .fso-stat-row,
+    .fso-stat-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+}
+
+@media (max-width: 640px) {
+    .rpt-app.is-fabric-sale .fso-stat-row,
+    .fso-stat-row {
+        grid-template-columns: 1fr !important;
+    }
+}
+
+/* 2. TABLE WRAPPER & SCROLL BODY MODES */
+.rpt-app.is-fabric-sale .fso-table-wrap {
+    background: #ffffff !important;
+    border: 1px solid #e2e8e4 !important;
+    border-top: 0 !important;
+    border-radius: 0 0 12px 12px !important;
+    position: relative !important;
+}
+
+/* Scroll Body Only Mode: Fixed view height, body scrolls internally */
+.rpt-app.is-fabric-sale .fso-table-wrap.is-scroll-body {
+    max-height: calc(100vh - 265px) !important;
+    min-height: 380px !important;
+    overflow-x: auto !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+}
+
+/* Full Page Scroll / Expanded Table Mode: table height extends, horizontal scroll preserved */
+.rpt-app.is-fabric-sale .fso-table-wrap:not(.is-scroll-body),
+.rpt-app.is-fabric-sale .fso-table-wrap.is-expanded {
+    max-height: none !important;
+    overflow-x: auto !important;
+    overflow-y: visible !important;
+}
+
+/* Table Dimensions */
+.rpt-app.is-fabric-sale .fso-page-table {
+    min-width: 3200px !important;
+    width: 100% !important;
+    border-collapse: separate !important;
+    border-spacing: 0 !important;
+}
+
+/* 3. STICKY HEADERS & FILTER ROW */
+.rpt-app.is-fabric-sale .fso-page-table thead .rpt-header-row th {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 12 !important;
+    background: #ecfeff !important;
+    color: #0e7490 !important;
+    border-bottom: 1px solid #b7e3e9 !important;
+    border-right: 1px solid #d7e0dc !important;
+    padding: 10px 12px !important;
+    box-shadow: 0 1px 0 #b7e3e9 !important;
+}
+
+.rpt-app.is-fabric-sale .fso-page-table thead .rpt-filter-row th {
+    position: sticky !important;
+    top: var(--rpt-header-h, 42px) !important;
+    z-index: 11 !important;
+    background: #f8fafc !important;
+    border-bottom: 2px solid #cbd5d1 !important;
+    border-right: 1px solid #d7e0dc !important;
+    padding: 6px 8px !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04) !important;
+}
+
+/* In Full Page Scroll mode, offset stickies under top bar (56px) and toolbar (~48px) */
+.rpt-app.is-fabric-sale .fso-table-wrap:not(.is-scroll-body) .fso-page-table thead .rpt-header-row th {
+    top: 104px !important;
+}
+
+.rpt-app.is-fabric-sale .fso-table-wrap:not(.is-scroll-body) .fso-page-table thead .rpt-filter-row th {
+    top: calc(104px + var(--rpt-header-h, 42px)) !important;
+}
+
+/* 4. COLUMN FILTERS INPUTS & RESET BUTTON */
+.rpt-app.is-fabric-sale .rpt-col-input-wrap {
+    position: relative !important;
+    display: flex !important;
+    align-items: center !important;
+    width: 100% !important;
+    min-width: 72px !important;
+}
+
+.rpt-app.is-fabric-sale .rpt-col-input {
+    width: 100% !important;
+    height: 28px !important;
+    padding: 3px 22px 3px 8px !important;
+    font-size: 11.5px !important;
+    font-weight: 500 !important;
+    color: #1e293b !important;
+    background: #ffffff !important;
+    border: 1.5px solid #cbd5e1 !important;
+    border-radius: 6px !important;
+    transition: all 0.15s ease !important;
+    outline: none !important;
+}
+
+.rpt-app.is-fabric-sale .rpt-col-input::placeholder {
+    color: #94a3b8 !important;
+    font-weight: 400 !important;
+}
+
+.rpt-app.is-fabric-sale .rpt-col-input:focus {
+    background: #ffffff !important;
+    border-color: #0e7490 !important;
+    box-shadow: 0 0 0 3px rgba(14, 116, 144, 0.15) !important;
+}
+
+.rpt-app.is-fabric-sale .rpt-col-input.has-val {
+    background: #ecfeff !important;
+    border-color: #0e7490 !important;
+    color: #0e7490 !important;
+    font-weight: 600 !important;
+}
+
+.rpt-app.is-fabric-sale .rpt-col-clear {
+    position: absolute !important;
+    right: 5px !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    width: 16px !important;
+    height: 16px !important;
+    border-radius: 50% !important;
+    background: #e2e8f0 !important;
+    color: #64748b !important;
+    border: none !important;
+    display: none;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 11px !important;
+    line-height: 1 !important;
+    cursor: pointer !important;
+    padding: 0 !important;
+    transition: all 0.15s ease !important;
+}
+
+.rpt-app.is-fabric-sale .rpt-col-input.has-val + .rpt-col-clear,
+.rpt-app.is-fabric-sale .rpt-col-input-wrap.has-val .rpt-col-clear {
+    display: inline-flex !important;
+}
+
+.rpt-app.is-fabric-sale .rpt-col-clear:hover {
+    background: #fee2e2 !important;
+    color: #ef4444 !important;
+}
+
+.rpt-app.is-fabric-sale .rpt-col-filter-reset {
+    width: 26px !important;
+    height: 26px !important;
+    border-radius: 6px !important;
+    border: 1.5px solid #cbd5e1 !important;
+    background: #ffffff !important;
+    color: #64748b !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    cursor: pointer !important;
+    font-size: 12px !important;
+    transition: all 0.15s ease !important;
+    margin: 0 auto !important;
+}
+
+.rpt-app.is-fabric-sale .rpt-col-filter-reset:hover {
+    background: #fef2f2 !important;
+    border-color: #fca5a5 !important;
+    color: #ef4444 !important;
+}
+
+/* 5. TOOLBAR BUTTONS & BADGE */
+.rpt-app.is-fabric-sale .fso-table-toolbar .rpt-tb-btn.is-active {
+    border-color: #67e8f9 !important;
+    background: #ecfeff !important;
+    color: #0e7490 !important;
+}
+
+.rpt-app.is-fabric-sale .fso-table-toolbar .rpt-tb-badge {
+    background: #0e7490 !important;
+    color: #ffffff !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    padding: 1px 6px !important;
+    border-radius: 999px !important;
+    margin-left: 4px !important;
+}

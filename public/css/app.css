@@ -7691,12 +7691,14 @@ td[data-hover-type]:hover {
 .pcw-btn-pass { background: #e2e8f0; color: #64748b; }
 .pcw-btn-pass:not(:disabled) { background: #059669; color: #fff; }
 .pcw-btn:disabled { opacity: .55; cursor: not-allowed; }
-.pcw-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.pcw-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
 .pcw-kpi { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 16px; background: #fff; border: 1px solid #e2e8f0; box-shadow: 0 8px 20px rgba(15,23,42,.03); }
 .pcw-kpi .material-icons-round { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: #eef2ff; color: #4338ca; }
 .pcw-kpi.is-pass .material-icons-round { background: #dcfce7; color: #15803d; }
 .pcw-kpi.is-fail .material-icons-round { background: #fee2e2; color: #b91c1c; }
+.pcw-kpi.is-review .material-icons-round { background: #fef3c7; color: #b45309; }
 .pcw-kpi.is-value .material-icons-round { background: #ffedd5; color: #c2410c; }
+.pcw-sub { font-size: 10px; color: #64748b; font-weight: 600; margin-top: 2px; }
 .pcw-kpi b { display: block; font-size: 1.35rem; font-weight: 800; color: #0f172a; line-height: 1.1; }
 .pcw-kpi small { color: #64748b; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
 .pcw-table-wrap { overflow: auto; border: 1px solid #e2e8f0; border-radius: 16px; background: #fff; box-shadow: 0 10px 28px rgba(15,23,42,.04); }
@@ -7712,6 +7714,7 @@ td[data-hover-type]:hover {
 .pcw-pill { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; letter-spacing: .04em; }
 .pcw-pill.is-pass { background: #dcfce7; color: #166534; }
 .pcw-pill.is-fail { background: #fee2e2; color: #991b1b; }
+.pcw-pill.is-review { background: #fef3c7; color: #92400e; }
 .pcw-var.is-good { color: #15803d; font-weight: 700; }
 .pcw-var.is-bad { color: #b91c1c; font-weight: 700; }
 .pcw-mat { font-weight: 700; color: #3730a3; }
@@ -8981,6 +8984,7 @@ body.pcb-offcanvas-open { overflow: hidden; }
 }
 .pcb-badge.is-pass { background: #dcfce7; color: #166534; }
 .pcb-badge.is-fail { background: #fee2e2; color: #991b1b; }
+.pcb-badge.is-review { background: #fef3c7; color: #92400e; }
 .pcb-badge.is-pending { background: #fef3c7; color: #92400e; }
 .pcb-var.is-good { color: #15803d; font-weight: 700; }
 .pcb-var.is-bad { color: #b91c1c; font-weight: 700; }
@@ -9119,4 +9123,487 @@ body.pcb-offcanvas-open { overflow: hidden; }
     .pcw-btn { flex: 1 1 calc(50% - 6px); justify-content: center; }
     .pcw-actions { justify-content: stretch; }
     .pcw-actions .pcw-btn { flex: 1; }
+}
+
+/* ==========================================================================
+   Fabric Sale Order — Production-style lookup → dashboard → 90% offcanvas
+   ========================================================================== */
+.rpt-app.is-fabric-sale {
+    --rpt: #0e7490;
+    --rpt-soft: #cffafe;
+    --fso-accent: #0891b2;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: #f0f9ff;
+}
+.rpt-app.is-fabric-sale .lookup {
+    background:
+        radial-gradient(1200px 500px at 50% -10%, rgba(6, 182, 212, 0.18), transparent 60%),
+        #f0f9ff;
+}
+.rpt-app.is-fabric-sale .lookup-card {
+    border-color: #dbeafe;
+}
+.rpt-app.is-fabric-sale .lookup-submit {
+    background: var(--rpt);
+    border-color: var(--rpt);
+}
+.rpt-app.is-fabric-sale .lookup-submit:hover {
+    filter: brightness(1.06);
+}
+.rpt-app.is-fabric-sale > .hub-footer { margin-top: auto; }
+
+/* Mode: lookup = search card only; details = full-screen report + header filters */
+.rpt-app.is-fabric-sale.is-lookup #fsoLanding { display: flex; }
+.rpt-app.is-fabric-sale.is-lookup #fsoDashboard,
+.rpt-app.is-fabric-sale.is-lookup #fsoHeaderForm { display: none !important; }
+.rpt-app.is-fabric-sale.is-details #fsoLanding { display: none !important; }
+.rpt-app.is-fabric-sale.is-details #fsoDashboard { display: grid; }
+.rpt-app.is-fabric-sale.is-details #fsoHeaderForm { display: flex !important; }
+
+/* PO-style header filters (date + SO search) */
+.rpt-app.is-fabric-sale .fso-header-filters.rpt-search {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-left: 8px;
+    justify-content: flex-end;
+    overflow: visible;
+}
+.rpt-app.is-fabric-sale .fso-header-filters .rpt-field {
+    flex: 0 0 auto;
+    height: 38px;
+    min-width: 0;
+    background: #fff;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.rpt-app.is-fabric-sale .fso-header-filters .rpt-field .material-icons-round {
+    color: #0e7490;
+}
+.rpt-app.is-fabric-sale .fso-header-filters .rpt-field-range {
+    width: 148px;
+    min-width: 148px;
+    flex: 0 0 148px;
+}
+.rpt-app.is-fabric-sale .fso-header-filters .rpt-field select {
+    border: 0;
+    background: transparent;
+    width: 100%;
+    min-width: 0;
+    padding: 9px 0;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    color: #0f172a;
+    cursor: pointer;
+}
+.rpt-app.is-fabric-sale .fso-header-filters .rpt-field select:focus { outline: none; }
+.rpt-app.is-fabric-sale .fso-header-filters .fso-hdr-custom {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 0;
+    flex: 0 0 auto;
+}
+.rpt-app.is-fabric-sale .fso-header-filters .rpt-field-date {
+    width: 168px;
+    min-width: 168px;
+    flex: 0 0 168px;
+    gap: 6px;
+}
+.rpt-app.is-fabric-sale .fso-header-filters .rpt-field-date .date-cap {
+    flex: 0 0 auto;
+    font-size: 10px;
+    font-weight: 700;
+    color: #64748b;
+    text-transform: uppercase;
+}
+.rpt-app.is-fabric-sale .fso-header-filters .rpt-field-date input[type="date"] {
+    flex: 1 1 auto;
+    min-width: 100px;
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+}
+.rpt-app.is-fabric-sale .fso-header-filters .fso-hdr-search {
+    width: 160px;
+    min-width: 140px;
+    max-width: 180px;
+    flex: 0 0 160px;
+}
+.rpt-app.is-fabric-sale .fso-header-filters .po-direct-search-btn {
+    flex: 0 0 auto;
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border-radius: 999px;
+    justify-content: center;
+    background: var(--rpt);
+}
+.rpt-app.is-fabric-sale .fso-header-filters .po-direct-search-btn .material-icons-round { font-size: 18px; }
+.rpt-app.is-fabric-sale .fso-header-filters .rpt-btn-ghost {
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border-radius: 10px;
+    justify-content: center;
+}
+@media (max-width: 900px) {
+    .rpt-app.is-fabric-sale .fso-header-filters.rpt-search {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+    }
+    .rpt-app.is-fabric-sale .fso-header-filters .rpt-field-range,
+    .rpt-app.is-fabric-sale .fso-header-filters .fso-hdr-search {
+        flex: 1 1 140px;
+        width: auto;
+        max-width: none;
+    }
+}
+
+/* Full-screen details */
+.fso-dashboard {
+    width: min(1680px, 100%);
+    margin: 0 auto;
+    padding: 16px 18px 28px;
+    display: grid;
+    gap: 14px;
+    flex: 1;
+}
+.fso-stat-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+.rpt-app.is-fabric-sale .fso-stat-row .rpt-stat.tone-indigo .material-icons-round {
+    background: #cffafe;
+    color: #0e7490;
+}
+
+.fso-table-card {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: visible;
+    display: grid;
+    gap: 0;
+}
+.fso-table-toolbar.rpt-table-toolbar {
+    margin-bottom: 0;
+    border-radius: 12px 12px 0 0;
+    border-bottom: 0;
+    position: sticky;
+    top: 56px;
+    z-index: 20;
+    overflow: visible;
+}
+.fso-table-wrap {
+    overflow: auto;
+    max-height: min(62vh, 680px);
+    background: #fff;
+    border: 1px solid #e2e8e4;
+    border-top: 0;
+    border-radius: 0 0 12px 12px;
+}
+.fso-table-wrap:not(.is-scroll-body),
+.fso-table-wrap.is-expanded {
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: visible;
+}
+.fso-page-table { min-width: 3600px; }
+.rpt-app.is-fabric-sale .fso-page-table thead .rpt-header-row th {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: #ecfeff;
+    color: #0e7490;
+}
+.rpt-app.is-fabric-sale .fso-page-table thead .rpt-filter-row th {
+    position: sticky;
+    top: var(--rpt-header-h, 37px);
+    z-index: 9;
+}
+.rpt-app.is-fabric-sale .fso-table-toolbar .rpt-tb-btn.is-active {
+    border-color: #67e8f9;
+    background: #ecfeff;
+    color: #0e7490;
+}
+.rpt-app.is-fabric-sale #rptColumnToggleDropdown {
+    position: relative;
+    z-index: 40;
+}
+.rpt-app.is-fabric-sale #rptColumnToggleDropdown.is-open .rpt-cat-dd-menu {
+    display: block;
+    max-height: min(70vh, 520px);
+    overflow-y: auto;
+    min-width: 280px;
+    z-index: 50;
+}
+.rpt-app.is-fabric-sale .fso-page-table th.is-sorted-asc .th-content span::after,
+.rpt-app.is-fabric-sale .fso-page-table th.is-sorted-desc .th-content span::after {
+    content: '';
+    display: inline-block;
+    margin-left: 4px;
+    border: 4px solid transparent;
+}
+.rpt-app.is-fabric-sale .fso-page-table th.is-sorted-asc .th-content span::after {
+    border-bottom-color: #0e7490;
+    transform: translateY(-2px);
+}
+.rpt-app.is-fabric-sale .fso-page-table th.is-sorted-desc .th-content span::after {
+    border-top-color: #0e7490;
+    transform: translateY(2px);
+}
+.fso-row { cursor: pointer; transition: background 0.15s ease; }
+.fso-row:hover { background: #f0fdfa; }
+.fso-row.is-active {
+    background: #cffafe;
+    box-shadow: inset 3px 0 0 #0e7490;
+}
+.fso-so-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 0;
+    background: #e0f2fe;
+    color: #0369a1;
+    border-radius: 999px;
+    padding: 3px 10px;
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.fso-so-pill .material-icons-round { font-size: 14px; }
+.fso-so-pill:hover { background: #bae6fd; }
+.fso-mat-pill,
+.fso-plant-pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #f1f5f9;
+    color: #334155;
+    font-size: 12px;
+    font-weight: 600;
+}
+.fso-status {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+}
+.fso-status.is-open { background: #fff7ed; color: #c2410c; }
+.fso-status.is-done { background: #ecfdf5; color: #047857; }
+.fso-table-foot {
+    padding: 10px 16px;
+    font-size: 12px;
+    color: #64748b;
+    border-top: 1px solid #f1f5f9;
+}
+.fso-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+}
+.fso-table th,
+.fso-table td {
+    padding: 9px 12px;
+    border-bottom: 1px solid #f1f5f9;
+    text-align: left;
+    vertical-align: top;
+}
+.fso-table th {
+    background: #f8fafc;
+    font-size: 10.5px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #64748b;
+}
+.fso-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 1100px) {
+    .fso-stat-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+    .fso-stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* 90% fabric utilization offcanvas */
+body.fso-drawer-open { overflow: hidden; }
+.fso-drawer {
+    position: fixed;
+    inset: 0;
+    z-index: 1400;
+}
+.fso-drawer[hidden] { display: none !important; }
+.fso-drawer-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.5);
+    backdrop-filter: blur(3px);
+    opacity: 0;
+    transition: opacity 0.25s ease;
+}
+.fso-drawer-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 90vw;
+    max-width: 90vw;
+    display: flex;
+    flex-direction: column;
+    background: #f8fafc;
+    box-shadow: -20px 0 50px rgba(15, 23, 42, 0.25);
+    transform: translateX(100%);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.fso-drawer.is-open .fso-drawer-backdrop { opacity: 1; }
+.fso-drawer.is-open .fso-drawer-panel { transform: translateX(0); }
+.fso-drawer-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 22px;
+    background: #fff;
+    border-bottom: 1px solid #e2e8f0;
+    border-top: 4px solid #0e7490;
+    flex-shrink: 0;
+}
+.fso-drawer-head-main { min-width: 0; flex: 1; }
+.fso-drawer-head-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+.fso-drawer-open-full {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    border: 1px solid #cffafe;
+    background: #ecfeff;
+    color: #0e7490;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 700;
+}
+.fso-drawer-open-full .material-icons-round { font-size: 16px; }
+.fso-drawer-eyebrow {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #0e7490;
+}
+.fso-drawer-head h2 {
+    margin: 4px 0 0;
+    font-family: Outfit, sans-serif;
+    font-size: 20px;
+    color: #0f172a;
+}
+.fso-drawer-meta {
+    margin: 4px 0 0;
+    font-size: 13px;
+    color: #64748b;
+}
+.fso-drawer-close {
+    border: 0;
+    background: #f1f5f9;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+    color: #475569;
+}
+.fso-drawer-body {
+    flex: 1;
+    overflow: auto;
+    padding: 16px 22px 24px;
+    -webkit-overflow-scrolling: touch;
+}
+.fso-drawer-loading,
+.fso-drawer-empty {
+    padding: 28px;
+    text-align: center;
+    color: #64748b;
+    font-weight: 600;
+}
+.fso-drawer-error {
+    padding: 14px 16px;
+    border-radius: 12px;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: #b91c1c;
+    font-weight: 600;
+}
+.fso-drawer-stats {
+    margin-bottom: 14px;
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 10px;
+}
+.fso-drawer-charts {
+    margin-bottom: 14px;
+}
+.fso-drawer-charts .rpt-chart-body {
+    height: 260px;
+}
+.fso-drawer-toolbar {
+    margin-bottom: 0;
+    border-radius: 12px 12px 0 0;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+}
+.fso-drawer-table-wrap {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-top: 0;
+    border-radius: 0 0 14px 14px;
+    overflow: auto;
+    max-height: min(52vh, 560px);
+    -webkit-overflow-scrolling: touch;
+}
+.fso-drawer-table { min-width: 1600px; }
+.fso-drawer-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #ecfeff;
+    color: #0e7490;
+    white-space: nowrap;
+}
+.fso-so-pill.is-static { cursor: default; pointer-events: none; }
+.fso-page-table .fso-row { cursor: pointer; }
+
+@media (max-width: 1200px) {
+    .fso-drawer-panel { width: 94vw; max-width: 94vw; }
+    .fso-drawer-charts { grid-template-columns: 1fr; }
+    .fso-drawer-charts .rpt-chart-body { height: 220px; }
+    .fso-drawer-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 768px) {
+    .fso-drawer-panel { width: 100vw; max-width: 100vw; }
+    .fso-drawer-head { padding: 12px 14px; flex-wrap: wrap; }
+    .fso-drawer-body { padding: 12px 12px 20px; }
+    .fso-drawer-open-full span:not(.material-icons-round) { display: none; }
+    .fso-drawer-head h2 { font-size: 17px; }
+    .fso-drawer-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .fso-drawer-table-wrap { max-height: min(48vh, 420px); }
+    .fso-drawer-toolbar { flex-wrap: wrap; gap: 8px; }
 }

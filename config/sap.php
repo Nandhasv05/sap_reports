@@ -39,6 +39,20 @@ return [
     'procurement_service' => '/sap/opu/odata/sap/ZBUSINESS_API_SRV/ProcurementDashboardSet',
     'purchase_order_service' => '/sap/opu/odata/sap/ZI_PURCHASEORDERAPI_HUB_CDS/ZI_PurchaseOrderAPI_HUB',
     'cost_service'           => '/sap/opu/odata/sap/ZCOST_SRV/ZCOSTHSet',
+    // Quotation ↔ Sales Order hub (used by PO Costing Step 2)
+    'quotation_service'      => '/sap/opu/odata/sap/ZI_QUOTATIONSALESORDER_HUB_CDS/ZI_QuotationSalesOrder_HUB',
+    /*
+     * PO Material Group text → ZCOST section names (case-insensitive contains match).
+     * Adjust when SAP naming differs from Fabric / Trim / Packing / Special.
+     */
+    'po_cost_section_map'    => [
+        'FABRIC'   => ['Fabric'],
+        'TRIM'     => ['Trim', 'Packing', 'Special'],
+        'TRIMS'    => ['Trim', 'Packing', 'Special'],
+        'ACCESSOR' => ['Trim', 'Packing', 'Special'],
+        'PACK'     => ['Packing'],
+        'SPECIAL'  => ['Special'],
+    ],
     'username'         => 'APIUSER',
     'password'         => 'Api@321',
     'page_size'        => 500,

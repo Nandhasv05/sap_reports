@@ -16,6 +16,7 @@ class SapSalesService
     private array $cfg;
 
     /*
+    /*
      * Constructor
      */
     public function __construct(?SapODataClient $client = null)
@@ -800,7 +801,13 @@ class SapSalesService
         $cost = $this->number($this->field($row, ['Costamount'], 0));
         $isReturn = $this->isReturnItem($row);
 
-        $customer = (string) $this->field($row, ['Purchaseorderbycustomer', 'Materialbycustomer'], '');
+        $customer = (string) $this->field($row, [
+            'SoldToParty',
+            'Soldtoparty',
+            'Customer',
+            'Purchaseorderbycustomer',
+            'Materialbycustomer',
+        ], '');
         if ($customer === '') {
             $group = (string) $this->field($row, ['Customergroup'], '');
             $customer = $group !== '' ? 'Customer Group ' . $group : ('SO ' . $orderNo);
@@ -1008,6 +1015,10 @@ class SapSalesService
             'shipping_point'=> $shippingPoint !== '' ? $shippingPoint : '—',
             'material_group'=> $materialGroup !== '' ? $materialGroup : '—',
             'unit'          => $orderUnit !== '' ? $orderUnit : 'EA',
+            'sales_org'     => (string) $this->field($row, ['SalesOrganization', 'Salesorganization'], '—') ?: '—',
+            'sales_order_type' => (string) $this->field($row, ['SalesOrderType', 'Salesordertype'], '—') ?: '—',
+            'sold_to_party' => (string) $this->field($row, ['SoldToParty', 'Soldtoparty', 'Customer'], '—') ?: '—',
+            'organization_division' => (string) $this->field($row, ['OrganizationDivision', 'Organizationdivision'], $divisionCode) ?: '—',
 
             // Entity ZI_SalesApi_HUB fields
             'storage_location' => $storageLocation !== '' ? $storageLocation : '—',
@@ -1772,6 +1783,7 @@ class SapSalesService
 
         $grouped = [];
         $totalQty = 0.0;
+        $totalValue = 0.0;
         $uniquePlants = [];
         $uniqueCustomers = [];
 
@@ -1786,7 +1798,12 @@ class SapSalesService
             }
 
             $plant = (string) $this->field($row, ['Plant'], '—');
-            $customer = (string) $this->field($row, ['SoldToParty', 'Customer', 'CustomerGroup'], '—');
+            $customer = (string) $this->field($row, [
+                'SoldToParty',
+                'Customer',
+                'PurchaseOrderByCustomer',
+                'CustomerGroup',
+            ], '—');
             if ($plant !== '' && $plant !== '—') {
                 $uniquePlants[$plant] = true;
             }
@@ -1794,8 +1811,24 @@ class SapSalesService
                 $uniqueCustomers[$customer] = true;
             }
 
+            $lineAmount = $this->number($this->field($row, ['NetAmount', 'Netamount'], 0));
+            if ($lineAmount <= 0) {
+                $lineAmount = $this->number($this->field($row, ['Subtotal1Amount', 'Subtotal1amount'], 0));
+            }
+            $lineQty = $this->number($this->field($row, ['OrderQuantity', 'RequestedQuantity', 'Orderquantity'], 0));
+            if ($lineAmount <= 0 && $lineQty > 0) {
+                $unitPrice = $this->number($this->field($row, ['NetPriceAmount', 'Netpriceamount'], 0));
+                $priceQty = max(1.0, $this->number($this->field($row, ['NetPriceQuantity', 'Netpricequantity'], 1)));
+                if ($unitPrice > 0) {
+                    $lineAmount = ($unitPrice / $priceQty) * $lineQty;
+                }
+            }
+            $currency = (string) $this->field($row, ['TransactionCurrency', 'Transactioncurrency'], 'INR');
+            $status = $this->statusLabel($row);
+            $statusCode = strtoupper(trim((string) $this->field($row, ['SdProcessStatus', 'Sdprocessstatus', 'DeliveryStatus'], '')));
+
             if (!isset($grouped[$so])) {
-                $rawDate = (string) $this->field($row, ['CreationDate'], '');
+                $rawDate = (string) $this->field($row, ['CreationDate', 'Creationdate'], '');
                 $formattedDate = '';
                 if (preg_match('/\/Date\((\d+)\)\//', $rawDate, $m)) {
                     $formattedDate = date('d M Y', (int) ($m[1] / 1000));
@@ -1803,22 +1836,80 @@ class SapSalesService
                     $formattedDate = date('d M Y', strtotime($rawDate));
                 }
 
+                $unit = (string) $this->field($row, ['OrderQuantityUnit', 'Orderquantityunit', 'BaseUnit', 'Baseunit'], 'EA');
+                $style = (string) $this->field($row, [
+                    'SalesOrderItemText',
+                    'Salesorderitemtext',
+                    'PurchaseOrderByCustomer',
+                    'Purchaseorderbycustomer',
+                    'MaterialByCustomer',
+                    'Materialbycustomer',
+                ], '—');
                 $grouped[$so] = [
-                    'sales_order'   => $so,
-                    'creation_date' => $formattedDate ?: ($from ? date('d M Y', strtotime($from)) : '—'),
-                    'customer'      => $customer,
-                    'plant'         => $plant,
-                    'material'      => (string) $this->field($row, ['OriginallyRequestedMaterial', 'Material'], '—'),
-                    'created_by'    => (string) $this->field($row, ['CreatedByUser'], '—'),
-                    'lines'         => 0,
-                    'quantity'      => 0.0,
+                    'sales_order'        => $so,
+                    'creation_date'      => $formattedDate ?: ($from ? date('d M Y', strtotime($from)) : '—'),
+                    'customer'           => $customer,
+                    'customer_group'     => (string) $this->field($row, ['CustomerGroup', 'Customergroup'], '—'),
+                    'sales_district'     => (string) $this->field($row, ['SalesDistrict', 'Salesdistrict'], '—'),
+                    'plant'              => $plant,
+                    'material'           => (string) $this->field($row, ['Material', 'OriginallyRequestedMaterial', 'Originallyrequestedmaterial'], '—'),
+                    'style'              => $style !== '' ? $style : '—',
+                    'orig_material'      => (string) $this->field($row, ['OriginallyRequestedMaterial', 'Originallyrequestedmaterial'], '—'),
+                    'material_group'     => (string) $this->field($row, ['MaterialGroup', 'Materialgroup'], '—'),
+                    'material_by_customer' => (string) $this->field($row, ['MaterialByCustomer', 'Materialbycustomer'], '—'),
+                    'created_by'         => (string) $this->field($row, ['CreatedByUser', 'Createdbyuser'], '—'),
+                    'currency'           => $currency !== '' ? $currency : 'INR',
+                    'status'             => $status !== '' ? $status : '—',
+                    'status_code'        => $statusCode,
+                    'delivery_status'    => (string) $this->field($row, ['DeliveryStatus', 'Deliverystatus', 'TotalDeliveryStatus', 'Totaldeliverystatus'], '—'),
+                    'rejection_status'   => (string) $this->field($row, ['SDDocumentRejectionStatus', 'Sddocumentrejectionstatus'], '—'),
+                    'shipping_point'     => (string) $this->field($row, ['ShippingPoint', 'Shippingpoint'], '—'),
+                    'shipping_type'      => (string) $this->field($row, ['ShippingType', 'Shippingtype'], '—'),
+                    'storage_location'   => (string) $this->field($row, ['StorageLocation', 'Storagelocation'], '—'),
+                    'route'              => (string) $this->field($row, ['Route'], '—'),
+                    'delivery_priority'  => (string) $this->field($row, ['DeliveryPriority', 'Deliverypriority'], '—'),
+                    'sales_org'          => (string) $this->field($row, ['SalesOrganization', 'Salesorganization'], '—'),
+                    'distribution_channel' => (string) $this->field($row, ['DistributionChannel', 'Distributionchannel'], '—'),
+                    'division'           => (string) $this->field($row, ['OrganizationDivision', 'Organizationdivision', 'Division'], '—'),
+                    'sales_order_type'   => (string) $this->field($row, ['SalesOrderType', 'Salesordertype'], '—'),
+                    'item_category'      => (string) $this->field($row, ['SalesOrderItemCategory', 'Salesorderitemcategory'], '—'),
+                    'item_type'          => (string) $this->field($row, ['SalesOrderItemType', 'Salesorderitemtype'], '—'),
+                    'unit'               => $unit !== '' ? $unit : 'EA',
+                    'incoterms'          => (string) $this->field($row, ['IncotermsClassification', 'Incotermsclassification'], '—'),
+                    'payment_terms'      => (string) $this->field($row, ['CustomerPaymentTerms', 'Customerpaymentterms'], '—'),
+                    'billing_date'       => $this->formatDateField($row, 'Billingdocumentdate'),
+                    'pricing_date'       => $this->formatDateField($row, 'Pricingdate'),
+                    'last_change_date'   => $this->formatDateField($row, 'Lastchangedate'),
+                    'lines'              => 0,
+                    'quantity'           => 0.0,
+                    'requested_qty'      => 0.0,
+                    'confd_deliv_qty'    => 0.0,
+                    'net_value'          => 0.0,
+                    'cost'               => 0.0,
+                    'unit_price'         => 0.0,
+                    'tax_amount'         => 0.0,
                 ];
             }
 
-            $lineQty = $this->number($this->field($row, ['OrderQuantity', 'RequestedQuantity'], 0));
+            $lineTax = $this->number($this->field($row, ['TaxAmount', 'Taxamount'], 0));
+            $lineCost = $this->number($this->field($row, ['CostAmount', 'Costamount'], 0));
+            $lineReqQty = $this->number($this->field($row, ['RequestedQuantity', 'Requestedquantity'], 0));
+            $lineConfQty = $this->number($this->field($row, ['ConfdDelivQtyInOrderQtyUnit', 'Confddelivqtyinorderqtyunit'], 0));
             $grouped[$so]['lines']++;
             $grouped[$so]['quantity'] += $lineQty;
+            $grouped[$so]['requested_qty'] += $lineReqQty;
+            $grouped[$so]['confd_deliv_qty'] += $lineConfQty;
+            $grouped[$so]['net_value'] += $lineAmount;
+            $grouped[$so]['cost'] += $lineCost;
+            $grouped[$so]['tax_amount'] += $lineTax;
+            if ($status !== '' && $status !== '—') {
+                $grouped[$so]['status'] = $status;
+            }
+            if ($statusCode !== '') {
+                $grouped[$so]['status_code'] = $statusCode;
+            }
             $totalQty += $lineQty;
+            $totalValue += $lineAmount;
         }
 
         $orders = array_values($grouped);
@@ -1828,6 +1919,21 @@ class SapSalesService
 
         foreach ($orders as &$order) {
             $order['quantity'] = round((float) $order['quantity'], 2);
+            $order['requested_qty'] = round((float) ($order['requested_qty'] ?? 0), 2);
+            $order['confd_deliv_qty'] = round((float) ($order['confd_deliv_qty'] ?? 0), 2);
+            $order['net_value'] = round((float) $order['net_value'], 2);
+            $order['cost'] = round((float) ($order['cost'] ?? 0), 2);
+            $order['tax_amount'] = round((float) ($order['tax_amount'] ?? 0), 2);
+            $qty = (float) $order['quantity'];
+            $order['unit_price'] = $qty > 0
+                ? round((float) $order['net_value'] / $qty, 2)
+                : 0.0;
+            $code = strtoupper((string) ($order['status_code'] ?? ''));
+            $label = strtolower((string) ($order['status'] ?? ''));
+            $order['is_complete'] = $code === 'C'
+                || str_contains($label, 'complet')
+                || str_contains($label, 'closed')
+                || str_contains($label, 'fully');
         }
         unset($order);
 
@@ -1843,17 +1949,18 @@ class SapSalesService
         }
 
         return [
-            'success'     => true,
-            'message'     => $orders === [] ? 'No sales orders found for this period.' : 'Sales orders loaded successfully.',
-            'from'        => $from,
-            'to'          => $to,
-            'count'       => count($orders),
-            'line_count'  => count($rows),
-            'total_qty'   => round($totalQty, 2),
-            'plants'      => array_keys($uniquePlants),
-            'customers'   => array_keys($uniqueCustomers),
-            'orders'      => $orders,
-            'error'       => count($rows) > 0 ? null : ($queryResult['error'] ?? null),
+            'success'      => true,
+            'message'      => $orders === [] ? 'No sales orders found for this period.' : 'Sales orders loaded successfully.',
+            'from'         => $from,
+            'to'           => $to,
+            'count'        => count($orders),
+            'line_count'   => count($rows),
+            'total_qty'    => round($totalQty, 2),
+            'total_value'  => round($totalValue, 2),
+            'plants'       => array_keys($uniquePlants),
+            'customers'    => array_keys($uniqueCustomers),
+            'orders'       => $orders,
+            'error'        => count($rows) > 0 ? null : ($queryResult['error'] ?? null),
         ];
     }
 }

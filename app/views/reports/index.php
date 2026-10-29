@@ -284,7 +284,7 @@ $currentYear = date('Y');
             </a>
 
             <!-- 9. Fabric Sale Order -->
-            <a class="hub-bento-card is-fabric-sale animate-card" style="--stagger: 9;" href="<?= e(url('sales')) ?>" data-category="sales" data-keywords="fabric sale order report sales fabric quotations orders revenue buyers pipeline">
+            <a class="hub-bento-card is-fabric-sale animate-card" style="--stagger: 9;" href="<?= e(url('fabric-sale')) ?>" data-category="sales" data-keywords="fabric sale order report sales fabric quotations orders revenue buyers pipeline">
                 <div class="hub-bento-ambient-glow"></div>
                 <div class="hub-bento-shine"></div>
                 <div class="hub-bento-head">
