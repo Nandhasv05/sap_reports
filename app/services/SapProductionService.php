@@ -136,6 +136,10 @@ class SapProductionService
             'last_week'  => [$today->modify('monday last week'), $today->modify('monday last week')->modify('+6 days')],
             'this_month' => [$today->modify('first day of this month'), $today],
             'last_month' => [$today->modify('first day of last month'), $today->modify('last day of last month')],
+            'custom'     => [
+                $from !== '' ? self::parseDate($from, $tz) : $today->modify('-7 days'),
+                $to !== '' ? self::parseDate($to, $tz) : $today,
+            ],
             default      => [self::parseDate($from, $tz), self::parseDate($to, $tz)],
         };
 

@@ -99,6 +99,14 @@
                 if (dates) {
                     if (fromInput) fromInput.value = dates.from;
                     if (toInput) toInput.value = dates.to;
+                } else if (key === 'custom') {
+                    const today = new Date();
+                    const sevenDaysAgo = new Date();
+                    sevenDaysAgo.setDate(today.getDate() - 7);
+                    const pad = (n) => String(n).padStart(2, '0');
+                    const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+                    if (fromInput && !fromInput.value) fromInput.value = fmt(sevenDaysAgo);
+                    if (toInput && !toInput.value) toInput.value = fmt(today);
                 } else if (key === '') {
                     dateInputs.forEach(input => { input.value = ''; });
                 }

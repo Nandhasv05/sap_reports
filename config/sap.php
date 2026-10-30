@@ -41,6 +41,8 @@ return [
     'cost_service'           => '/sap/opu/odata/sap/ZCOST_SRV/ZCOSTHSet',
     // Quotation ↔ Sales Order hub (used by PO Costing Step 2)
     'quotation_service'      => '/sap/opu/odata/sap/ZI_QUOTATIONSALESORDER_HUB_CDS/ZI_QuotationSalesOrder_HUB',
+    // Quotation & Costing combined CDS view (PO + Items + Quotation + SO + Fabric/Trim/Packing/Special)
+    'quotation_costing_service' => '/sap/opu/odata/sap/Z_QUOTATIONZCOSTCOM_CDS/Z_QuotationZCostCom',
     /*
      * PO Material Group text → ZCOST section names (case-insensitive contains match).
      * Adjust when SAP naming differs from Fabric / Trim / Packing / Special.
@@ -51,6 +53,8 @@ return [
         'TRIMS'    => ['Trim', 'Packing', 'Special'],
         'ACCESSOR' => ['Trim', 'Packing', 'Special'],
         'PACK'     => ['Packing'],
+        'LABEL'    => ['Trim', 'Packing'],
+        'LABELS'   => ['Trim', 'Packing'],
         'SPECIAL'  => ['Special'],
     ],
     'username'         => 'APIUSER',

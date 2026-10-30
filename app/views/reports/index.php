@@ -15,6 +15,7 @@ $logoutUrl = url('logout.php');
 $logoUrl = sap_reports_logo_url();
 $currentYear = date('Y');
 ?>
+
 <div class="hub-wrapper" id="hubWrapper">
     <!-- Ambient mesh background with animated floating glow orbs -->
     <div class="hub-ambient-bg" aria-hidden="true">
@@ -1640,33 +1641,75 @@ html, body {
     }
 }
 
-@media (max-width: 680px) {
-    .hub-cards-grid {
-        grid-template-columns: 1fr;
-        gap: 14px;
-    }
-    .hub-modal-grid {
-        grid-template-columns: 1fr;
-    }
-    .hub-main-container {
-        padding: 16px 14px 24px;
+@media (max-width: 768px) {
+    .hub-header {
+        height: auto;
+        min-height: 52px;
+        padding: 6px 0;
     }
     .hub-header-container {
         padding: 0 12px;
         gap: 8px;
+        flex-wrap: wrap;
+    }
+    .hub-brand-subtitle {
+        display: none !important;
+    }
+    .hub-status-pill {
+        padding: 3px 6px;
+    }
+    .hub-status-pill .hub-status-label,
+    .hub-status-pill .hub-ecg-icon {
+        display: none !important;
     }
     .hub-header-center {
-        max-width: 180px;
+        order: 3;
+        flex: 1 1 100%;
+        max-width: 100%;
+        margin-top: 4px;
+    }
+    .hub-search-box {
+        width: 100%;
+        height: 38px;
     }
     .hub-search-kbd {
         display: none;
     }
     .hub-header-right .hub-btn span,
     .hub-user-meta {
-        display: none;
+        display: none !important;
+    }
+}
+
+@media (max-width: 680px) {
+    .hub-cards-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    .hub-modal-grid {
+        grid-template-columns: 1fr;
+    }
+    .hub-main-container {
+        padding: 12px 10px 24px;
+    }
+    .hub-bento-card {
+        padding: 16px 14px;
+    }
+    .hub-bento-title {
+        font-size: 18px;
     }
     .hub-footer-center {
         display: none;
+    }
+}
+
+@media (max-width: 440px) {
+    .hub-quick-nav {
+        padding: 0 2px;
+        gap: 2px;
+    }
+    .hub-status-pill {
+        display: none !important;
     }
 }
 </style>

@@ -610,8 +610,10 @@
             if (!modal) return;
             setCustomDateError('');
             const today = ymdDaysAgo(0);
-            if (modalFrom) modalFrom.value = (fromHidden?.value || modalFrom.value || today);
-            if (modalTo) modalTo.value = (toHidden?.value || modalTo.value || today);
+            const sevenDaysAgo = ymdDaysAgo(7);
+            const isCurrentlyCustom = rangeSelect && rangeSelect.value === 'custom';
+            if (modalFrom) modalFrom.value = (isCurrentlyCustom && fromHidden?.value ? fromHidden.value : sevenDaysAgo);
+            if (modalTo) modalTo.value = (isCurrentlyCustom && toHidden?.value ? toHidden.value : today);
             modal.hidden = false;
             document.body.classList.add('po-modal-open');
             setTimeout(() => modalFrom?.focus(), 40);

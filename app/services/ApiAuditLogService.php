@@ -3,7 +3,7 @@
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 28/10/2026
  * DESCRIPTION : Persist sap_reports API audit rows (url, status, user, ip, payload, datetime only)
- */
+*/
 declare(strict_types=1);
 
 final class ApiAuditLogService
@@ -132,21 +132,21 @@ final class ApiAuditLogService
             return;
         }
         $sql = "IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = N'sap_reports_api_audit_log')
-BEGIN
-    CREATE TABLE dbo.sap_reports_api_audit_log (
-        id BIGINT IDENTITY(1,1) NOT NULL,
-        url NVARCHAR(2000) NOT NULL,
-        status INT NOT NULL,
-        username NVARCHAR(100) NULL,
-        user_id NVARCHAR(100) NULL,
-        created_at DATETIME2 NOT NULL CONSTRAINT DF_sap_reports_api_audit_log_created DEFAULT SYSUTCDATETIME(),
-        ip NVARCHAR(64) NULL,
-        response_payload NVARCHAR(MAX) NULL,
-        CONSTRAINT PK_sap_reports_api_audit_log PRIMARY KEY CLUSTERED (id)
-    );
-    CREATE NONCLUSTERED INDEX IX_sap_reports_api_audit_log_created
-        ON dbo.sap_reports_api_audit_log (created_at DESC);
-END";
+        BEGIN
+            CREATE TABLE dbo.sap_reports_api_audit_log (
+                id BIGINT IDENTITY(1,1) NOT NULL,
+                url NVARCHAR(2000) NOT NULL,
+                status INT NOT NULL,
+                username NVARCHAR(100) NULL,
+                user_id NVARCHAR(100) NULL,
+                created_at DATETIME2 NOT NULL CONSTRAINT DF_sap_reports_api_audit_log_created DEFAULT SYSUTCDATETIME(),
+                ip NVARCHAR(64) NULL,
+                response_payload NVARCHAR(MAX) NULL,
+                CONSTRAINT PK_sap_reports_api_audit_log PRIMARY KEY CLUSTERED (id)
+            );
+            CREATE NONCLUSTERED INDEX IX_sap_reports_api_audit_log_created
+                ON dbo.sap_reports_api_audit_log (created_at DESC);
+        END";
         $pdo->exec($sql);
         self::$ensured = true;
     }
@@ -163,3 +163,4 @@ END";
         }
     }
 }
+?>

@@ -75,6 +75,9 @@ $extraHead = '<link rel="stylesheet" href="' . e(asset('css/fabricSale.css')) . 
             <button type="submit" class="rpt-btn po-direct-search-btn" id="fsoHdrSubmit" title="Show report">
                 <span class="material-icons-round">arrow_forward</span>
             </button>
+            <button type="button" class="rpt-btn rpt-btn-ghost" id="fsoHdrReset" title="Reset all filters">
+                <span class="material-icons-round">restart_alt</span>
+            </button>
             <button type="button" class="rpt-btn rpt-btn-ghost" id="fsoHdrLookup" title="Open search screen">
                 <span class="material-icons-round">apps</span>
             </button>

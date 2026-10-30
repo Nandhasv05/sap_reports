@@ -15,50 +15,45 @@
     </div>
 
     <div class="pcb-kpis" id="pcbKpis">
-        <article class="pcb-kpi is-total" style="--kpi-delay:0ms">
-            <div class="pcb-kpi-glow" aria-hidden="true"></div>
-            <span class="pcb-kpi-icon material-icons-round">receipt_long</span>
+        <article class="pcb-kpi is-total">
+            <span class="pcb-kpi-icon material-icons-round">description</span>
             <div class="pcb-kpi-body">
                 <b id="pcbKpiTotal">—</b>
                 <small>Total POs</small>
             </div>
-            <div class="pcb-kpi-bar" aria-hidden="true"><i id="pcbKpiTotalBar" style="width:100%"></i></div>
+            <div class="pcb-kpi-bar" aria-hidden="true" style="display:none;"><i id="pcbKpiTotalBar" style="width:100%"></i></div>
         </article>
-        <article class="pcb-kpi is-pass" style="--kpi-delay:60ms">
-            <div class="pcb-kpi-glow" aria-hidden="true"></div>
+        <article class="pcb-kpi is-pass">
             <span class="pcb-kpi-icon material-icons-round">check_circle</span>
             <div class="pcb-kpi-body">
                 <b id="pcbKpiPassed">—</b>
                 <small id="pcbKpiPassedPct">Passed</small>
             </div>
-            <div class="pcb-kpi-bar" aria-hidden="true"><i id="pcbKpiPassedBar" style="width:0%"></i></div>
+            <div class="pcb-kpi-bar" aria-hidden="true" style="display:none;"><i id="pcbKpiPassedBar" style="width:0%"></i></div>
         </article>
-        <article class="pcb-kpi is-fail" style="--kpi-delay:120ms">
-            <div class="pcb-kpi-glow" aria-hidden="true"></div>
+        <article class="pcb-kpi is-fail">
             <span class="pcb-kpi-icon material-icons-round">error</span>
             <div class="pcb-kpi-body">
                 <b id="pcbKpiExceptions">—</b>
                 <small id="pcbKpiExcPct">Exceptions</small>
             </div>
-            <div class="pcb-kpi-bar" aria-hidden="true"><i id="pcbKpiExcBar" style="width:0%"></i></div>
+            <div class="pcb-kpi-bar" aria-hidden="true" style="display:none;"><i id="pcbKpiExcBar" style="width:0%"></i></div>
         </article>
-        <article class="pcb-kpi is-pending" style="--kpi-delay:180ms">
-            <div class="pcb-kpi-glow" aria-hidden="true"></div>
+        <article class="pcb-kpi is-pending">
             <span class="pcb-kpi-icon material-icons-round">schedule</span>
             <div class="pcb-kpi-body">
                 <b id="pcbKpiPending">—</b>
                 <small id="pcbKpiPendPct">Pending</small>
             </div>
-            <div class="pcb-kpi-bar" aria-hidden="true"><i id="pcbKpiPendBar" style="width:0%"></i></div>
+            <div class="pcb-kpi-bar" aria-hidden="true" style="display:none;"><i id="pcbKpiPendBar" style="width:0%"></i></div>
         </article>
-        <article class="pcb-kpi is-value" style="--kpi-delay:240ms">
-            <div class="pcb-kpi-glow" aria-hidden="true"></div>
+        <article class="pcb-kpi is-value">
             <span class="pcb-kpi-icon material-icons-round">payments</span>
             <div class="pcb-kpi-body">
                 <b id="pcbKpiValue">—</b>
                 <small>Total PO Value</small>
             </div>
-            <div class="pcb-kpi-bar" aria-hidden="true"><i style="width:100%"></i></div>
+            <div class="pcb-kpi-bar" aria-hidden="true" style="display:none;"><i style="width:100%"></i></div>
         </article>
     </div>
 
@@ -89,6 +84,7 @@
                     </button>
                     <div class="rpt-cat-dd-menu pcb-col-menu" id="pcbColumnToggleMenu" role="menu"></div>
                 </div>
+                <span class="rpt-col-save" id="pcbColSaveStatus" role="status" aria-live="polite" hidden></span>
                 <button type="button" class="rpt-tb-btn rpt-tb-btn-excel" id="pcbExportBtn" title="Download Excel / CSV">
                     <i class="fas fa-file-excel"></i>
                     <span>Excel</span>
@@ -127,25 +123,25 @@
                         <th data-col-key="actions">Actions</th>
                     </tr>
                     <tr class="pcb-filter-row" id="pcbFilterRow">
-                        <th class="pcb-check">
+                        <th class="pcb-check" data-col-key="check">
                             <button type="button" class="rpt-col-filter-reset" id="pcbColFilterReset" title="Clear all column filters" aria-label="Clear all column filters">
                                 <i class="fas fa-eraser"></i>
                             </button>
                         </th>
-                        <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="po" placeholder="Filter…"></div></th>
-                        <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="date" placeholder="Filter…"></div></th>
-                        <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="vendor_code" placeholder="Filter…"></div></th>
-                        <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="vendor_name" placeholder="Filter…"></div></th>
-                        <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="material" placeholder="Filter…"></div></th>
-                        <th class="num"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="items" data-numeric placeholder="Filter…"></div></th>
-                        <th class="num"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="value" data-numeric placeholder="Filter…"></div></th>
-                        <th class="num"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="passed" data-numeric placeholder="Filter…"></div></th>
-                        <th class="num"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="exceptions" data-numeric placeholder="Filter…"></div></th>
-                        <th class="num"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="pending" data-numeric placeholder="Filter…"></div></th>
-                        <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="status" placeholder="Filter…"></div></th>
-                        <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="last" placeholder="Filter…"></div></th>
-                        <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="validated_by" placeholder="Filter…"></div></th>
-                        <th></th>
+                        <th data-col-key="po"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="po" placeholder="Filter…"></div></th>
+                        <th data-col-key="date"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="date" placeholder="Filter…"></div></th>
+                        <th data-col-key="vendor_code"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="vendor_code" placeholder="Filter…"></div></th>
+                        <th data-col-key="vendor_name"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="vendor_name" placeholder="Filter…"></div></th>
+                        <th data-col-key="material"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="material" placeholder="Filter…"></div></th>
+                        <th class="num" data-col-key="items"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="items" data-numeric placeholder="Filter…"></div></th>
+                        <th class="num" data-col-key="value"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="value" data-numeric placeholder="Filter…"></div></th>
+                        <th class="num" data-col-key="passed"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="passed" data-numeric placeholder="Filter…"></div></th>
+                        <th class="num" data-col-key="exceptions"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="exceptions" data-numeric placeholder="Filter…"></div></th>
+                        <th class="num" data-col-key="pending"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="pending" data-numeric placeholder="Filter…"></div></th>
+                        <th data-col-key="status"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="status" placeholder="Filter…"></div></th>
+                        <th data-col-key="last"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="last" placeholder="Filter…"></div></th>
+                        <th data-col-key="validated_by"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-col-filter" data-key="validated_by" placeholder="Filter…"></div></th>
+                        <th data-col-key="actions"></th>
                     </tr>
                 </thead>
                 <tbody id="pcbTableBody">
@@ -200,6 +196,10 @@
                     <span class="material-icons-round">error</span>
                     <div><b id="pcbOcKpiExceptions">—</b><small>Exceptions</small></div>
                 </article>
+                <article class="pcw-kpi is-review">
+                    <span class="material-icons-round">rate_review</span>
+                    <div><b id="pcbOcKpiReview">—</b><small>Needs Review</small></div>
+                </article>
                 <article class="pcw-kpi is-value">
                     <span class="material-icons-round">payments</span>
                     <div><b id="pcbOcKpiValue">—</b><small>Total PO Value</small></div>
@@ -221,6 +221,7 @@
                         </button>
                         <div class="rpt-cat-dd-menu pcb-col-menu" id="pcbItemColumnMenu" role="menu"></div>
                     </div>
+                    <span class="rpt-col-save" id="pcbItemColSaveStatus" role="status" aria-live="polite" hidden></span>
                     <button type="button" class="rpt-tb-btn rpt-tb-btn-excel" id="pcbItemExcelBtn" title="Download item lines as Excel/CSV">
                         <i class="fas fa-file-excel"></i>
                         <span>Excel</span>
@@ -268,34 +269,34 @@
                             <th data-icol="validation_result">Validation Result</th>
                         </tr>
                         <tr class="pcb-item-filter-row" id="pcbItemFilterRow">
-                            <th class="pcw-check">
+                            <th class="pcw-check" data-icol="check">
                                 <button type="button" class="rpt-col-filter-reset" id="pcbItemColFilterReset" title="Clear column filters">
                                     <i class="fas fa-eraser"></i>
                                 </button>
                             </th>
-                            <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="status" placeholder="Filter…"></div></th>
-                            <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="po_item" placeholder="Filter…"></div></th>
-                            <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="material" placeholder="Filter…"></div></th>
-                            <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="description" placeholder="Filter…"></div></th>
-                            <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="mat_category" placeholder="Filter…"></div></th>
-                            <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="sales_order" placeholder="Filter…"></div></th>
-                            <th class="num"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="po_qty" placeholder="Filter…"></div></th>
-                            <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="unit" placeholder="Filter…"></div></th>
-                            <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="currency" placeholder="Filter…"></div></th>
-                            <th class="num"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="net_value" placeholder="Filter…"></div></th>
-                            <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="costing_ref" placeholder="Filter…"></div></th>
-                            <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="cost_section" placeholder="Filter…"></div></th>
-                            <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="cost_item" placeholder="Filter…"></div></th>
-                            <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="cost_description" placeholder="Filter…"></div></th>
-                            <th class="num"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="expected_unit_cost" placeholder="Filter…"></div></th>
-                            <th class="num"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="po_unit_cost" placeholder="Filter…"></div></th>
-                            <th class="num"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="difference" placeholder="Filter…"></div></th>
-                            <th class="num"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="variance_pct" placeholder="Filter…"></div></th>
-                            <th class="num"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="sell_price" placeholder="Filter…"></div></th>
-                            <th class="num"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="making" placeholder="Filter…"></div></th>
-                            <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="quoted_uom" placeholder="Filter…"></div></th>
-                            <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="quoted_currency" placeholder="Filter…"></div></th>
-                            <th><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="validation_result" placeholder="Filter…"></div></th>
+                            <th data-icol="status"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="status" placeholder="Filter…"></div></th>
+                            <th data-icol="po_item"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="po_item" placeholder="Filter…"></div></th>
+                            <th data-icol="material"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="material" placeholder="Filter…"></div></th>
+                            <th data-icol="description"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="description" placeholder="Filter…"></div></th>
+                            <th data-icol="mat_category"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="mat_category" placeholder="Filter…"></div></th>
+                            <th data-icol="sales_order"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="sales_order" placeholder="Filter…"></div></th>
+                            <th class="num" data-icol="po_qty"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="po_qty" placeholder="Filter…"></div></th>
+                            <th data-icol="unit"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="unit" placeholder="Filter…"></div></th>
+                            <th data-icol="currency"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="currency" placeholder="Filter…"></div></th>
+                            <th class="num" data-icol="net_value"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="net_value" placeholder="Filter…"></div></th>
+                            <th data-icol="costing_ref"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="costing_ref" placeholder="Filter…"></div></th>
+                            <th data-icol="cost_section"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="cost_section" placeholder="Filter…"></div></th>
+                            <th data-icol="cost_item"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="cost_item" placeholder="Filter…"></div></th>
+                            <th data-icol="cost_description"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="cost_description" placeholder="Filter…"></div></th>
+                            <th class="num" data-icol="expected_unit_cost"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="expected_unit_cost" placeholder="Filter…"></div></th>
+                            <th class="num" data-icol="po_unit_cost"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="po_unit_cost" placeholder="Filter…"></div></th>
+                            <th class="num" data-icol="difference"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="difference" placeholder="Filter…"></div></th>
+                            <th class="num" data-icol="variance_pct"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="variance_pct" placeholder="Filter…"></div></th>
+                            <th class="num" data-icol="sell_price"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="sell_price" placeholder="Filter…"></div></th>
+                            <th class="num" data-icol="making"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="making" placeholder="Filter…"></div></th>
+                            <th data-icol="quoted_uom"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="quoted_uom" placeholder="Filter…"></div></th>
+                            <th data-icol="quoted_currency"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="quoted_currency" placeholder="Filter…"></div></th>
+                            <th data-icol="validation_result"><div class="rpt-col-input-wrap"><input type="text" class="rpt-col-input pcb-item-col-filter" data-key="validation_result" placeholder="Filter…"></div></th>
                         </tr>
                     </thead>
                     <tbody id="pcbItemBody">

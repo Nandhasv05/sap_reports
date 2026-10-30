@@ -107,6 +107,14 @@
         if (preset && preset !== 'custom' && presetDates[preset]) {
             if (fromEl) fromEl.value = presetDates[preset].from || '';
             if (toEl) toEl.value = presetDates[preset].to || '';
+        } else if (preset === 'custom') {
+            const today = new Date();
+            const sevenDaysAgo = new Date();
+            sevenDaysAgo.setDate(today.getDate() - 7);
+            const pad = (n) => String(n).padStart(2, '0');
+            const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+            if (fromEl && !fromEl.value) fromEl.value = fmt(sevenDaysAgo);
+            if (toEl && !toEl.value) toEl.value = fmt(today);
         }
     }
 
@@ -1283,6 +1291,12 @@
             const so = ($('fsoHdrSo')?.value || '').trim();
             applySearch('header', { prefer: so ? 'so' : 'date' });
         });
+        $('fsoHdrReset')?.addEventListener('click', () => {
+            clearSoFields();
+            clearDateFields();
+            clearAllFilters();
+            showLookup();
+        });
 
         // Date selected → clear SO, then search by date only
         $('fsoHdrPreset')?.addEventListener('change', () => {
@@ -1290,7 +1304,6 @@
             syncPresetUi($('fsoHdrPreset'), $('fsoHdrCustomDates'), $('fsoHdrFrom'), $('fsoHdrTo'));
             const preset = ($('fsoHdrPreset')?.value || '').toLowerCase();
             if (!preset) return;
-            if (preset === 'custom') return;
             applySearch('header', { prefer: 'date' });
         });
         $('fsoHdrFrom')?.addEventListener('change', () => {

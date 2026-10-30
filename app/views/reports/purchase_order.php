@@ -162,19 +162,10 @@ $listCards = $isCostingView
                         <option value="PENDING">Pending</option>
                     </select>
                 </label>
-                <label class="rpt-field po-direct-search pcb-header-search" title="Search PO number">
+                <label class="rpt-field po-direct-search pcb-header-search" title="Search PO number (Press Enter to search)">
                     <span class="material-icons-round">search</span>
                     <input type="search" id="pcbPoSearch" value="" placeholder="Search PO #" inputmode="numeric" maxlength="10" autocomplete="off" aria-label="Search purchase order number">
                 </label>
-                <button type="button" class="rpt-btn po-direct-search-btn" id="pcbPoSearchBtn" title="Open purchase order">
-                    <span class="material-icons-round">arrow_forward</span>
-                </button>
-                <button type="submit" class="rpt-btn" id="pcbFetchBtn" title="Fetch POs">
-                    <span class="material-icons-round">download</span>
-                </button>
-                <button type="button" class="rpt-btn rpt-btn-ghost" id="pcbResetBtn" title="Reset filters">
-                    <span class="material-icons-round">restart_alt</span>
-                </button>
             </form>
         <?php elseif ($isList): ?>
             <!-- Condition-wise filter form for PO List -->
@@ -324,12 +315,12 @@ $listCards = $isCostingView
                 </div>
 
                 <!-- Direct PO Search -->
-                <label class="rpt-field po-direct-search" title="Search particular PO Number to view its details">
+                <label class="rpt-field po-direct-search" title="Search particular PO Number to view its details (Press Enter)">
                     <span class="material-icons-round">search</span>
                     <input id="po" name="po" value="" placeholder="Search PO #" inputmode="numeric" maxlength="10" autocomplete="off" aria-label="Search purchase order number">
                 </label>
-                <button type="submit" class="rpt-btn po-direct-search-btn" id="poDirectSearchBtn" title="Open purchase order">
-                    <span class="material-icons-round">arrow_forward</span>
+                <button type="button" class="rpt-btn rpt-btn-ghost" id="poResetBtn" title="Reset all filters">
+                    <span class="material-icons-round">restart_alt</span>
                 </button>
             </form>
         <?php else: ?>
@@ -347,18 +338,14 @@ $listCards = $isCostingView
                         <span class="material-icons-round">receipt</span>
                         <input id="po" name="po" value="<?= e($purchaseOrder) ?>" placeholder="Purchase order" inputmode="numeric" maxlength="10" autocomplete="off" required>
                     </label>
-                    <?php if ($isCostingView): ?>
-                        <label class="rpt-field" title="Sales order for ZCOST sheet (used when PO has no linked SO)">
-                            <span class="material-icons-round">sell</span>
-                            <input id="so" name="so" value="<?= e($salesOrder) ?>" placeholder="Sales Order #" inputmode="numeric" maxlength="10" autocomplete="off">
-                        </label>
-                    <?php endif; ?>
                     <button class="rpt-btn" type="submit" title="Load report">
                         <span class="material-icons-round">sync</span>
                     </button>
-                    <a class="rpt-btn rpt-btn-ghost" href="<?= e($csvUrl) ?>" title="Download CSV">
-                        <span class="material-icons-round">file_download</span>
-                    </a>
+                    <?php if (!$isCostingWorkbench): ?>
+                        <a class="rpt-btn rpt-btn-ghost" href="<?= e($csvUrl) ?>" title="Download CSV">
+                            <span class="material-icons-round">file_download</span>
+                        </a>
+                    <?php endif; ?>
                 </form>
             </div>
         <?php endif; ?>
@@ -687,8 +674,35 @@ $pcbCurrentUser = trim((string) (
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
 <script src="<?= e(asset('js/loader.js')) ?>"></script>
 <?php if ($isCostingWorkbench): ?>
+<?php
+    $prefTableKey = 'purchase_order_costing_workbench_table';
+    require base_path('app/views/partials/table_preferences.php');
+?>
+<script src="<?= e(asset('js/table-columns.js')) ?>"></script>
 <script src="<?= e(asset('js/po-costing-workbench.js')) ?>"></script>
 <?php elseif ($isCostingBulk): ?>
+<?php
+    require_once base_path('app/services/TableColumnRegistry.php');
+    $bulkTableKey = 'purchase_order_costing_bulk_table';
+    $bulkItemsTableKey = 'purchase_order_costing_items_table';
+    $bulkTableDef = TableColumnRegistry::get($bulkTableKey);
+    $bulkItemsDef = TableColumnRegistry::get($bulkItemsTableKey);
+?>
+<script type="application/json" id="pcbTablePrefs"><?= json_encode([
+    'tableKey'      => $bulkTableKey,
+    'apiUrl'        => url('api/user/table-preferences/' . $bulkTableKey),
+    'userId'        => (string) ($_SESSION['user_id'] ?? ''),
+    'columns'       => $bulkTableDef['columns'] ?? [],
+    'defaultHidden' => $bulkTableDef['defaultHidden'] ?? [],
+], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
+<script type="application/json" id="pcbItemTablePrefs"><?= json_encode([
+    'tableKey'      => $bulkItemsTableKey,
+    'apiUrl'        => url('api/user/table-preferences/' . $bulkItemsTableKey),
+    'userId'        => (string) ($_SESSION['user_id'] ?? ''),
+    'columns'       => $bulkItemsDef['columns'] ?? [],
+    'defaultHidden' => $bulkItemsDef['defaultHidden'] ?? [],
+], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
+<script src="<?= e(asset('js/table-columns.js')) ?>"></script>
 <script src="<?= e(asset('js/po-costing-bulk.js')) ?>"></script>
 <?php else: ?>
 <script src="<?= e(asset('js/po-report.js')) ?>"></script>

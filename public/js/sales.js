@@ -4943,6 +4943,14 @@
             const searchClear = document.getElementById('salesSearchClear');
             if (searchClear) searchClear.style.display = 'none';
 
+            // Also clear header SO search & active filter banner
+            const headerSearch = document.getElementById('headerSoSearchInput');
+            if (headerSearch) headerSearch.value = '';
+            const headerClear = document.getElementById('headerSoSearchClear');
+            if (headerClear) headerClear.hidden = true;
+            const filterBanner = document.getElementById('salesActiveFilterBanner');
+            if (filterBanner) filterBanner.style.display = 'none';
+
             document.querySelectorAll('.sales-col-filter-row .col-filter-input').forEach(inp => {
                 inp.value = '';
                 inp.classList.remove('has-val');
@@ -6101,16 +6109,17 @@
             if (period === 'custom') {
                 closePeriodMenu();
                 if (customModal) {
-                    const def = getPeriodRange('this_month');
                     const today = new Date();
                     today.setHours(0, 0, 0, 0);
+                    const sevenDaysAgo = new Date(today);
+                    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
                     if (headerFrom) {
-                        headerFrom.value = def.from;
+                        headerFrom.value = (currentPeriod === 'custom' && currentFrom) ? currentFrom : fmt(sevenDaysAgo);
                         headerFrom.removeAttribute('min');
                         headerFrom.max = fmt(today);
                     }
                     if (headerTo) {
-                        headerTo.value = def.to;
+                        headerTo.value = (currentPeriod === 'custom' && currentTo) ? currentTo : fmt(today);
                         headerTo.removeAttribute('min');
                         headerTo.max = fmt(today);
                     }

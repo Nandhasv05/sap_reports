@@ -833,8 +833,25 @@ class ReportsController extends Controller
         }
         $category = strtolower(trim((string) ($_GET['mat_cat'] ?? $_GET['category'] ?? 'all')));
         $so = preg_replace('/\D/', '', (string) ($_GET['so'] ?? '')) ?? '';
+        $item = preg_replace('/\D/', '', (string) ($_GET['item'] ?? $_GET['item_no'] ?? '')) ?? '';
+        $quotation = preg_replace('/\D/', '', (string) ($_GET['quotation'] ?? $_GET['quote_no'] ?? '')) ?? '';
+        $mode = strtolower(trim((string) ($_GET['mode'] ?? 'validated')));
+        if (!in_array($mode, ['validated', 'non_validated'], true)) {
+            $mode = 'validated';
+        }
+        $customer = preg_replace('/\D/', '', (string) ($_GET['customer'] ?? $_GET['customer_quote'] ?? '')) ?? '';
+        $endUser = preg_replace('/\D/', '', (string) ($_GET['end_user'] ?? $_GET['end_user_quote'] ?? '')) ?? '';
         try {
-            $payload = (new PoCostValidationService())->validate($po, $category, $so);
+            $payload = (new PoCostValidationService())->validate(
+                $po,
+                $category,
+                $so,
+                $item !== '' ? $item : null,
+                $quotation !== '' ? $quotation : null,
+                $mode,
+                $customer,
+                $endUser
+            );
         } catch (Throwable $e) {
             $this->jsonResponse([
                 'success' => false,

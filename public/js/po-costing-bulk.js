@@ -52,6 +52,8 @@
         { key: 'actions', label: 'Actions', locked: true },
     ];
     let hiddenCols = new Set();
+    let pcbTablePrefManager = null;
+    let pcbItemTablePrefManager = null;
     let currentSort = { key: null, dir: null }; // dir: 'asc' | 'desc' | null
     const NUMERIC_SORT_KEYS = new Set(['items', 'value', 'passed', 'exceptions', 'pending']);
 
@@ -345,7 +347,305 @@
         renderTable();
     }
 
+    function initTablePreferences({
+        scriptId,
+        tableId,
+        menuId,
+        toggleBtnId,
+        dropdownId,
+        statusId,
+        colAttr = 'data-col-key',
+    }) {
+        const scriptNode = document.getElementById(scriptId);
+        if (!scriptNode) return null;
+        let config = null;
+        try { config = JSON.parse(scriptNode.textContent || 'null'); } catch (e) { return null; }
+        if (!config || !Array.isArray(config.columns)) return null;
+
+        const table = document.getElementById(tableId);
+        if (!table) return null;
+        const menu = document.getElementById(menuId);
+        const dropdown = document.getElementById(dropdownId);
+        const toggleBtn = document.getElementById(toggleBtnId);
+        const statusEl = document.getElementById(statusId);
+
+        const columns = config.columns;
+        const defaultOrder = columns.map((c) => c.id);
+        const isLocked = (id) => columns.some((c) => c.id === id && c.locked);
+        const labels = Object.fromEntries(columns.map((c) => [c.id, c.label]));
+
+        let currentState = {
+            columnOrder: [...defaultOrder],
+            hiddenColumns: Array.isArray(config.defaultHidden) ? [...config.defaultHidden] : [],
+        };
+        let appliedOrder = [...defaultOrder];
+
+        let styleEl = document.getElementById(tableId + 'ColStyle');
+        if (!styleEl) {
+            styleEl = document.createElement('style');
+            styleEl.id = tableId + 'ColStyle';
+            document.head.appendChild(styleEl);
+        }
+
+        function applyHidden(hidden) {
+            if (!hidden || !hidden.length) {
+                styleEl.textContent = '';
+            } else {
+                styleEl.textContent = hidden.map((id) =>
+                    `#${tableId} [${colAttr}="${id}"], #${tableId} [data-icol="${id}"] { display: none !important; }`
+                ).join('\n');
+            }
+            if (toggleBtn) toggleBtn.classList.toggle('is-active', !!(hidden && hidden.length > 0));
+        }
+
+        function applyOrder(order) {
+            appliedOrder = [...order];
+            const rows = Array.from(table.querySelectorAll('thead tr, tbody tr')).filter(
+                (tr) => !tr.classList.contains('pcb-empty') && !tr.classList.contains('pcw-empty')
+            );
+            rows.forEach((tr) => {
+                const byId = {};
+                Array.from(tr.children).forEach((cell) => {
+                    const key = cell.getAttribute(colAttr) || cell.getAttribute('data-icol') || cell.getAttribute('data-col-key');
+                    if (key) byId[key] = cell;
+                });
+                const frag = document.createDocumentFragment();
+                order.forEach((id) => {
+                    if (byId[id]) frag.appendChild(byId[id]);
+                });
+                tr.appendChild(frag);
+            });
+        }
+
+        function renderStatus(state) {
+            if (!statusEl) return;
+            let html = '';
+            let kind = '';
+            if (state && state.error) {
+                kind = 'error';
+                html = `<span class="material-icons-round">error_outline</span><span>${esc(state.error.message)}</span>`
+                    + (state.error.retry ? '<button type="button" data-col-retry>Retry</button>' : '');
+            } else if (state && state.saving) {
+                kind = 'saving';
+                html = '<span class="rpt-col-save-spin" aria-hidden="true"></span><span>Saving columns…</span>';
+            } else if (state && state.saved) {
+                kind = 'saved';
+                html = '<span class="material-icons-round">check_circle</span><span>Saved</span>';
+            }
+            statusEl.hidden = kind === '';
+            statusEl.className = 'rpt-col-save' + (kind ? ' is-' + kind : '');
+            statusEl.title = (state && state.error) ? state.error.message : '';
+            if (statusEl.innerHTML !== html) statusEl.innerHTML = html;
+        }
+
+        function buildMenu() {
+            if (!menu) return;
+            const order = currentState.columnOrder;
+            const hidden = new Set(currentState.hiddenColumns);
+            const movable = order.filter((id) => !isLocked(id));
+            const visibleCount = order.length - hidden.size;
+
+            menu.innerHTML = `
+                <div class="rpt-colmgr-head">
+                    <span class="rpt-cat-dd-header">Manage columns</span>
+                    <span class="rpt-colmgr-count">${visibleCount} of ${order.length} shown</span>
+                </div>
+                <p class="rpt-colmgr-hint">Drag or use arrows to reorder. Saved to your account automatically.</p>
+                <ul class="rpt-colmgr-list">
+                    ${order.map((id) => {
+                        const label = esc(labels[id] || id);
+                        if (isLocked(id)) {
+                            return `<li class="rpt-colmgr-item is-locked" data-col-item="${id}" title="Always shown first">
+                                <span class="material-icons-round rpt-colmgr-grip">lock</span>
+                                <span class="rpt-colmgr-label"><input type="checkbox" checked disabled><span>${label}</span></span>
+                            </li>`;
+                        }
+                        const pos = movable.indexOf(id);
+                        return `<li class="rpt-colmgr-item${hidden.has(id) ? ' is-hidden' : ''}" data-col-item="${id}" draggable="true">
+                            <span class="material-icons-round rpt-colmgr-grip" title="Drag to reorder">drag_indicator</span>
+                            <label class="rpt-colmgr-label"><input type="checkbox" data-col-toggle="${id}"${hidden.has(id) ? '' : ' checked'}><span>${label}</span></label>
+                            <span class="rpt-colmgr-move">
+                                <button type="button" data-col-move="-1" aria-label="Move ${label} up"${pos === 0 ? ' disabled' : ''}><span class="material-icons-round">keyboard_arrow_up</span></button>
+                                <button type="button" data-col-move="1" aria-label="Move ${label} down"${pos === movable.length - 1 ? ' disabled' : ''}><span class="material-icons-round">keyboard_arrow_down</span></button>
+                            </span>
+                        </li>`;
+                    }).join('')}
+                </ul>
+                <div class="rpt-cat-dd-divider"></div>
+                <button type="button" class="rpt-cat-dd-item" data-col-reset>
+                    <span class="material-icons-round">restart_alt</span>
+                    <span class="rpt-cat-dd-item-text">Reset to default</span>
+                </button>
+            `;
+        }
+
+        function moveColumn(from, target) {
+            if (from === target || isLocked(from)) return;
+            const order = currentState.columnOrder.filter((id) => id !== from);
+            const fromPos = currentState.columnOrder.indexOf(from);
+            const toPos = order.indexOf(target);
+            const insertAt = isLocked(target) ? toPos + 1 : (fromPos <= toPos ? toPos + 1 : toPos);
+            order.splice(insertAt, 0, from);
+            if (prefsStore) {
+                prefsStore.setPreferences({ columnOrder: order, hiddenColumns: currentState.hiddenColumns });
+            } else {
+                currentState.columnOrder = order;
+                applyOrder(order);
+                buildMenu();
+            }
+        }
+
+        function bindDrag(root, itemSelector, idOf) {
+            let dragFrom = null;
+            const clearMarks = () => root.querySelectorAll('.is-drag-over, .is-dragging').forEach((el) => el.classList.remove('is-drag-over', 'is-dragging'));
+            root.addEventListener('dragstart', (e) => {
+                const item = e.target.closest?.(itemSelector);
+                const id = item ? idOf(item) : null;
+                if (!id || isLocked(id)) return;
+                dragFrom = id;
+                item.classList.add('is-dragging');
+                if (e.dataTransfer) {
+                    e.dataTransfer.effectAllowed = 'move';
+                    try { e.dataTransfer.setData('text/plain', id); } catch (err) {}
+                }
+            });
+            root.addEventListener('dragover', (e) => {
+                const item = e.target.closest?.(itemSelector);
+                if (dragFrom === null || !item) return;
+                e.preventDefault();
+                if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+                root.querySelectorAll('.is-drag-over').forEach((el) => { if (el !== item) el.classList.remove('is-drag-over'); });
+                if (idOf(item) !== dragFrom) item.classList.add('is-drag-over');
+            });
+            root.addEventListener('drop', (e) => {
+                const item = e.target.closest?.(itemSelector);
+                if (dragFrom === null || !item) return;
+                e.preventDefault();
+                const from = dragFrom;
+                dragFrom = null;
+                clearMarks();
+                moveColumn(from, idOf(item));
+            });
+            root.addEventListener('dragend', () => { dragFrom = null; clearMarks(); });
+        }
+
+        if (menu) {
+            bindDrag(menu, '[data-col-item]', (li) => li.getAttribute('data-col-item'));
+            menu.addEventListener('change', (e) => {
+                const cb = e.target.closest('input[data-col-toggle]');
+                if (!cb) return;
+                const id = cb.getAttribute('data-col-toggle');
+                const hidden = currentState.hiddenColumns.filter((h) => h !== id);
+                if (!cb.checked) hidden.push(id);
+                if (prefsStore) {
+                    prefsStore.setPreferences({ columnOrder: currentState.columnOrder, hiddenColumns: hidden });
+                } else {
+                    currentState.hiddenColumns = hidden;
+                    applyHidden(hidden);
+                    buildMenu();
+                }
+            });
+            menu.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (e.target.closest('[data-col-reset]')) {
+                    if (prefsStore) {
+                        prefsStore.reset();
+                    } else {
+                        currentState.columnOrder = [...defaultOrder];
+                        currentState.hiddenColumns = Array.isArray(config.defaultHidden) ? [...config.defaultHidden] : [];
+                        applyOrder(currentState.columnOrder);
+                        applyHidden(currentState.hiddenColumns);
+                        buildMenu();
+                    }
+                    return;
+                }
+                const moveBtn = e.target.closest('[data-col-move]');
+                if (!moveBtn) return;
+                const id = moveBtn.closest('[data-col-item]').getAttribute('data-col-item');
+                const dir = parseInt(moveBtn.getAttribute('data-col-move'), 10);
+                const movable = currentState.columnOrder.filter((c) => !isLocked(c));
+                const neighbour = movable[movable.indexOf(id) + dir];
+                if (!neighbour) return;
+                moveColumn(id, neighbour);
+            });
+        }
+
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                dropdown?.classList.toggle('is-open');
+                const open = dropdown?.classList.contains('is-open');
+                toggleBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+                if (open) buildMenu();
+            });
+        }
+        document.addEventListener('click', (e) => {
+            if (dropdown && !dropdown.contains(e.target)) {
+                dropdown.classList.remove('is-open');
+                toggleBtn?.setAttribute('aria-expanded', 'false');
+            }
+        });
+
+        if (statusEl) {
+            statusEl.addEventListener('click', (e) => {
+                if (e.target.closest('[data-col-retry]')) currentState?.error?.retry?.();
+            });
+        }
+
+        const theadFirstRow = table.querySelector('thead tr:first-child');
+        if (theadFirstRow) {
+            Array.from(theadFirstRow.children).forEach((th) => {
+                const key = th.getAttribute(colAttr) || th.getAttribute('data-icol') || th.getAttribute('data-col-key');
+                if (isLocked(key)) return;
+                th.setAttribute('draggable', 'true');
+                th.title = (th.title ? th.title + ' — ' : '') + 'drag to move column';
+            });
+            bindDrag(theadFirstRow, 'th', (th) => th.getAttribute(colAttr) || th.getAttribute('data-icol') || th.getAttribute('data-col-key'));
+        }
+
+        function onPreferenceChange(next) {
+            const prev = currentState;
+            currentState = next;
+            const orderKey = next.columnOrder.join(',');
+            const hiddenKey = next.hiddenColumns.join(',');
+            const prevOrderKey = prev?.columnOrder?.join(',');
+            const prevHiddenKey = prev?.hiddenColumns?.join(',');
+
+            if (orderKey !== prevOrderKey || orderKey !== appliedOrder.join(',')) {
+                applyOrder(next.columnOrder);
+            }
+            if (hiddenKey !== prevHiddenKey) {
+                applyHidden(next.hiddenColumns);
+            }
+            buildMenu();
+            renderStatus(next);
+        }
+
+        const prefsStore = (typeof window.rptCreateTablePreferences === 'function')
+            ? window.rptCreateTablePreferences(config, onPreferenceChange)
+            : null;
+
+        if (!prefsStore) {
+            applyOrder(currentState.columnOrder);
+            applyHidden(currentState.hiddenColumns);
+            buildMenu();
+        }
+
+        return {
+            getOrder() { return currentState.columnOrder; },
+            getHidden() { return new Set(currentState.hiddenColumns); },
+            refresh() {
+                applyOrder(currentState.columnOrder);
+                applyHidden(currentState.hiddenColumns);
+            },
+        };
+    }
+
     function applyColumnVisibility() {
+        if (pcbTablePrefManager) {
+            pcbTablePrefManager.refresh();
+            return;
+        }
         const table = $('pcbTable');
         if (!table) return;
         table.querySelectorAll('[data-col-key]').forEach((cell) => {
@@ -353,28 +653,10 @@
             const hide = hiddenCols.has(key);
             cell.style.display = hide ? 'none' : '';
         });
-        // filter row cells align by index with header
-        const headerCells = table.querySelectorAll('tr.pcb-header-row th');
-        const filterCells = table.querySelectorAll('tr.pcb-filter-row th');
-        headerCells.forEach((th, i) => {
-            const key = th.getAttribute('data-col-key');
-            const hide = key ? hiddenCols.has(key) : false;
-            th.style.display = hide ? 'none' : '';
-            if (filterCells[i]) filterCells[i].style.display = hide ? 'none' : '';
-        });
-        // body cells: use same order
-        table.querySelectorAll('tbody tr').forEach((tr) => {
-            if (tr.classList.contains('pcb-empty')) return;
-            const tds = tr.children;
-            headerCells.forEach((th, i) => {
-                const key = th.getAttribute('data-col-key');
-                if (!tds[i]) return;
-                tds[i].style.display = (key && hiddenCols.has(key)) ? 'none' : '';
-            });
-        });
     }
 
     function buildColumnMenu() {
+        if (pcbTablePrefManager) return;
         const menu = $('pcbColumnToggleMenu');
         if (!menu) return;
         const visible = COL_DEFS.filter((c) => !c.locked && !hiddenCols.has(c.key)).length;
@@ -401,29 +683,6 @@
                 </label>`;
             }).join('') +
             `</div>`;
-
-        menu.querySelectorAll('[data-pcb-col-act]').forEach((btn) => {
-            btn.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                const act = btn.getAttribute('data-pcb-col-act');
-                if (act === 'all' || act === 'reset') {
-                    hiddenCols.clear();
-                    buildColumnMenu();
-                    applyColumnVisibility();
-                }
-            });
-        });
-        menu.querySelectorAll('input[data-col-key]').forEach((inp) => {
-            inp.addEventListener('change', () => {
-                const key = inp.getAttribute('data-col-key');
-                if (!key) return;
-                if (inp.checked) hiddenCols.delete(key);
-                else hiddenCols.add(key);
-                applyColumnVisibility();
-                buildColumnMenu();
-            });
-        });
     }
 
     function applyListStickyMode(enabled) {
@@ -504,21 +763,21 @@
         tbody.innerHTML = rows.map((r) => {
             const active = activePo === r.purchase_order ? ' is-active' : '';
             return `<tr class="pcb-row${active}" data-po="${esc(r.purchase_order)}">
-                <td class="pcb-check"><input type="checkbox" class="pcb-row-check" data-po="${esc(r.purchase_order)}" ${r._checked ? 'checked' : ''}></td>
-                <td class="pcb-sticky-po"><button type="button" class="pcb-po-link" data-po="${esc(r.purchase_order)}">${esc(r.purchase_order)}</button></td>
-                <td>${fmtDate(r.date)}</td>
-                <td>${dash(r.supplier)}</td>
-                <td class="pcb-vendor" title="${esc(r.supplier_full_name)}">${dash(r.supplier_full_name)}</td>
-                <td><span class="pcb-mat-chip">${dash(r._mat_label)}</span></td>
-                <td class="num">${qty(r.items_count)}</td>
-                <td class="num">${money(r.total_value)}</td>
-                <td class="num">${qty(r._passed)}</td>
-                <td class="num">${qty(r._exceptions)}</td>
-                <td class="num">${qty(r._pending)}</td>
-                <td>${statusBadge(r._validation_status)}</td>
-                <td>${dash(r._last_validated)}</td>
-                <td>${dash(r._validated_by)}</td>
-                <td><button type="button" class="pcb-btn pcb-btn-sm pcb-drill-btn" data-po="${esc(r.purchase_order)}">View</button></td>
+                <td class="pcb-check" data-col-key="check"><input type="checkbox" class="pcb-row-check" data-po="${esc(r.purchase_order)}" ${r._checked ? 'checked' : ''}></td>
+                <td class="pcb-sticky-po" data-col-key="po"><button type="button" class="pcb-po-link" data-po="${esc(r.purchase_order)}">${esc(r.purchase_order)}</button></td>
+                <td data-col-key="date">${fmtDate(r.date)}</td>
+                <td data-col-key="vendor_code">${dash(r.supplier)}</td>
+                <td class="pcb-vendor" data-col-key="vendor_name" title="${esc(r.supplier_full_name)}">${dash(r.supplier_full_name)}</td>
+                <td data-col-key="material"><span class="pcb-mat-chip">${dash(r._mat_label)}</span></td>
+                <td class="num" data-col-key="items">${qty(r.items_count)}</td>
+                <td class="num" data-col-key="value">${money(r.total_value)}</td>
+                <td class="num" data-col-key="passed">${qty(r._passed)}</td>
+                <td class="num" data-col-key="exceptions">${qty(r._exceptions)}</td>
+                <td class="num" data-col-key="pending">${qty(r._pending)}</td>
+                <td data-col-key="status">${statusBadge(r._validation_status)}</td>
+                <td data-col-key="last">${dash(r._last_validated)}</td>
+                <td data-col-key="validated_by">${dash(r._validated_by)}</td>
+                <td data-col-key="actions"><button type="button" class="pcb-btn pcb-btn-sm pcb-drill-btn" data-po="${esc(r.purchase_order)}">View</button></td>
             </tr>`;
         }).join('');
 
@@ -574,6 +833,15 @@
         return cfg.presetDates || {};
     }
 
+    function ymdDaysAgo(days) {
+        const d = new Date();
+        d.setDate(d.getDate() - days);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    }
+
     function applyRangePreset(key, { fillDates = true } = {}) {
         const customWrap = $('pcbCustomDates');
         const isCustom = key === 'custom';
@@ -586,6 +854,13 @@
             if (dates) {
                 if ($('pcbFrom')) $('pcbFrom').value = dates.from || '';
                 if ($('pcbTo')) $('pcbTo').value = dates.to || '';
+            }
+        } else if (isCustom && fillDates) {
+            const fromEl = $('pcbFrom');
+            const toEl = $('pcbTo');
+            if (fromEl && toEl && (!fromEl.value || !toEl.value)) {
+                fromEl.value = ymdDaysAgo(7);
+                toEl.value = ymdDaysAgo(0);
             }
         }
     }
@@ -693,21 +968,50 @@
 
     function searchPoHeader() {
         const raw = String($('pcbPoSearch')?.value || '').trim();
+        if (!raw) {
+            if ($('pcbQuickSearch') && $('pcbQuickSearch').value) {
+                $('pcbQuickSearch').value = '';
+                applyFilter();
+            }
+            return;
+        }
         const po = raw.replace(/\D/g, '');
         if (!po || !/^\d{1,10}$/.test(po)) {
             toast('Enter a valid PO number (up to 10 digits).', 'error');
             return;
         }
         if ($('pcbQuickSearch')) $('pcbQuickSearch').value = po;
-        // Prefer opening offcanvas for this PO if it is already in the list
-        const inList = allRows.some((r) => String(r.purchase_order) === po);
-        if (inList) {
+
+        // 1. Exact match in current loaded list (full or without leading zeros)
+        const exact = allRows.find((r) => {
+            const rowPo = String(r.purchase_order || '');
+            return rowPo === po || rowPo.replace(/^0+/, '') === po.replace(/^0+/, '');
+        });
+        if (exact) {
             applyFilter();
-            void openDrill(po);
+            void openDrill(exact.purchase_order);
             return;
         }
-        // Otherwise open costing workbench for that PO
-        window.location.href = workbenchUrl(po);
+
+        // 2. Partial match in current list (e.g. typing last few digits)
+        const partialMatches = allRows.filter((r) => String(r.purchase_order || '').includes(po));
+        if (partialMatches.length > 0) {
+            applyFilter();
+            if (partialMatches.length === 1) {
+                void openDrill(partialMatches[0].purchase_order);
+            }
+            return;
+        }
+
+        // 3. If a full PO number (8-10 digits) was typed and not in current list, open workbench
+        if (po.length >= 8) {
+            window.location.href = workbenchUrl(po);
+            return;
+        }
+
+        // 4. Otherwise filter table and inform user
+        applyFilter();
+        toast(`No PO found matching "${po}" in loaded records.`, 'info');
     }
 
     async function validateOne(po) {
@@ -846,7 +1150,19 @@
 
     function resultPill(status) {
         const s = String(status || '').toUpperCase();
-        return `<span class="pcb-badge ${s === 'PASS' ? 'is-pass' : 'is-fail'}">${esc(s || '—')}</span>`;
+        let cls = 'is-fail';
+        let label = s || '—';
+        if (s === 'PASS') {
+            cls = 'is-pass';
+            label = 'PASS';
+        } else if (s === 'NEEDS_REVIEW') {
+            cls = 'is-review';
+            label = 'NEEDS REVIEW';
+        } else if (s === 'FAIL' || s === 'EXCEPTION') {
+            cls = 'is-fail';
+            label = 'EXCEPTION';
+        }
+        return `<span class="pcw-pill ${cls}">${esc(label)}</span>`;
     }
 
     function openOffcanvas() {
@@ -873,7 +1189,11 @@
     let activeItemIdx = -1;
     let activeItemRows = [];
     let filteredItemRows = [];
-    let hiddenItemCols = new Set();
+    const DEFAULT_HIDDEN_ITEM_COLS = [
+        'mat_category', 'unit', 'currency', 'net_value', 'cost_section', 'cost_item',
+        'cost_description', 'difference', 'sell_price', 'making', 'quoted_uom', 'quoted_currency'
+    ];
+    let hiddenItemCols = new Set(DEFAULT_HIDDEN_ITEM_COLS);
     /** @type {Record<string, string>} live column-filter values (source of truth) */
     const itemColFilterState = Object.create(null);
 
@@ -1216,12 +1536,16 @@
     }
 
     function applyItemColumnVisibility() {
+        if (pcbItemTablePrefManager) {
+            pcbItemTablePrefManager.refresh();
+            return;
+        }
         const table = $('pcbItemTable');
         if (!table) return;
         const headerCells = table.querySelectorAll('tr.pcb-item-header-row th');
         const filterCells = table.querySelectorAll('tr.pcb-item-filter-row th');
         headerCells.forEach((th, i) => {
-            const key = th.getAttribute('data-icol');
+            const key = th.getAttribute('data-icol') || th.getAttribute('data-col-key');
             const hide = key ? hiddenItemCols.has(key) : false;
             th.style.display = hide ? 'none' : '';
             if (filterCells[i]) filterCells[i].style.display = hide ? 'none' : '';
@@ -1230,7 +1554,7 @@
             if (tr.classList.contains('pcw-empty')) return;
             const tds = tr.children;
             headerCells.forEach((th, i) => {
-                const key = th.getAttribute('data-icol');
+                const key = th.getAttribute('data-icol') || th.getAttribute('data-col-key');
                 if (!tds[i]) return;
                 tds[i].style.display = (key && hiddenItemCols.has(key)) ? 'none' : '';
             });
@@ -1238,6 +1562,7 @@
     }
 
     function buildItemColumnMenu() {
+        if (pcbItemTablePrefManager) return;
         const menu = $('pcbItemColumnMenu');
         if (!menu) return;
         const visible = ITEM_COL_DEFS.filter((c) => !c.locked && !hiddenItemCols.has(c.key)).length;
@@ -1270,8 +1595,12 @@
                 e.preventDefault();
                 e.stopPropagation();
                 const act = btn.getAttribute('data-pcb-icol-act');
-                if (act === 'all' || act === 'reset') {
+                if (act === 'all') {
                     hiddenItemCols.clear();
+                    buildItemColumnMenu();
+                    applyItemColumnVisibility();
+                } else if (act === 'reset') {
+                    hiddenItemCols = new Set(DEFAULT_HIDDEN_ITEM_COLS);
                     buildItemColumnMenu();
                     applyItemColumnVisibility();
                 }
@@ -1293,16 +1622,13 @@
         const body = $('pcbItemBody');
         if (!body) return;
         const filtered = filterItemRows();
-        const items = groupItemRows(filtered);
+        const items = filtered;
         updateItemFilterUi();
         if ($('pcbItemCount')) {
             if (!filtered.length) {
                 $('pcbItemCount').textContent = 'No items';
-            } else if (items.length === filtered.length) {
-                $('pcbItemCount').textContent = `Showing ${filtered.length} of ${activeItemRows.length} items`;
             } else {
-                $('pcbItemCount').textContent =
-                    `Showing ${items.length} groups · ${filtered.length} of ${activeItemRows.length} items`;
+                $('pcbItemCount').textContent = `Showing ${filtered.length} of ${activeItemRows.length} items`;
             }
             $('pcbItemCount').classList.toggle('is-filtered', !!(itemSearchQuery() || Object.keys(itemColFilterMap()).length));
         }
@@ -1317,36 +1643,33 @@
 
         body.innerHTML = items.map((r) => {
             const idx = r._srcIdx != null ? r._srcIdx : activeItemRows.indexOf(r);
-            const active = (r._memberIdxs || [idx]).includes(activeItemIdx) ? ' is-active' : '';
-            const groupBadge = r._group
-                ? `<span class="pcb-group-badge" title="${esc(String(r._group_size))} matching lines">${esc(String(r._group_size))}×</span>`
-                : '';
+            const active = idx === activeItemIdx ? ' is-active' : '';
             const matGroup = r.cost_item || r.material_group || '';
-            return `<tr class="pcw-row${active}${r._group ? ' is-group' : ''}" data-idx="${idx}" data-member-idxs="${esc((r._memberIdxs || [idx]).join(','))}">
-                <td class="pcw-check"><input type="checkbox" class="pcb-item-check" data-idx="${idx}" data-member-idxs="${esc((r._memberIdxs || [idx]).join(','))}" ${r._checked ? 'checked' : ''}></td>
-                <td>${resultPill(r.status)}</td>
-                <td>${dash(r.po_item)}</td>
-                <td class="pcw-mat" title="${esc(r.material)}">${dash(r.material)}</td>
-                <td title="${esc(r.description)}">${dash(r.description)}${groupBadge}</td>
-                <td>${dash(r.mat_category)}</td>
-                <td>${dash(r.sales_order)}</td>
-                <td class="num">${qty(r.po_qty)}</td>
-                <td>${dash(r.unit)}</td>
-                <td>${dash(r.currency)}</td>
-                <td class="num">${money2(r.net_value)}</td>
-                <td title="${esc(r.costing_ref)}">${dash(r.costing_ref)}</td>
-                <td>${dash(r.cost_section)}</td>
-                <td title="${esc(matGroup)}">${dash(matGroup)}</td>
-                <td title="${esc(r.cost_description)}">${dash(r.cost_description)}</td>
-                <td class="num">${money2(r.expected_unit_cost)}</td>
-                <td class="num">${money2(r.po_unit_cost)}</td>
-                <td class="num">${money2(r.difference)}</td>
-                <td class="num">${varianceCell(r.variance_pct)}</td>
-                <td class="num">${money2(r.sell_price)}</td>
-                <td class="num">${money2(r.making)}</td>
-                <td>${dash(r.quoted_uom)}</td>
-                <td>${dash(r.quoted_currency)}</td>
-                <td>${dash(r.validation_result)}</td>
+            return `<tr class="pcw-row${active}" data-idx="${idx}">
+                <td class="pcw-check" data-col-key="check"><input type="checkbox" class="pcb-item-check" data-idx="${idx}" ${r._checked ? 'checked' : ''}></td>
+                <td data-col-key="status">${resultPill(r.status)}</td>
+                <td data-col-key="po_item">${dash(r.po_item)}</td>
+                <td class="pcw-mat" data-col-key="material" title="${esc(r.material)}">${dash(r.material)}</td>
+                <td data-col-key="description" title="${esc(r.description)}">${dash(r.description)}</td>
+                <td data-col-key="mat_category">${dash(r.mat_category)}</td>
+                <td data-col-key="sales_order" title="${esc((r.quotations || []).join(', ') || r.quotation || '')}">${dash(r.sales_order)}${r.quotation ? `<div class="pcw-sub">Q ${esc(r.quotation)}</div>` : ''}</td>
+                <td class="num" data-col-key="po_qty">${qty(r.po_qty)}</td>
+                <td data-col-key="unit">${dash(r.unit)}</td>
+                <td data-col-key="currency">${dash(r.currency)}</td>
+                <td class="num" data-col-key="net_value">${money2(r.net_value)}</td>
+                <td data-col-key="costing_ref" title="${esc(r.costing_ref)}">${dash(r.costing_ref)}</td>
+                <td data-col-key="cost_section">${dash(r.cost_section)}</td>
+                <td data-col-key="cost_item" title="${esc(matGroup)}">${dash(matGroup)}</td>
+                <td data-col-key="cost_description" title="${esc(r.cost_description)}">${dash(r.cost_description)}</td>
+                <td class="num" data-col-key="expected_unit_cost">${money2(r.expected_unit_cost)}</td>
+                <td class="num" data-col-key="po_unit_cost">${money2(r.po_unit_cost)}</td>
+                <td class="num" data-col-key="difference">${money2(r.difference)}</td>
+                <td class="num" data-col-key="variance_pct">${varianceCell(r.variance_pct)}</td>
+                <td class="num" data-col-key="sell_price">${money2(r.sell_price)}</td>
+                <td class="num" data-col-key="making">${money2(r.making)}</td>
+                <td data-col-key="quoted_uom">${dash(r.quoted_uom)}</td>
+                <td data-col-key="quoted_currency">${dash(r.quoted_currency)}</td>
+                <td data-col-key="validation_result">${dash(r.validation_result)}</td>
             </tr>`;
         }).join('');
 
@@ -1396,9 +1719,12 @@
         if ($('pcbOcKpiItems')) $('pcbOcKpiItems').textContent = qty(s.po_items || 0);
         if ($('pcbOcKpiPassed')) $('pcbOcKpiPassed').textContent = qty(s.passed || 0);
         if ($('pcbOcKpiExceptions')) $('pcbOcKpiExceptions').textContent = qty(s.exceptions || 0);
+        if ($('pcbOcKpiReview')) $('pcbOcKpiReview').textContent = qty(s.needs_review || 0);
         if ($('pcbOcKpiValue')) {
             const val = s.total_po_value != null ? s.total_po_value : fallbackValue;
-            $('pcbOcKpiValue').textContent = '₹ ' + money(val || 0);
+            const curr = (s.currency || 'INR').toUpperCase();
+            const sym = curr === 'EUR' ? '€ ' : (curr === 'USD' ? '$ ' : '₹ ');
+            $('pcbOcKpiValue').textContent = sym + money2(val || 0);
         }
     }
 
@@ -1552,8 +1878,14 @@
         const data = itemCache[po];
         if ($('pcbDrillTitle')) $('pcbDrillTitle').textContent = `PO ${po}`;
         if ($('pcbDrillSub')) {
+            const s = data?.summary || {};
+            const parts = [];
+            if (s.passed != null) parts.push(`${s.passed} passed`);
+            if (s.exceptions != null) parts.push(`${s.exceptions} exceptions`);
+            if (s.needs_review != null && s.needs_review > 0) parts.push(`${s.needs_review} needs review`);
+            if (data?._validated_at) parts.push(data._validated_at);
             $('pcbDrillSub').textContent = data
-                ? `${data.summary?.passed || 0} passed · ${data.summary?.exceptions || 0} exceptions · ${data._validated_at || ''}`
+                ? parts.join(' · ')
                 : (runtimeRunning ? 'Validation in progress…' : 'Loading ZCOST validation…');
         }
         const wb = $('pcbOpenWorkbench');
@@ -1639,7 +1971,7 @@
         });
         $('pcbRange')?.addEventListener('change', () => {
             applyRangePreset(currentRange(), { fillDates: true });
-            if (currentRange() !== 'custom') void fetchPos();
+            void fetchPos();
         });
         $('pcbFrom')?.addEventListener('change', () => {
             if (currentRange() === 'custom') void fetchPos();
@@ -1706,20 +2038,14 @@
             const key = th.getAttribute('data-sort');
             if (key) toggleSort(key);
         });
-        $('pcbColumnToggleBtn')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const dd = $('pcbColumnToggleDropdown');
-            const open = !dd?.classList.contains('is-open');
-            dd?.classList.toggle('is-open', open);
-            $('pcbColumnToggleBtn')?.setAttribute('aria-expanded', open ? 'true' : 'false');
-            if (open) buildColumnMenu();
-        });
-        document.addEventListener('click', (e) => {
-            const dd = $('pcbColumnToggleDropdown');
-            if (dd && !dd.contains(e.target)) {
-                dd.classList.remove('is-open');
-                $('pcbColumnToggleBtn')?.setAttribute('aria-expanded', 'false');
-            }
+        pcbTablePrefManager = initTablePreferences({
+            scriptId: 'pcbTablePrefs',
+            tableId: 'pcbTable',
+            menuId: 'pcbColumnToggleMenu',
+            toggleBtnId: 'pcbColumnToggleBtn',
+            dropdownId: 'pcbColDropdown',
+            statusId: 'pcbColSaveStatus',
+            colAttr: 'data-col-key',
         });
         $('pcbExportBtn')?.addEventListener('click', exportCsv);
         $('pcbPrev')?.addEventListener('click', () => { if (page > 1) { page--; renderTable(); } });
@@ -1810,20 +2136,14 @@
             btn?.classList.toggle('is-active', show);
         });
         expandItemTableFully();
-        $('pcbItemColumnBtn')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const dd = $('pcbItemColumnDropdown');
-            const open = !dd?.classList.contains('is-open');
-            dd?.classList.toggle('is-open', open);
-            $('pcbItemColumnBtn')?.setAttribute('aria-expanded', open ? 'true' : 'false');
-            if (open) buildItemColumnMenu();
-        });
-        document.addEventListener('click', (e) => {
-            const dd = $('pcbItemColumnDropdown');
-            if (dd && !dd.contains(e.target)) {
-                dd.classList.remove('is-open');
-                $('pcbItemColumnBtn')?.setAttribute('aria-expanded', 'false');
-            }
+        pcbItemTablePrefManager = initTablePreferences({
+            scriptId: 'pcbItemTablePrefs',
+            tableId: 'pcbItemTable',
+            menuId: 'pcbItemColumnMenu',
+            toggleBtnId: 'pcbItemColToggle',
+            dropdownId: 'pcbItemColDropdown',
+            statusId: 'pcbItemColSaveStatus',
+            colAttr: 'data-col-key',
         });
         $('pcbItemExcelBtn')?.addEventListener('click', exportItemCsv);
         $('pcbItemSelectAll')?.addEventListener('change', (e) => {
@@ -1835,18 +2155,14 @@
         $('pcbItemBody')?.addEventListener('click', (e) => {
             const check = e.target.closest('.pcb-item-check');
             if (check) {
-                const idxs = String(check.getAttribute('data-member-idxs') || check.getAttribute('data-idx') || '')
-                    .split(',')
-                    .map((v) => Number(v))
-                    .filter((n) => !Number.isNaN(n));
-                idxs.forEach((i) => {
-                    if (activeItemRows[i]) activeItemRows[i]._checked = check.checked;
-                });
-                const primary = idxs[0];
-                if (check.checked && primary != null) {
-                    showItemDetail(primary, { scroll: true });
-                } else {
-                    renderItemTable();
+                const idx = Number(check.getAttribute('data-idx'));
+                if (!Number.isNaN(idx) && activeItemRows[idx]) {
+                    activeItemRows[idx]._checked = check.checked;
+                    if (check.checked) {
+                        showItemDetail(idx, { scroll: true });
+                    } else {
+                        renderItemTable();
+                    }
                 }
                 e.stopPropagation();
                 return;

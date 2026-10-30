@@ -7673,6 +7673,84 @@ td[data-hover-type]:hover {
 .pcw-alert { padding: 10px 14px; border-radius: 12px; font-size: 13px; font-weight: 700; }
 .pcw-alert.is-error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
 .pcw-alert.is-ok { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+.pcw-mode-bar {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 5px;
+    border-radius: 14px;
+    background: #eef2ff;
+    border: 1px solid #c7d2fe;
+    width: fit-content;
+    max-width: 100%;
+}
+.pcw-mode-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 40px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: #4338ca;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background .15s ease, color .15s ease, box-shadow .15s ease;
+}
+.pcw-mode-btn .material-icons-round { font-size: 18px; }
+.pcw-mode-btn:hover { background: rgba(255,255,255,.55); }
+.pcw-mode-btn.is-active {
+    background: #fff;
+    color: #312e81;
+    box-shadow: 0 4px 14px rgba(67,56,202,.16);
+}
+.pcw-compare-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 12px;
+    padding: 14px 16px;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    background: linear-gradient(180deg, #fff, #f8fafc);
+    box-shadow: 0 8px 24px rgba(15,23,42,.04);
+}
+.pcw-compare-bar[hidden] {
+    display: none !important;
+}
+.pcw-compare-bar .pcw-field { flex: 1 1 200px; max-width: 320px; }
+.pcw-compare-bar label {
+    font-size: 11px;
+    font-weight: 700;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+}
+.pcw-select {
+    height: 40px;
+    width: 100%;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    padding: 0 12px;
+    font: inherit;
+    background: #fff;
+    color: #0f172a;
+}
+.pcw-select:focus {
+    outline: none;
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99,102,241,.15);
+}
+.pcw-compare-hint {
+    flex: 1 1 100%;
+    margin: 0;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 600;
+}
+.pcw[data-mode="non_validated"] .pcw-compare-maktx { color: #1d4ed8; }
 .pcw-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 14px 16px; border: 1px solid #e2e8f0; border-radius: 16px; background: #fff; box-shadow: 0 8px 24px rgba(15,23,42,.04); }
 .pcw-field { display: grid; gap: 6px; min-width: 150px; }
 .pcw-field-seg { min-width: 240px; }
@@ -7718,10 +7796,114 @@ td[data-hover-type]:hover {
 .pcw-var.is-good { color: #15803d; font-weight: 700; }
 .pcw-var.is-bad { color: #b91c1c; font-weight: 700; }
 .pcw-mat { font-weight: 700; color: #3730a3; }
+.pcw-table-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+}
+.pcw-table-toolbar-sec { margin-top: 4px; }
+.pcw-table-title h2 {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: #0f172a;
+}
+.pcw-table-title p {
+    margin: 4px 0 0;
+    color: #64748b;
+    font-size: 13px;
+}
+.pcw-inline-seg { min-width: 0; }
+.pcw-inline-seg .pcb-seg { margin: 0; }
+.pcw-line-count {
+    font-size: 12px;
+    font-weight: 700;
+    color: #64748b;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 999px;
+    padding: 6px 12px;
+}
+.pcw-compare-po { max-width: 220px; color: #0f172a; font-weight: 600; }
+.pcw-compare-maktx { max-width: 260px; color: #4338ca; font-weight: 600; }
+.pcw-vs { color: #94a3b8; font-weight: 600; margin: 0 4px; }
+.pcw-table-unified { min-width: 1600px; }
+.pcw-dd { min-width: 150px; vertical-align: middle; }
+.pcw-rpt-toolbar { margin-top: 4px; }
+.pcw-unified-table { min-width: 2200px; }
+.pcw-unified-table .pcw-row-select {
+    width: 100%;
+    min-width: 148px;
+    max-width: 240px;
+    height: 34px;
+    border: 1px solid #c7d2fe;
+    border-radius: 8px;
+    padding: 0 8px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    color: #312e81;
+    background: #eef2ff;
+}
+.pcw-unified-table .pcw-row-select:focus {
+    outline: none;
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99,102,241,.18);
+}
+.pcw-quote-fixed {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 8px;
+    background: #ecfdf5;
+    color: #047857;
+    font-weight: 700;
+    font-size: 12px;
+}
+.pcw-nav-chip {
+    display: inline-flex;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: #e0e7ff;
+    color: #3730a3;
+    font-size: 11px;
+    font-weight: 800;
+}
+.pcw-row.is-open { background: #fffbeb; }
+.pcw-row.is-open:hover { background: #fef3c7; }
+.pcw-unified-table .pcw-row.is-pass-row td {
+    background: #ecfdf5;
+}
+.pcw-unified-table .pcw-row.is-pass-row:hover td {
+    background: #d1fae5;
+}
+.pcw-unified-table .pcw-row.is-fail-row td {
+    background: #fff7ed;
+}
+.pcw-unified-table .pcw-row.is-fail-row:hover td {
+    background: #ffedd5;
+}
+.pcw-unified-table .pcw-row.is-pass-row.is-open td,
+.pcw-unified-table .pcw-row.is-fail-row.is-open td {
+    background: inherit;
+}
+.pcw-unified-table .pcw-row.is-pass-row.is-open td { background: #ecfdf5; }
+.pcw-unified-table .pcw-row.is-fail-row.is-open td { background: #fff7ed; }
+.pcw .rpt-tb-btn-primary {
+    background: #4f46e5;
+    color: #fff;
+    border-color: #4f46e5;
+}
+.pcw .rpt-tb-btn-primary:hover { background: #4338ca; }
+.is-costing-workbench .rpt-table-wrap.is-scroll-body {
+    max-height: calc(100vh - 280px);
+}
 .pcw-detail { border: 1px solid #e2e8f0; border-radius: 16px; background: #fff; padding: 16px 18px 18px; box-shadow: 0 10px 28px rgba(15,23,42,.04); }
 .pcw-detail-head h2 { margin: 0; font-size: 1.05rem; }
 .pcw-detail-head p { margin: 4px 0 0; color: #64748b; font-size: 13px; }
-.pcw-detail-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.pcw-detail-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
 .pcw-panel { border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px 14px; background: linear-gradient(180deg, #f8fafc, #fff); }
 .pcw-panel h3 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: #64748b; }
 .pcw-panel dl { margin: 0; display: grid; gap: 8px; }
@@ -7732,10 +7914,15 @@ td[data-hover-type]:hover {
 .pcw-panel dd.is-bad { color: #b91c1c; background: #fef2f2; border-radius: 8px; padding: 6px 8px; }
 .pcw-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; padding-bottom: 8px; }
 @media (max-width: 1100px) {
-  .pcw-kpis, .pcw-detail-grid { grid-template-columns: 1fr 1fr; }
+  .pcw-kpis { grid-template-columns: 1fr 1fr; }
+  .pcw-mode-bar { width: 100%; }
+  .pcw-mode-btn { flex: 1 1 auto; justify-content: center; }
 }
 @media (max-width: 720px) {
-  .pcw-kpis, .pcw-detail-grid { grid-template-columns: 1fr; }
+  .pcw-kpis { grid-template-columns: 1fr; }
+  .pcw-compare-bar .pcw-field { max-width: none; flex: 1 1 100%; }
+  .pcw-compare-bar .pcw-btn { width: 100%; justify-content: center; }
+  .pcw-table { min-width: 720px; }
 }
 
 /* --- Bulk PO Costing Validation --- */
@@ -8002,107 +8189,97 @@ td[data-hover-type]:hover {
     transition: width .2s ease;
 }
 
-/* KPI cards — colorful + motion */
+/* KPI cards — clean modern stat cards */
 .pcb-kpis {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0,1fr));
-    gap: 14px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
 }
 .pcb-kpi {
-    --kpi-accent: #6366f1;
-    --kpi-soft: #eef2ff;
-    --kpi-ink: #312e81;
     position: relative;
-    overflow: hidden;
-    display: grid;
-    grid-template-columns: auto 1fr;
-    grid-template-rows: auto auto;
-    column-gap: 12px;
-    row-gap: 10px;
+    display: flex;
     align-items: center;
-    min-width: 0;
-    padding: 16px 16px 12px;
-    border-radius: 18px;
-    border: 1px solid color-mix(in srgb, var(--kpi-accent) 22%, #fff);
-    background:
-        linear-gradient(145deg, color-mix(in srgb, var(--kpi-accent) 12%, #fff), #fff 55%);
-    box-shadow: 0 10px 24px rgba(15,23,42,.05);
-    animation: pcbKpiIn .55s cubic-bezier(.2,.8,.2,1) both;
-    animation-delay: var(--kpi-delay, 0ms);
-    transition: transform .22s ease, box-shadow .22s ease;
+    gap: 12px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 12px 16px;
+    min-height: 56px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
 }
 .pcb-kpi:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 16px 30px rgba(15,23,42,.1);
-}
-.pcb-kpi.is-pulse {
-    animation: pcbKpiIn .45s cubic-bezier(.2,.8,.2,1) both, pcbKpiPulse .7s ease;
-    animation-delay: var(--kpi-delay, 0ms), calc(var(--kpi-delay, 0ms) + 80ms);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.07);
+    border-color: #cbd5e1;
 }
 .pcb-kpi-glow {
-    position: absolute;
-    inset: auto -20% -40% auto;
-    width: 120px;
-    height: 120px;
-    border-radius: 50%;
-    background: radial-gradient(circle, color-mix(in srgb, var(--kpi-accent) 35%, transparent), transparent 70%);
-    pointer-events: none;
-    animation: pcbKpiGlow 3.2s ease-in-out infinite;
+    display: none !important;
+}
+.pcb-kpi-bar {
+    display: none !important;
 }
 .pcb-kpi-icon {
-    grid-row: 1;
-    flex: 0 0 auto;
-    width: 44px;
-    height: 44px;
-    border-radius: 14px;
-    display: grid;
-    place-items: center;
-    background: var(--kpi-soft);
-    color: var(--kpi-accent);
-    font-size: 22px;
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--kpi-accent) 18%, transparent);
-    animation: pcbIconBob 2.8s ease-in-out infinite;
+    width: 38px;
+    height: 38px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 19px;
+    flex-shrink: 0;
 }
-.pcb-kpi-body { min-width: 0; grid-column: 2; }
+.pcb-kpi.is-total .pcb-kpi-icon {
+    background: #ede9fe;
+    color: #4f46e5;
+}
+.pcb-kpi.is-pass .pcb-kpi-icon {
+    background: #dcfce7;
+    color: #16a34a;
+}
+.pcb-kpi.is-fail .pcb-kpi-icon {
+    background: #fee2e2;
+    color: #dc2626;
+}
+.pcb-kpi.is-pending .pcb-kpi-icon {
+    background: #fef3c7;
+    color: #d97706;
+}
+.pcb-kpi.is-value .pcb-kpi-icon {
+    background: #dcfce7;
+    color: #16a34a;
+}
+.pcb-kpi-body {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
 .pcb-kpi b {
     display: block;
-    font-size: clamp(1.05rem, 1.9vw, 1.4rem);
+    font-family: Outfit, sans-serif;
+    font-size: 18px;
     font-weight: 800;
     color: #0f172a;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    letter-spacing: -.02em;
-    line-height: 1.15;
 }
 .pcb-kpi small {
     display: block;
-    margin-top: 3px;
-    color: var(--kpi-ink);
-    font-size: 12px;
+    font-family: inherit;
+    font-size: 10px;
     font-weight: 700;
-    opacity: .78;
-}
-.pcb-kpi-bar {
-    grid-column: 1 / -1;
-    height: 5px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--kpi-accent) 14%, #f1f5f9);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #64748b;
+    margin-top: 2px;
+    white-space: nowrap;
     overflow: hidden;
+    text-overflow: ellipsis;
 }
-.pcb-kpi-bar i {
-    display: block;
-    height: 100%;
-    width: 0;
-    border-radius: inherit;
-    background: linear-gradient(90deg, var(--kpi-accent), color-mix(in srgb, var(--kpi-accent) 55%, #fff));
-    transition: width .65s cubic-bezier(.2,.8,.2,1);
-}
-.pcb-kpi.is-total { --kpi-accent: #6366f1; --kpi-soft: #eef2ff; --kpi-ink: #3730a3; }
-.pcb-kpi.is-pass { --kpi-accent: #16a34a; --kpi-soft: #dcfce7; --kpi-ink: #166534; }
-.pcb-kpi.is-fail { --kpi-accent: #dc2626; --kpi-soft: #fee2e2; --kpi-ink: #991b1b; }
-.pcb-kpi.is-pending { --kpi-accent: #d97706; --kpi-soft: #fef3c7; --kpi-ink: #92400e; }
-.pcb-kpi.is-value { --kpi-accent: #ea580c; --kpi-soft: #ffedd5; --kpi-ink: #9a3412; }
 
 @keyframes pcbKpiIn {
     from { opacity: 0; transform: translateY(12px) scale(.97); }
@@ -8481,55 +8658,80 @@ body.pcb-offcanvas-open { overflow: hidden; }
     position: fixed;
     inset: 0;
     z-index: 1300;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    box-sizing: border-box;
 }
 .pcb-offcanvas[hidden] { display: none !important; }
 .pcb-offcanvas-backdrop {
-    position: absolute;
+    position: fixed;
     inset: 0;
-    background: rgba(15, 23, 42, .48);
-    backdrop-filter: blur(3px);
+    background: rgba(15, 23, 42, .55);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     opacity: 0;
     transition: opacity .25s ease;
 }
 .pcb-offcanvas-panel {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: 90vw;
-    max-width: 90vw;
-    min-width: 0;
+    position: relative;
+    width: 100%;
+    max-width: 1540px;
+    height: calc(100vh - 48px);
+    max-height: calc(100vh - 48px);
     display: flex;
     flex-direction: column;
     background: #f8fafc;
-    box-shadow: -24px 0 60px rgba(15, 23, 42, .28);
-    transform: translateX(100%);
-    transition: transform .28s cubic-bezier(.16, 1, .3, 1);
-    overflow: hidden; /* keep L/R scroll inside table only */
+    border-radius: 20px;
+    border: 1px solid rgba(226, 232, 240, 0.9);
+    box-shadow: 0 25px 65px -12px rgba(15, 23, 42, .38), 0 0 0 1px rgba(255, 255, 255, .3);
+    opacity: 0;
+    transform: scale(0.97) translateY(12px);
+    transition: transform .28s cubic-bezier(.16, 1, .3, 1), opacity .25s ease;
+    overflow: hidden;
+    z-index: 1;
 }
 .pcb-offcanvas.is-open .pcb-offcanvas-backdrop { opacity: 1; }
-.pcb-offcanvas.is-open .pcb-offcanvas-panel { transform: translateX(0); }
+.pcb-offcanvas.is-open .pcb-offcanvas-panel {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+}
 .pcb-offcanvas-head {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 16px;
-    padding: 16px 22px;
+    padding: 18px 26px;
     background: #fff;
     border-bottom: 1px solid #e2e8f0;
-    border-top: 4px solid #4f46e5;
+    border-radius: 20px 20px 0 0;
+    position: relative;
+    flex-shrink: 0;
+}
+.pcb-offcanvas-head::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 24px;
+    right: 24px;
+    height: 3px;
+    border-radius: 0 0 4px 4px;
+    background: linear-gradient(90deg, #4f46e5, #818cf8, #c084fc);
 }
 .pcb-offcanvas-kicker {
-    display: block;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     font-size: 11px;
     font-weight: 800;
-    letter-spacing: .06em;
+    letter-spacing: .08em;
     text-transform: uppercase;
     color: #6366f1;
 }
 .pcb-offcanvas-title h2 {
-    margin: 4px 0 0;
-    font-size: 1.35rem;
+    margin: 3px 0 0;
+    font-size: 1.45rem;
     font-weight: 800;
     color: #0f172a;
     letter-spacing: -.02em;
@@ -8538,26 +8740,55 @@ body.pcb-offcanvas-open { overflow: hidden; }
     margin: 4px 0 0;
     font-size: 13px;
     color: #64748b;
-    font-weight: 600;
+    font-weight: 500;
 }
 .pcb-offcanvas-actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     flex-shrink: 0;
 }
+#pcbOpenWorkbench.pcb-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 38px;
+    padding: 0 16px;
+    border-radius: 999px;
+    background: #eef2ff;
+    color: #4f46e5;
+    border: 1px solid #c7d2fe;
+    font-size: 13px;
+    font-weight: 700;
+    text-decoration: none;
+    box-shadow: 0 1px 3px rgba(79, 70, 229, 0.08);
+    transition: all .18s ease;
+}
+#pcbOpenWorkbench.pcb-btn:hover {
+    background: #4f46e5;
+    color: #ffffff;
+    border-color: #4f46e5;
+    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25);
+    transform: translateY(-1px);
+}
 .pcb-offcanvas-close {
-    width: 40px;
-    height: 40px;
+    width: 38px;
+    height: 38px;
     border-radius: 12px;
     border: 1px solid #e2e8f0;
     background: #fff;
-    color: #334155;
+    color: #64748b;
     display: grid;
     place-items: center;
     cursor: pointer;
+    transition: all .18s ease;
 }
-.pcb-offcanvas-close:hover { background: #f1f5f9; color: #0f172a; }
+.pcb-offcanvas-close:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+    border-color: #cbd5e1;
+    transform: rotate(90deg);
+}
 .pcb-offcanvas-body {
     flex: 1;
     min-height: 0;
@@ -8566,7 +8797,7 @@ body.pcb-offcanvas-open { overflow: hidden; }
     max-width: 100%;
     overflow-x: hidden; /* panel itself must not scroll sideways */
     overflow-y: auto;
-    padding: 16px 22px 24px;
+    padding: 20px 26px 24px;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     gap: 16px;
@@ -8579,20 +8810,87 @@ body.pcb-offcanvas-open { overflow: hidden; }
     max-width: 100%;
 }
 .pcb-oc-kpis {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 14px;
     margin: 0;
     width: 100%;
-    max-width: 100%;
+    box-sizing: border-box;
+}
+.pcb-oc-kpis .pcw-kpi {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+    border-radius: 16px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.03);
+    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.pcb-oc-kpis .pcw-kpi:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
+    border-color: #cbd5e1;
+}
+.pcb-oc-kpis .pcw-kpi .material-icons-round {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    font-size: 22px;
+    background: #eef2ff;
+    color: #4f46e5;
+    flex-shrink: 0;
+}
+.pcb-oc-kpis .pcw-kpi.is-pass .material-icons-round {
+    background: #dcfce7;
+    color: #16a34a;
+}
+.pcb-oc-kpis .pcw-kpi.is-fail .material-icons-round {
+    background: #fee2e2;
+    color: #dc2626;
+}
+.pcb-oc-kpis .pcw-kpi.is-review .material-icons-round {
+    background: #fef3c7;
+    color: #d97706;
+}
+.pcb-oc-kpis .pcw-kpi.is-value .material-icons-round {
+    background: #ffedd5;
+    color: #ea580c;
+}
+.pcb-oc-kpis .pcw-kpi b {
+    display: block;
+    font-size: 1.45rem;
+    font-weight: 800;
+    color: #0f172a;
+    line-height: 1.15;
+    letter-spacing: -.02em;
+}
+.pcb-oc-kpis .pcw-kpi small {
+    display: block;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    margin-top: 2px;
 }
 .pcb-oc-toolbar {
     margin: 0;
     position: relative;
     z-index: 30;
     top: auto;
-    border-radius: 12px;
+    border-radius: 14px;
     width: 100%;
     max-width: 100%;
     min-width: 0;
     overflow: visible;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.02);
+    padding: 10px 14px;
 }
 .pcb-oc-toolbar .pcb-col-dropdown {
     position: relative;
@@ -8661,8 +8959,8 @@ body.pcb-offcanvas-open { overflow: hidden; }
     overscroll-behavior-x: contain;
 }
 .pcb-oc-table-wrap .pcw-table {
-    min-width: 2200px;
-    width: max-content;
+    min-width: 1000px;
+    width: 100%;
     border-collapse: separate;
     border-spacing: 0;
 }
@@ -8684,8 +8982,14 @@ body.pcb-offcanvas-open { overflow: hidden; }
     position: static !important;
     top: auto !important;
     z-index: auto;
-    border-bottom: 2px solid #cbd5e1;
-    background: #f1f5f9;
+    border-bottom: 2px solid #e2e8f0;
+    background: #f8fafc;
+    color: #475569;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    padding: 12px 14px;
 }
 .pcb-oc-table-wrap .pcw-table thead tr.pcb-item-filter-row th {
     position: static !important;
@@ -9607,3 +9911,557 @@ body.fso-drawer-open { overflow: hidden; }
     .fso-drawer-table-wrap { max-height: min(48vh, 420px); }
     .fso-drawer-toolbar { flex-wrap: wrap; gap: 8px; }
 }
+
+/* ==========================================================================
+   UNIFIED RESPONSIVE DESIGN SYSTEM (ALL SAP REPORTS PAGES)
+   Ensures seamless, polished experience on Desktop, Laptop, Tablet, and Mobile
+   ========================================================================== */
+
+/* 1. Universal Layout & Viewport Overflow Safety */
+html, body {
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: clip;
+}
+
+.rpt-body, .wrap, .wrap-wide, .rpt-app, .hub-wrapper, .audit-page {
+    width: 100%;
+    max-width: 100vw;
+    box-sizing: border-box;
+}
+
+/* 2. Top Navigation Bar Responsiveness (.rpt-bar, .hub-header, .audit-topbar) */
+@media (max-width: 1200px) {
+    .rpt-bar {
+        padding: 9px 14px;
+        gap: 10px;
+    }
+    .rpt-name {
+        font-size: 16px;
+    }
+    .rpt-search {
+        gap: 6px;
+    }
+    .rpt-field {
+        min-width: 120px;
+        flex: 0 1 160px;
+    }
+}
+
+@media (max-width: 1024px) {
+    .rpt-bar {
+        padding: 8px 12px;
+        gap: 8px;
+    }
+    .rpt-brand img {
+        height: 24px;
+        max-width: 110px;
+    }
+    .rpt-home, .hub-quick-icon-btn {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+    }
+    .rpt-home .material-icons-round,
+    .hub-quick-icon-btn .material-icons-round {
+        font-size: 18px;
+    }
+    /* Hide long username & role text on tablet/mobile; keep round avatar */
+    .hub-user-meta {
+        display: none !important;
+    }
+    .hub-profile-trigger {
+        padding: 3px !important;
+    }
+    .hub-avatar-wrap {
+        width: 32px;
+        height: 32px;
+    }
+    .rpt-field {
+        min-width: 110px;
+        padding: 0 8px;
+        font-size: 13px;
+    }
+    .rpt-field input, .rpt-field select {
+        font-size: 13px;
+        padding: 7px 0;
+    }
+    .rpt-field-date {
+        width: 145px !important;
+        min-width: 130px !important;
+        flex: 0 1 145px !important;
+    }
+}
+
+@media (max-width: 860px) {
+    .rpt-bar {
+        flex-wrap: wrap !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        padding: 8px 12px !important;
+        gap: 6px !important;
+    }
+    .rpt-bar-left {
+        flex: 0 1 auto !important;
+        min-width: 0 !important;
+        gap: 8px !important;
+    }
+    .rpt-bar-right, .hub-header-right {
+        flex: 0 0 auto !important;
+        margin-left: auto !important;
+    }
+    /* Move filter forms to full-width second row on mobile/tablets */
+    .rpt-search,
+    .prod-filters,
+    .po-filters,
+    .fso-header-filters,
+    .is-costing-bulk .pcb-header-filters,
+    .is-sales-page .rpt-bar-center {
+        order: 3 !important;
+        flex: 1 1 100% !important;
+        width: 100% !important;
+        margin-left: 0 !important;
+        margin-top: 4px !important;
+        justify-content: flex-start !important;
+        flex-wrap: wrap !important;
+        gap: 6px !important;
+    }
+    .is-sales-page .header-so-search {
+        flex: 1 1 200px !important;
+        width: auto !important;
+        max-width: none !important;
+    }
+    .is-sales-page .period-filter {
+        flex: 0 0 auto !important;
+    }
+    .rpt-field,
+    .rpt-field-filter,
+    .rpt-field-range,
+    .rpt-field-mat-cat,
+    .fso-hdr-search,
+    .po-direct-search,
+    .pcb-header-search {
+        flex: 1 1 calc(50% - 6px) !important;
+        min-width: 120px !important;
+        max-width: none !important;
+        width: auto !important;
+    }
+    .date-custom,
+    .fso-hdr-custom,
+    .pcb-header-custom {
+        display: flex !important;
+        flex: 1 1 100% !important;
+        width: 100% !important;
+        gap: 6px !important;
+        margin-top: 2px !important;
+    }
+    .rpt-field-date {
+        flex: 1 1 calc(50% - 3px) !important;
+        min-width: 110px !important;
+        max-width: none !important;
+        width: auto !important;
+    }
+    .rpt-btn, .po-direct-search-btn {
+        flex: 0 0 auto;
+        padding: 8px 12px;
+        font-size: 13px;
+    }
+}
+
+@media (max-width: 540px) {
+    .rpt-bar {
+        padding: 6px 10px !important;
+    }
+    .rpt-name {
+        display: none !important; /* Hide text on small phones to give full room to logo + navigation */
+    }
+    .rpt-brand img {
+        height: 22px !important;
+        max-width: 95px !important;
+    }
+    .rpt-field,
+    .rpt-field-filter,
+    .rpt-field-range,
+    .rpt-field-mat-cat,
+    .fso-hdr-search,
+    .po-direct-search,
+    .pcb-header-search,
+    .is-sales-page .header-so-search,
+    .is-sales-page .period-filter {
+        flex: 1 1 100% !important;
+        width: 100% !important;
+    }
+    .is-sales-page .period-trigger {
+        width: 100% !important;
+        justify-content: space-between !important;
+    }
+    .date-custom,
+    .fso-hdr-custom,
+    .pcb-header-custom {
+        flex-direction: column !important;
+        width: 100% !important;
+        gap: 6px !important;
+    }
+    .rpt-field-date {
+        flex: 1 1 100% !important;
+        width: 100% !important;
+    }
+    .rpt-btn {
+        padding: 7px 10px !important;
+        font-size: 12px !important;
+    }
+}
+
+/* 3. Universal KPI / Metric Cards Grid */
+@media (max-width: 1280px) {
+    .rpt-stats,
+    .fso-stat-row,
+    .po-stat-row,
+    .pcb-kpis,
+    .prod-stat-row,
+    .sales-kpi-grid,
+    .bom-stat-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        gap: 12px !important;
+    }
+}
+
+@media (max-width: 860px) {
+    .rpt-stats,
+    .fso-stat-row,
+    .po-stat-row,
+    .pcb-kpis,
+    .prod-stat-row,
+    .sales-kpi-grid,
+    .bom-stat-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 10px !important;
+    }
+    .rpt-stat,
+    .kpi-card,
+    .orders-kpi-card,
+    .pcb-kpi {
+        padding: 12px 14px !important;
+        gap: 10px !important;
+        border-radius: 12px !important;
+    }
+    .rpt-stat .material-icons-round,
+    .kpi-card .kpi-icon,
+    .orders-kpi-card .material-icons-round {
+        width: 38px !important;
+        height: 38px !important;
+        font-size: 20px !important;
+        border-radius: 10px !important;
+    }
+    .rpt-stat-val,
+    .stat-value-wrap b,
+    .kpi-info .value,
+    .orders-kpi-val,
+    .pcb-kpi-val {
+        font-size: clamp(17px, 3.8vw, 22px) !important;
+    }
+    .rpt-stat small,
+    .kpi-info .label,
+    .orders-kpi-lbl,
+    .pcb-kpi-lbl {
+        font-size: 11px !important;
+    }
+}
+
+@media (max-width: 480px) {
+    .rpt-stats,
+    .fso-stat-row,
+    .po-stat-row,
+    .pcb-kpis,
+    .prod-stat-row,
+    .sales-kpi-grid,
+    .bom-stat-grid {
+        grid-template-columns: 1fr !important;
+        gap: 8px !important;
+    }
+}
+
+/* 4. Table Toolbars Across All Reports */
+@media (max-width: 992px) {
+    .rpt-table-header,
+    .fso-table-toolbar,
+    .sales-table-toolbar,
+    .pcb-table-toolbar,
+    .audit-toolbar {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 8px !important;
+        padding: 10px 12px !important;
+    }
+    .rpt-tb-search,
+    .sales-tb-search,
+    .audit-search,
+    .fso-table-toolbar .rpt-tb-search {
+        width: 100% !important;
+        max-width: 100% !important;
+        margin: 0 !important;
+        flex: 1 1 100% !important;
+    }
+    .rpt-tb-search input,
+    .sales-tb-search input,
+    .audit-search input {
+        width: 100% !important;
+    }
+    .rpt-tb-actions,
+    .fso-table-actions,
+    .sales-tb-actions {
+        display: flex !important;
+        flex-wrap: wrap !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
+        gap: 6px !important;
+        width: 100% !important;
+    }
+    .rpt-table-header .rpt-tb-count,
+    .fso-table-toolbar .rpt-tb-count,
+    .sales-table-toolbar .rpt-tb-count {
+        align-self: flex-start !important;
+        font-size: 12px !important;
+    }
+}
+
+@media (max-width: 640px) {
+    .rpt-tb-actions,
+    .fso-table-actions,
+    .sales-tb-actions {
+        flex-wrap: nowrap !important;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+        padding-bottom: 4px !important;
+    }
+    .rpt-tb-btn,
+    .fso-table-actions .rpt-tb-btn,
+    .sales-tb-actions .rpt-tb-btn {
+        flex-shrink: 0 !important;
+        padding: 5px 9px !important;
+        font-size: 11.5px !important;
+        height: 32px !important;
+        border-radius: 8px !important;
+    }
+}
+
+/* 5. Tables & Horizontal Scrolling */
+.rpt-table-wrap,
+.fso-table-wrap,
+.sales-table-wrap,
+.audit-table-wrap,
+.table-responsive {
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+}
+
+@media (max-width: 860px) {
+    .rpt-table-wrap.is-scroll-body,
+    .fso-table-wrap.is-scroll-body {
+        max-height: calc(100vh - 290px) !important;
+    }
+    .rpt-col-input {
+        min-width: 65px !important;
+        font-size: 11px !important;
+        padding: 3px 5px !important;
+    }
+}
+
+/* 6. Universal Pagination Responsiveness */
+@media (max-width: 768px) {
+    .rpt-pagination {
+        flex-direction: column !important;
+        align-items: center !important;
+        gap: 8px !important;
+        padding: 10px 12px !important;
+    }
+    .rpt-page-info {
+        font-size: 12px !important;
+        text-align: center !important;
+        width: 100% !important;
+    }
+    .rpt-page-nav {
+        justify-content: center !important;
+        flex-wrap: wrap !important;
+        gap: 4px !important;
+    }
+    .rpt-page-btn {
+        min-width: 30px !important;
+        height: 30px !important;
+        padding: 0 6px !important;
+        font-size: 12px !important;
+    }
+}
+
+@media (max-width: 480px) {
+    #rptPageFirst, #rptPageLast {
+        display: none !important;
+    }
+}
+
+/* 7. Drawers & Offcanvas Panels on Mobile/Tablet */
+@media (max-width: 860px) {
+    .po-drawer-panel,
+    .pcb-offcanvas-panel,
+    .fso-drawer-panel,
+    .sales-detail-drawer,
+    .so-canvas-panel,
+    .proc-drawer-panel {
+        width: 100vw !important;
+        max-width: 100vw !important;
+        left: 0 !important;
+        right: 0 !important;
+        border-radius: 0 !important;
+    }
+    .po-drawer-head,
+    .pcb-offcanvas-head,
+    .fso-drawer-head,
+    .sales-detail-head {
+        padding: 12px 14px !important;
+        flex-wrap: wrap !important;
+        gap: 8px !important;
+    }
+    .po-drawer-body,
+    .pcb-offcanvas-body,
+    .fso-drawer-body,
+    .sales-detail-body {
+        padding: 12px 10px 24px !important;
+    }
+}
+
+/* 8. Modals Responsiveness */
+@media (max-width: 640px) {
+    .po-custom-modal,
+    .custom-date-modal,
+    .hub-modal-card,
+    .audit-detail-modal,
+    .modal-card {
+        width: calc(100vw - 20px) !important;
+        max-width: calc(100vw - 20px) !important;
+        margin: auto !important;
+        padding: 16px 14px !important;
+        max-height: calc(100vh - 30px) !important;
+        overflow-y: auto !important;
+        border-radius: 14px !important;
+    }
+    .po-custom-modal-fields,
+    .custom-modal-fields {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 8px !important;
+    }
+    .po-custom-modal-actions,
+    .custom-modal-actions {
+        display: flex !important;
+        flex-direction: column-reverse !important;
+        width: 100% !important;
+        gap: 8px !important;
+    }
+    .po-custom-modal-actions button,
+    .custom-modal-actions button {
+        width: 100% !important;
+        height: 40px !important;
+        justify-content: center !important;
+    }
+}
+
+/* 9. Landing Search / Lookup Screens */
+@media (max-width: 640px) {
+    .lookup {
+        padding: 16px 10px !important;
+        min-height: auto !important;
+        display: block !important;
+    }
+    .lookup-card {
+        width: 100% !important;
+        max-width: 100% !important;
+        margin: 10px auto !important;
+        padding: 20px 14px !important;
+        border-radius: 16px !important;
+    }
+    .lookup-card h1 {
+        font-size: 20px !important;
+        line-height: 1.25 !important;
+    }
+    .lookup-lede {
+        font-size: 13px !important;
+    }
+    .lookup-form {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 10px !important;
+    }
+    .lookup-so {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+    .lookup-btn {
+        width: 100% !important;
+        height: 44px !important;
+        justify-content: center !important;
+    }
+}
+
+/* 10. Catalog Hub (.hub-header, .hub-cards-grid) */
+@media (max-width: 860px) {
+    .hub-header {
+        height: auto !important;
+        min-height: 48px !important;
+        padding: 6px 0 !important;
+    }
+    .hub-header-container {
+        padding: 0 12px !important;
+        gap: 8px !important;
+        flex-wrap: wrap !important;
+    }
+    .hub-header-left {
+        gap: 8px !important;
+    }
+    .hub-brand-logo {
+        height: 24px !important;
+    }
+    .hub-brand-subtitle {
+        display: none !important;
+    }
+    .hub-status-pill .hub-status-label,
+    .hub-status-pill .hub-ecg-icon {
+        display: none !important;
+    }
+    .hub-status-pill {
+        padding: 3px 6px !important;
+    }
+    .hub-header-center {
+        order: 3 !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        flex: 1 1 100% !important;
+        margin-top: 4px !important;
+    }
+    .hub-search-box {
+        width: 100% !important;
+        height: 38px !important;
+    }
+    .hub-cards-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 12px !important;
+    }
+}
+
+@media (max-width: 580px) {
+    .hub-cards-grid {
+        grid-template-columns: 1fr !important;
+        gap: 12px !important;
+    }
+    .hub-bento-card {
+        padding: 16px 14px !important;
+    }
+    .hub-bento-title {
+        font-size: 18px !important;
+    }
+    .hub-bento-desc {
+        font-size: 12.5px !important;
+    }
+}
+
