@@ -15,52 +15,126 @@ $wbTableDef = TableColumnRegistry::get($wbTableKey) ?? ['columns' => [], 'defaul
 $wbColumns = $wbTableDef['columns'] ?? [];
 $wbColCount = max(1, count($wbColumns));
 $wbNumKeys = [
-    'order_qty', 'net_value', 'net', 'waste', 'gross', 'rate', 'total_inr', 'total_fr', 'convr',
-    'expected_unit_cost', 'po_unit_cost', 'variance_pct', 'eu_expected', 'eu_variance', 'po_item', 'sno',
+    'sno', 'poitem', 'so_qty', 'prwise_so_qty', 'consumption', 'reqqty', 'tot_poqty',
+    'so_wise_poqty', 'so_wise_po_val', 'porate', 'totvalue', 'budgeted_cons', 'budget_inr',
+    'budget_conv_rt', 'budget_cost_per_gmt', 'conv', 'actual_cost', 'variance_pct',
 ];
+$wbZcostKeys = [
+    'cost_item', 'maktx',
+    'budgeted_cons', 'budget_inr', 'budget_currency', 'budget_conv_rt', 'budget_cost_per_gmt',
+    'conv', 'buom', 'actual_cost', 'cost_matrix', 'variance_pct', 'validation_result',
+];
+$wbPoColCount = 0;
+$wbZcostColCount = 0;
+foreach ($wbColumns as $col) {
+    $id = (string) ($col['id'] ?? '');
+    if (in_array($id, $wbZcostKeys, true)) {
+        $wbZcostColCount++;
+    } else {
+        $wbPoColCount++;
+    }
+}
 ?>
 <section class="pcw" id="poCostingWorkbench" data-po="<?= e($wbPo) ?>" data-so="<?= e($wbSo) ?>" data-mat="<?= e($wbMat) ?>">
-    <div class="pcw-kpis" id="pcwKpis">
-        <article class="pcw-kpi">
-            <span class="material-icons-round">format_list_numbered</span>
-            <div><b id="pcwKpiItems">—</b><small>PO Items</small></div>
-        </article>
-        <article class="pcw-kpi is-pass">
-            <span class="material-icons-round">check_circle</span>
-            <div><b id="pcwKpiPassed">—</b><small>Passed</small></div>
-        </article>
-        <article class="pcw-kpi is-fail">
-            <span class="material-icons-round">error</span>
-            <div><b id="pcwKpiExceptions">—</b><small>Exceptions</small></div>
-        </article>
-        <article class="pcw-kpi is-review">
-            <span class="material-icons-round">rate_review</span>
-            <div><b id="pcwKpiReview">—</b><small>Needs Review</small></div>
-        </article>
-        <article class="pcw-kpi is-value">
-            <span class="material-icons-round">payments</span>
-            <div><b id="pcwKpiValue">—</b><small>Total PO Value</small></div>
-        </article>
+    <div class="pcw-compare" id="pcwKpis" aria-label="PO Data vs zCOST Data comparison">
+        <section class="pcw-compare-panel is-po" aria-label="PO Data totals">
+            <header class="pcw-compare-head">
+                <span class="material-icons-round">receipt_long</span>
+                <strong>PO Data</strong>
+            </header>
+            <div class="pcw-compare-meta">
+                <div class="pcw-compare-chip">
+                    <span class="material-icons-round">format_list_numbered</span>
+                    <div><b id="pcwKpiItems">—</b><small>Items</small></div>
+                </div>
+                <div class="pcw-compare-chip">
+                    <span class="material-icons-round">category</span>
+                    <div><b id="pcwKpiMaterials">—</b><small>Materials</small></div>
+                </div>
+                <div class="pcw-compare-chip">
+                    <span class="material-icons-round">receipt_long</span>
+                    <div><b id="pcwKpiSalesOrders">—</b><small>Sales Orders</small></div>
+                </div>
+            </div>
+            <div class="pcw-compare-totals">
+                <div class="pcw-compare-total is-qty">
+                    <span class="material-icons-round">inventory_2</span>
+                    <div>
+                        <small>PO Order Qty</small>
+                        <div class="pcw-compare-total-val">
+                            <b id="pcwKpiOrderQty">—</b>
+                            <em id="pcwKpiOrderQtyUnit"></em>
+                        </div>
+                    </div>
+                </div>
+                <div class="pcw-compare-total is-value">
+                    <span class="material-icons-round">payments</span>
+                    <div>
+                        <small>PO Net Value</small>
+                        <div class="pcw-compare-total-val">
+                            <b id="pcwKpiValue">—</b>
+                            <em id="pcwKpiValueUnit"></em>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <div class="pcw-compare-vs" aria-hidden="true"><span>VS</span></div>
+
+        <section class="pcw-compare-panel is-zcost" aria-label="zCOST Data totals">
+            <header class="pcw-compare-head">
+                <span class="material-icons-round">grid_view</span>
+                <strong>zCOST Data</strong>
+            </header>
+            <div class="pcw-compare-meta">
+                <div class="pcw-compare-chip is-pass">
+                    <span class="material-icons-round">check_circle</span>
+                    <div><b id="pcwKpiPassed">—</b><small>Passed</small></div>
+                </div>
+                <div class="pcw-compare-chip is-fail">
+                    <span class="material-icons-round">error</span>
+                    <div><b id="pcwKpiExceptions">—</b><small>Exceptions</small></div>
+                </div>
+                <div class="pcw-compare-chip is-review">
+                    <span class="material-icons-round">rate_review</span>
+                    <div><b id="pcwKpiReview">—</b><small>Needs Review</small></div>
+                </div>
+            </div>
+            <div class="pcw-compare-totals">
+                <div class="pcw-compare-total is-expected">
+                    <span class="material-icons-round">account_balance_wallet</span>
+                    <div>
+                        <small>Budget Total</small>
+                        <div class="pcw-compare-total-val">
+                            <b id="pcwKpiExpected">—</b>
+                            <em id="pcwKpiExpectedUnit"></em>
+                        </div>
+                    </div>
+                </div>
+                <div class="pcw-compare-total is-actual">
+                    <span class="material-icons-round">calculate</span>
+                    <div>
+                        <small>Actual Cost Total</small>
+                        <div class="pcw-compare-total-val">
+                            <b id="pcwKpiActual">—</b>
+                            <em id="pcwKpiActualUnit"></em>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
     </div>
 
     <div class="rpt-table-toolbar pcw-rpt-toolbar">
         <div class="rpt-tb-search">
             <span class="material-icons-round rpt-search-ico">search</span>
             <input type="search" id="rptTableSearch" class="rpt-tb-input"
-                   placeholder="Quick search PO item, Material, MAKTX, Quotation…"
+                   placeholder="Quick search PONO, SALORDNO, STYLE, MATERIAL…"
                    autocomplete="off" spellcheck="false">
             <button type="button" id="rptTableSearchClear" class="rpt-tb-clear" title="Clear search" aria-label="Clear search" style="display: none;">
                 <i class="fas fa-times"></i>
             </button>
-        </div>
-
-        <div class="pcw-field-seg pcw-inline-seg" title="Filter material type">
-            <fieldset class="pcb-seg" role="radiogroup" aria-label="Material Type">
-                <legend class="pcb-sr">Material Type</legend>
-                <label class="pcb-seg-opt"><input type="radio" name="pcw_mat" value="fabric"<?= $wbMat === 'fabric' ? ' checked' : '' ?>><span>Fabric</span></label>
-                <label class="pcb-seg-opt"><input type="radio" name="pcw_mat" value="trims"<?= $wbMat === 'trims' ? ' checked' : '' ?>><span>Trims</span></label>
-                <label class="pcb-seg-opt"><input type="radio" name="pcw_mat" value="all"<?= !in_array($wbMat, ['fabric', 'trims'], true) ? ' checked' : '' ?>><span>All</span></label>
-            </fieldset>
         </div>
 
         <div class="rpt-tb-actions">
@@ -98,18 +172,58 @@ $wbNumKeys = [
         </div>
     </div>
 
+    <div class="pcw-formula-pop" id="pcwFormulaPop" hidden role="dialog" aria-modal="false" aria-labelledby="pcwFormulaTitle">
+        <button type="button" class="pcw-formula-close" id="pcwFormulaClose" aria-label="Close">&times;</button>
+        <div class="pcw-formula-head">
+            <strong id="pcwFormulaTitle">—</strong>
+            <p id="pcwFormulaDesc"></p>
+        </div>
+        <div class="pcw-formula-formula" id="pcwFormulaExpr" hidden>
+            <div class="pcw-formula-formula-label">
+                <span class="pcw-formula-sigma" aria-hidden="true">Σ</span>
+                FORMULA
+            </div>
+            <code id="pcwFormulaExprText"></code>
+        </div>
+        <div class="pcw-formula-steps" id="pcwFormulaSteps" hidden>
+            <div class="pcw-formula-steps-label">CALCULATION STEPS</div>
+            <ul id="pcwFormulaStepsList"></ul>
+            <div class="pcw-formula-result" id="pcwFormulaResult"></div>
+        </div>
+        <div class="pcw-formula-example" id="pcwFormulaExample" hidden>
+            <span>EXAMPLE</span>
+            <p id="pcwFormulaExampleText"></p>
+        </div>
+    </div>
+
     <div class="rpt-table-wrap is-scroll-body" id="rptTableWrap">
         <table class="rpt-table prod-table po-page-table text-nowrap pcw-unified-table" id="rptDataTable">
             <thead>
+                <tr class="pcw-group-row" id="pcwGroupRow">
+                    <th class="pcw-group-th is-po" data-group="po" colspan="<?= (int) max(1, $wbPoColCount) ?>">
+                        <span class="pcw-group-label">
+                            <span class="material-icons-round">receipt_long</span>
+                            PO Data
+                        </span>
+                    </th>
+                    <th class="pcw-group-th is-zcost" data-group="zcost" colspan="<?= (int) max(1, $wbZcostColCount) ?>">
+                        <span class="pcw-group-label">
+                            <span class="material-icons-round">calculate</span>
+                            zCOST Data
+                        </span>
+                    </th>
+                </tr>
                 <tr class="rpt-header-row">
                     <?php foreach ($wbColumns as $i => $col): ?>
                         <?php
                         $key = (string) ($col['id'] ?? '');
                         $isNum = in_array($key, $wbNumKeys, true);
+                        $group = in_array($key, $wbZcostKeys, true) ? 'zcost' : 'po';
                         ?>
-                        <th class="is-sortable<?= $isNum ? ' num' : '' ?><?= $key === 'sno' ? ' sno' : '' ?>"
+                        <th class="is-sortable<?= $isNum ? ' num' : '' ?><?= $key === 'sno' ? ' sno' : '' ?> pcw-col-<?= e($group) ?>"
                             data-col="<?= (int) $i ?>"
                             data-col-id="<?= e($key) ?>"
+                            data-col-group="<?= e($group) ?>"
                             data-type="<?= $isNum ? 'num' : 'text' ?>"
                             title="Click to sort · drag to reorder">
                             <div class="th-content<?= $isNum ? ' num' : '' ?>"><span><?= e($col['label'] ?? $key) ?></span></div>
@@ -121,17 +235,18 @@ $wbNumKeys = [
                         <?php
                         $key = (string) ($col['id'] ?? '');
                         $isNum = in_array($key, $wbNumKeys, true);
+                        $group = in_array($key, $wbZcostKeys, true) ? 'zcost' : 'po';
                         ?>
                         <?php if ($key === 'sno'): ?>
-                            <th class="num sno" data-col-id="sno">
+                            <th class="num sno" data-col-id="sno" data-col-group="po">
                                 <button type="button" class="rpt-col-filter-reset" id="rptColFilterReset" title="Clear all column filters" aria-label="Clear all column filters">
                                     <i class="fas fa-eraser"></i>
                                 </button>
                             </th>
-                        <?php elseif (in_array($key, ['customer', 'end_user', 'status'], true)): ?>
-                            <th data-col-id="<?= e($key) ?>"></th>
+                        <?php elseif (in_array($key, ['status'], true)): ?>
+                            <th data-col-id="<?= e($key) ?>" data-col-group="<?= e($group) ?>"></th>
                         <?php else: ?>
-                            <th<?= $isNum ? ' class="num"' : '' ?> data-col-id="<?= e($key) ?>">
+                            <th<?= $isNum ? ' class="num"' : '' ?> data-col-id="<?= e($key) ?>" data-col-group="<?= e($group) ?>">
                                 <div class="rpt-col-input-wrap">
                                     <input type="text" class="rpt-col-input" data-col="<?= (int) $i ?>" data-col-key="<?= e($key) ?>"<?= $isNum ? ' data-numeric' : '' ?>
                                            placeholder="<?= $isNum ? '>0, <10…' : 'Filter…' ?>" title="Filter <?= e($col['label'] ?? $key) ?>">

@@ -81,7 +81,47 @@ class PoCostValidationService
             $customerQuote = $quotationOverride;
         }
 
-        // Always load full PO CDS payload so both validated + non-validated quote options are available
+        // Prefer classic TEMPFIN / PASSPO grid (PONO, SALORDNO, BUDGET_COST_PER_GMT, ACTUAL_COST, …)
+        require_once __DIR__ . '/PoTempfinCostingService.php';
+        $tempfinType = $category === 'fabric' ? 'fabric' : ($category === 'trims' ? 'trims' : 'all');
+        $tempfin = (new PoTempfinCostingService())->fetchForPurchaseOrder($poDigits, $tempfinType);
+        if (!empty($tempfin['success']) && !empty($tempfin['records'])) {
+            return [
+                'success'                  => true,
+                'purchase_order'           => $this->displayNumber($purchaseOrder),
+                'category'                 => $category,
+                'mode'                     => $mode,
+                'customer_quotation'       => $customerQuote,
+                'end_user_quotation'       => $endUserQuote,
+                'header'                   => [
+                    'purchase_order' => $this->displayNumber($purchaseOrder),
+                    'sales_orders'   => array_values(array_unique(array_filter(array_map(
+                        static fn ($r) => (string) ($r['salordno'] ?? ''),
+                        $tempfin['records']
+                    )))),
+                ],
+                'summary'                  => $tempfin['summary'],
+                'records'                  => $tempfin['records'],
+                'quote_options'            => [],
+                'validated_quotations'     => [],
+                'non_validated_quotations' => [],
+                'costing'                  => [
+                    'sales_orders' => $tempfin['summary']['sales_orders'] ?? 0,
+                    'quotations'   => [],
+                    'sheets'       => [],
+                    'cost_lines'   => count($tempfin['records']),
+                    'error'        => null,
+                ],
+                'cost_lines'               => [],
+                'flow'                     => [
+                    'source'   => 'TEMPFIN_PASSPO',
+                    'mat_type' => $tempfin['mat_type'] ?? $tempfinType,
+                ],
+                'error'                    => null,
+            ];
+        }
+
+        // Fallback: Z_QuotationZCostCom OData (validated + non-validated quote options)
         $cds = $this->fetchQuotationZCost($poDigits, $itemOverride, null, $soOverride !== '' ? $soOverride : null);
 
         if ($cds['success'] && !empty($cds['po_items'])) {
@@ -1384,7 +1424,15 @@ class PoCostValidationService
         $exceptions = 0;
         $needsReview = 0;
         $totalValue = 0.0;
+        $totalOrderQty = 0.0;
+        $totalExpected = 0.0;
+        $totalActual = 0.0;
+        $matchedZcost = 0;
         $seenValueItems = [];
+        $materials = [];
+        $salesOrders = [];
+        $unit = '';
+        $mixedUnit = false;
         foreach ($records as $r) {
             $st = (string) ($r['status'] ?? '');
             if ($st === 'PASS') {
@@ -1394,39 +1442,95 @@ class PoCostValidationService
             } else {
                 $exceptions++;
             }
-            // Same PO item can appear once per QuotationNo — count net value once per item
-            $itemKey = (string) ($r['po_item'] ?? '');
+            if (($r['maktx'] ?? '') !== '' || ($r['cost_item'] ?? '') !== '' || ($r['expected_unit_cost'] ?? null) !== null) {
+                $matchedZcost++;
+            }
+            $mat = trim((string) ($r['material'] ?? ''));
+            if ($mat !== '') {
+                $materials[$mat] = true;
+            }
+            $so = trim((string) ($r['sales_order'] ?? $r['salordno'] ?? ''));
+            if ($so !== '') {
+                $salesOrders[$so] = true;
+            }
+            foreach ((array) ($r['sales_orders'] ?? []) as $extraSo) {
+                $extraSo = trim((string) $extraSo);
+                if ($extraSo !== '') {
+                    $salesOrders[$extraSo] = true;
+                }
+            }
+            $expected = $r['budget_cost_per_gmt'] ?? $r['expected_unit_cost'] ?? null;
+            $actual = $r['actual_cost'] ?? $r['po_unit_cost'] ?? null;
+            $qty = (float) ($r['tot_poqty'] ?? $r['order_qty'] ?? $r['po_qty'] ?? 0);
+            $soQty = (float) ($r['so_qty'] ?? $r['prwise_so_qty'] ?? 0);
+            $costQty = $soQty > 0 ? $soQty : ($qty > 0 ? $qty : 1.0);
+            if ($expected !== null && $expected !== '') {
+                $totalExpected += (float) $expected * $costQty;
+            }
+            if ($actual !== null && $actual !== '') {
+                $totalActual += (float) $actual * $costQty;
+            }
+            // Same PO item can appear once per QuotationNo / SO — count net value / qty once per item
+            $itemKey = (string) ($r['po_item'] ?? $r['poitem'] ?? '');
             if ($itemKey !== '' && !isset($seenValueItems[$itemKey])) {
                 $seenValueItems[$itemKey] = true;
-                $totalValue += (float) ($r['net_value'] ?? 0);
+                $totalValue += (float) ($r['totvalue'] ?? $r['net_value'] ?? 0);
+                $totalOrderQty += $qty;
+                $rowUnit = trim((string) ($r['ouom'] ?? $r['unit'] ?? ''));
+                if ($rowUnit !== '') {
+                    if ($unit === '') {
+                        $unit = $rowUnit;
+                    } elseif (strcasecmp($unit, $rowUnit) !== 0) {
+                        $mixedUnit = true;
+                    }
+                }
             } elseif ($itemKey === '') {
-                $totalValue += (float) ($r['net_value'] ?? 0);
+                $totalValue += (float) ($r['totvalue'] ?? $r['net_value'] ?? 0);
+                $totalOrderQty += $qty;
             }
         }
-        $primaryCurr = $records !== [] ? (string) ($records[0]['currency'] ?? 'INR') : 'INR';
+        $primaryCurr = $records !== []
+            ? (string) ($records[0]['po_currency'] ?? $records[0]['currency'] ?? 'INR')
+            : 'INR';
         return [
-            'po_items'       => count($records),
-            'passed'         => $passed,
-            'exceptions'     => $exceptions,
-            'needs_review'   => $needsReview,
-            'pending'        => 0,
-            'total_po_value' => round($totalValue, 2),
-            'currency'       => $primaryCurr,
-            'can_pass_po'    => count($records) > 0 && $exceptions === 0 && $needsReview === 0,
+            'po_items'          => count($seenValueItems) > 0 ? count($seenValueItems) : count($records),
+            'unique_po_items'   => count($seenValueItems),
+            'materials'         => count($materials),
+            'sales_orders'      => count($salesOrders),
+            'total_order_qty'   => round($totalOrderQty, 3),
+            'unit'              => $mixedUnit ? '' : $unit,
+            'passed'            => $passed,
+            'exceptions'        => $exceptions,
+            'needs_review'      => $needsReview,
+            'pending'           => 0,
+            'zcost_matched'     => $matchedZcost,
+            'total_po_value'    => round($totalValue, 2),
+            'total_expected'    => round($totalExpected, 2),
+            'total_actual'      => round($totalActual, 2),
+            'currency'          => $primaryCurr,
+            'can_pass_po'       => count($records) > 0 && $exceptions === 0 && $needsReview === 0,
         ];
     }
 
     private function emptySummary(): array
     {
         return [
-            'po_items'       => 0,
-            'passed'         => 0,
-            'exceptions'     => 0,
-            'needs_review'   => 0,
-            'pending'        => 0,
-            'total_po_value' => 0,
-            'currency'       => 'INR',
-            'can_pass_po'    => false,
+            'po_items'        => 0,
+            'unique_po_items' => 0,
+            'materials'       => 0,
+            'sales_orders'    => 0,
+            'total_order_qty' => 0,
+            'unit'            => '',
+            'passed'          => 0,
+            'exceptions'      => 0,
+            'needs_review'    => 0,
+            'pending'         => 0,
+            'zcost_matched'   => 0,
+            'total_po_value'  => 0,
+            'total_expected'  => 0,
+            'total_actual'    => 0,
+            'currency'        => 'INR',
+            'can_pass_po'     => false,
         ];
     }
 }

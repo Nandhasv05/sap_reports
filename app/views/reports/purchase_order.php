@@ -91,7 +91,7 @@ $listCards = $isCostingView
         require base_path('app/views/partials/loader.php');
     ?>
 
-    <header class="rpt-bar">
+    <header class="rpt-bar<?= $isCostingWorkbench ? ' is-pcw-top' : '' ?>">
         <div class="rpt-bar-left">
             <a href="<?= e($catalogHome) ?>" class="rpt-brand" aria-label="EVOLV" title="SAP Reports">
                 <img src="<?= e($logoUrl) ?>" alt="evolv">
@@ -102,10 +102,49 @@ $listCards = $isCostingView
             <a href="<?= e($home) ?>" class="rpt-home" aria-label="Portal home" title="Portal Dashboard">
                 <span class="material-icons-round">home</span>
             </a>
-            <div class="rpt-name"><?= $pageHeading ?></div>
+            <?php if ($isCostingWorkbench): ?>
+                <a href="<?= e($pageUrl . '?view=costing') ?>" class="po-back-nav" title="Back to Bulk Validation">
+                    <span class="material-icons-round">arrow_back</span>
+                    <span>Bulk List</span>
+                </a>
+                <?php
+                    $wbMatBar = in_array((string) ($matCat ?? ''), ['fabric', 'trims'], true)
+                        ? (string) $matCat
+                        : 'trims';
+                ?>
+                <form class="pcw-control-bar" id="pcwControlBar" method="get" action="<?= e($pageUrl) ?>" autocomplete="off">
+                    <input type="hidden" name="view" value="costing">
+                    <div class="pcw-cb-type" role="radiogroup" aria-label="Material Type">
+                        <label class="pcw-cb-radio">
+                            <input type="radio" name="mat_cat" value="fabric"<?= $wbMatBar === 'fabric' ? ' checked' : '' ?>>
+                            <span>FABRIC</span>
+                        </label>
+                        <label class="pcw-cb-radio">
+                            <input type="radio" name="mat_cat" value="trims"<?= $wbMatBar === 'trims' ? ' checked' : '' ?>>
+                            <span>TRIMS</span>
+                        </label>
+                    </div>
+                    <label class="pcw-cb-po">
+                        <span>PURCH ORD NO</span>
+                        <input type="text" id="po" name="po" value="<?= e($purchaseOrder) ?>"
+                               inputmode="numeric" maxlength="10" autocomplete="off"
+                               aria-label="Purchase order number">
+                    </label>
+                    <button type="submit" class="pcw-cb-btn" id="pcwSearchBtn" title="Search">
+                        <i class="fas fa-search"></i> SEARCH
+                    </button>
+                    <button type="button" class="pcw-cb-btn" id="pcwResetBtn" title="Reset">RESET</button>
+                    <button type="button" class="pcw-cb-btn is-pass" id="pcwPassPoBtn" disabled title="Pass PO">PASS PO</button>
+                    <div class="pcw-cb-status" id="pcwPassStatus">STATUS : <?= $purchaseOrder !== '' ? 'NOT PASSED' : 'PENDING' ?></div>
+                </form>
+            <?php else: ?>
+                <div class="rpt-name"><?= $pageHeading ?></div>
+            <?php endif; ?>
         </div>
 
-        <?php if ($isCostingBulk): ?>
+        <?php if ($isCostingWorkbench): ?>
+            <?php require base_path('app/views/partials/header_nav_right.php'); ?>
+        <?php elseif ($isCostingBulk): ?>
             <?php
                 $bulkPresets = is_array($presets ?? null) && $presets !== [] ? $presets : SapPurchaseOrderService::rangePresets();
                 $bulkRangePreset = (string) ($rangePreset ?? ($range['preset'] ?? 'this_month'));
@@ -324,16 +363,13 @@ $listCards = $isCostingView
                 </button>
             </form>
         <?php else: ?>
-            <!-- Detail / Workbench header with Back to List & PO Search -->
+            <!-- Detail header with Back to List & PO Search -->
             <div style="display: flex; align-items: center; gap: 10px;">
-                <a href="<?= e($pageUrl . ($isCostingView ? '?view=costing' : '')) ?>" class="po-back-nav" title="Back to Bulk Validation">
+                <a href="<?= e($pageUrl) ?>" class="po-back-nav" title="Back to PO List">
                     <span class="material-icons-round">arrow_back</span>
-                    <span><?= $isCostingView ? 'Bulk List' : 'PO List' ?></span>
+                    <span>PO List</span>
                 </a>
                 <form class="rpt-search" method="get" action="<?= e($pageUrl) ?>" id="poFilterForm" novalidate>
-                    <?php if ($isCostingView): ?>
-                        <input type="hidden" name="view" value="costing">
-                    <?php endif; ?>
                     <label class="rpt-field">
                         <span class="material-icons-round">receipt</span>
                         <input id="po" name="po" value="<?= e($purchaseOrder) ?>" placeholder="Purchase order" inputmode="numeric" maxlength="10" autocomplete="off" required>
@@ -341,16 +377,16 @@ $listCards = $isCostingView
                     <button class="rpt-btn" type="submit" title="Load report">
                         <span class="material-icons-round">sync</span>
                     </button>
-                    <?php if (!$isCostingWorkbench): ?>
-                        <a class="rpt-btn rpt-btn-ghost" href="<?= e($csvUrl) ?>" title="Download CSV">
-                            <span class="material-icons-round">file_download</span>
-                        </a>
-                    <?php endif; ?>
+                    <a class="rpt-btn rpt-btn-ghost" href="<?= e($csvUrl) ?>" title="Download CSV">
+                        <span class="material-icons-round">file_download</span>
+                    </a>
                 </form>
             </div>
         <?php endif; ?>
 
-        <?php require base_path('app/views/partials/header_nav_right.php'); ?>
+        <?php if (!$isCostingWorkbench): ?>
+            <?php require base_path('app/views/partials/header_nav_right.php'); ?>
+        <?php endif; ?>
     </header>
 
     <?php if ($isList && !$isCostingBulk): ?>
