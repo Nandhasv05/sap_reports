@@ -104,46 +104,27 @@ class PoCostValidationService
                 $salesOrders[] = $soOverride;
             }
 
-            // Select costing lines used for primary comparison
-            if ($mode === 'validated') {
-                $matchLines = array_values(array_filter(
+            // Keep all CDS rows visible. Each row compares against its own QuotationNo cost lines
+            // (or against selected Customer / End User quotations in non_validated mode).
+            if ($mode === 'non_validated' && $customerQuote === '' && $nonValidatedQuotes !== []) {
+                $customerQuote = (string) $nonValidatedQuotes[0];
+            }
+
+            $activeQuotes = $mode === 'validated'
+                ? $validatedQuotes
+                : array_values(array_filter([$customerQuote, $endUserQuote]));
+            $displayLines = $mode === 'validated'
+                ? array_values(array_filter(
                     $allCostLines,
                     static fn (array $l): bool => !empty($l['is_validated'])
-                ));
-                $activeQuotes = $validatedQuotes;
-                $displayLines = $matchLines;
-            } else {
-                if ($customerQuote === '' && $nonValidatedQuotes !== []) {
-                    $customerQuote = (string) $nonValidatedQuotes[0];
-                }
-                $matchLines = $customerQuote !== ''
-                    ? array_values(array_filter(
-                        $allCostLines,
-                        static fn (array $l): bool => (string) ($l['quotation_no'] ?? '') === $customerQuote
-                    ))
-                    : [];
-                $activeQuotes = array_values(array_filter([$customerQuote, $endUserQuote]));
-                $displayLines = array_values(array_filter(
+                ))
+                : array_values(array_filter(
                     $allCostLines,
                     static function (array $l) use ($activeQuotes): bool {
                         $q = (string) ($l['quotation_no'] ?? '');
                         return $q !== '' && in_array($q, $activeQuotes, true);
                     }
                 ));
-            }
-
-            $quoteMap = [];
-            foreach ($activeQuotes as $q) {
-                if ($q === '') {
-                    continue;
-                }
-                $quoteMap[] = [
-                    'sales_order'    => $salesOrders[0] ?? '',
-                    'quotation'      => $q,
-                    'quotation_item' => '',
-                    'error'          => null,
-                ];
-            }
 
             $endUserLines = [];
             if ($mode === 'non_validated' && $endUserQuote !== '' && $endUserQuote !== $customerQuote) {
@@ -155,6 +136,46 @@ class PoCostValidationService
 
             $records = [];
             foreach ($poItems as $item) {
+                $itemQuote = (string) ($item['quotation'] ?? '');
+                if ($mode === 'non_validated' && $customerQuote !== '') {
+                    $compareQuote = $customerQuote;
+                } else {
+                    $compareQuote = $itemQuote;
+                }
+
+                $matchLines = $compareQuote !== ''
+                    ? array_values(array_filter(
+                        $allCostLines,
+                        static function (array $l) use ($compareQuote, $mode): bool {
+                            $q = (string) ($l['quotation_no'] ?? '');
+                            if ($q !== $compareQuote) {
+                                return false;
+                            }
+                            if ($mode === 'validated') {
+                                return !empty($l['is_validated']);
+                            }
+                            return true;
+                        }
+                    ))
+                    : [];
+
+                // Validated mode with no cost lines on this quote: still try validated pool for same material
+                if ($mode === 'validated' && $matchLines === [] && !empty($item['is_validated_quote'])) {
+                    $matchLines = array_values(array_filter(
+                        $allCostLines,
+                        static fn (array $l): bool => !empty($l['is_validated'])
+                    ));
+                }
+
+                $quoteMap = $compareQuote !== ''
+                    ? [[
+                        'sales_order'    => (string) (($item['sales_orders'][0] ?? '') ?: ($salesOrders[0] ?? '')),
+                        'quotation'      => $compareQuote,
+                        'quotation_item' => '',
+                        'error'          => null,
+                    ]]
+                    : [];
+
                 $rec = $this->validateItem(
                     $item,
                     $matchLines,
@@ -163,8 +184,10 @@ class PoCostValidationService
                     $quoteMap
                 );
                 $rec['compare_mode'] = $mode;
+                $rec['quotation'] = $itemQuote !== '' ? $itemQuote : $compareQuote;
+                $rec['is_validated_quote'] = !empty($item['is_validated_quote']);
                 $rec['customer_quotation'] = $mode === 'validated'
-                    ? (string) ($rec['quotation'] ?? ($validatedQuotes[0] ?? ''))
+                    ? (string) ($rec['quotation'] ?: ($validatedQuotes[0] ?? ''))
                     : $customerQuote;
                 $rec['end_user_quotation'] = $endUserQuote;
                 if (($rec['supplier'] ?? '') === '') {
@@ -172,11 +195,6 @@ class PoCostValidationService
                     $rec['supplier_full_name'] = (string) ($cds['header']['supplier_full_name'] ?? '');
                     $rec['created_by'] = (string) ($cds['header']['created_by'] ?? '');
                     $rec['po_date'] = (string) ($cds['header']['po_date'] ?? ($rec['po_date'] ?? ''));
-                }
-                if (($rec['quotation'] ?? '') === '' && $mode === 'validated' && $validatedQuotes !== []) {
-                    $rec['quotation'] = (string) $validatedQuotes[0];
-                } elseif ($mode === 'non_validated' && $customerQuote !== '') {
-                    $rec['quotation'] = $customerQuote;
                 }
 
                 if ($endUserLines !== []) {
@@ -202,6 +220,19 @@ class PoCostValidationService
                 }
 
                 $records[] = $rec;
+            }
+
+            $quoteMap = [];
+            foreach ($activeQuotes as $q) {
+                if ($q === '') {
+                    continue;
+                }
+                $quoteMap[] = [
+                    'sales_order'    => $salesOrders[0] ?? '',
+                    'quotation'      => $q,
+                    'quotation_item' => '',
+                    'error'          => null,
+                ];
             }
 
             $summary = $this->summarize($records);
@@ -497,7 +528,7 @@ class PoCostValidationService
             ];
         }
 
-        // Process rows into deduplicated PO Items and expanded costing lines
+        // One UI/API row per CDS result (PurchaseOrderItem + QuotationNo) — do not collapse to unique PO items
         $itemsMap = [];
         $costLines = [];
         $seenCostKeys = [];
@@ -528,6 +559,7 @@ class PoCostValidationService
             $costingQuoteNo = $this->displayNumber((string) ($row['CostingQuotationNo'] ?? ''));
             $isValidatedRow = $costingQuoteNo !== '';
             $soRef = $this->displayNumber((string) ($row['SalesOrderReference'] ?? ''));
+            $rowKey = $itemNo . '|' . ($quoteNo !== '' ? $quoteNo : '_');
 
             if ($quoteNo !== '' && !in_array($quoteNo, $quotations, true)) {
                 $quotations[] = $quoteNo;
@@ -567,7 +599,7 @@ class PoCostValidationService
                 }
             }
 
-            if (!isset($itemsMap[$itemNo])) {
+            if (!isset($itemsMap[$rowKey])) {
                 $qty = $this->sapNumber($row['OrderQuantity'] ?? 0);
                 $netAmt = $this->sapNumber($row['NetPriceAmount'] ?? 0);
                 // In SAP CDS view, NetPriceAmount is line net amount. Unit price = netAmt / qty.
@@ -581,40 +613,45 @@ class PoCostValidationService
                 $itemText = trim((string) ($row['PurchaseOrderItemText'] ?? ''));
                 $matCategory = SapPurchaseOrderService::classifyMaterial($matType, $matTypeDesc, $matGroup);
 
-                $itemsMap[$itemNo] = [
-                    'item'            => $itemNo,
-                    'purchase_order'  => $this->displayNumber((string) ($row['PurchaseOrder'] ?? $purchaseOrder)),
-                    'material'        => trim((string) ($row['Material'] ?? '')),
-                    'description'     => $matDesc !== '' ? $matDesc : $itemText,
-                    'material_desc'   => $matDesc !== '' ? $matDesc : $itemText,
-                    'item_text'       => $itemText,
-                    'material_type'   => $matType,
-                    'mat_type_desc'   => $matTypeDesc,
-                    'material_group'  => $matGroup,
-                    'mat_grp_desc'    => $matGrpDesc,
-                    'mat_category'    => $matCategory,
-                    'plant'           => trim((string) ($row['Plant'] ?? '')),
-                    'storage_location'=> trim((string) ($row['StorageLocation'] ?? '')),
-                    'order_qty'       => $qty,
-                    'unit'            => trim((string) ($row['PurchaseOrderQuantityUnit'] ?? '')),
-                    'net_price'       => $unitPrice,
-                    'net_value'       => $netAmt,
-                    'currency'        => trim((string) ($row['DocumentCurrency'] ?? 'INR')),
-                    'po_type'         => trim((string) ($row['PurchaseOrderType'] ?? '')),
-                    'po_type_name'    => trim((string) ($row['PurchasingDocumentTypeName'] ?? '')),
-                    'po_date'         => $this->sapDate($row['PurchaseOrderDate'] ?? null),
-                    'supplier'        => $this->displayNumber((string) ($row['Supplier'] ?? '')),
+                $itemsMap[$rowKey] = [
+                    'item'               => $itemNo,
+                    'row_key'            => $rowKey,
+                    'purchase_order'     => $this->displayNumber((string) ($row['PurchaseOrder'] ?? $purchaseOrder)),
+                    'material'           => trim((string) ($row['Material'] ?? '')),
+                    'description'        => $matDesc !== '' ? $matDesc : $itemText,
+                    'material_desc'      => $matDesc !== '' ? $matDesc : $itemText,
+                    'item_text'          => $itemText,
+                    'material_type'      => $matType,
+                    'mat_type_desc'      => $matTypeDesc,
+                    'material_group'     => $matGroup,
+                    'mat_grp_desc'       => $matGrpDesc,
+                    'mat_category'       => $matCategory,
+                    'plant'              => trim((string) ($row['Plant'] ?? '')),
+                    'storage_location'   => trim((string) ($row['StorageLocation'] ?? '')),
+                    'order_qty'          => $qty,
+                    'unit'               => trim((string) ($row['PurchaseOrderQuantityUnit'] ?? '')),
+                    'net_price'          => $unitPrice,
+                    'net_value'          => $netAmt,
+                    'currency'           => trim((string) ($row['DocumentCurrency'] ?? 'INR')),
+                    'po_type'            => trim((string) ($row['PurchaseOrderType'] ?? '')),
+                    'po_type_name'       => trim((string) ($row['PurchasingDocumentTypeName'] ?? '')),
+                    'po_date'            => $this->sapDate($row['PurchaseOrderDate'] ?? null),
+                    'supplier'           => $this->displayNumber((string) ($row['Supplier'] ?? '')),
                     'supplier_full_name' => trim((string) ($row['SupplierFullName'] ?? '')),
-                    'created_by'      => trim((string) ($row['CreatedByUser'] ?? '')),
-                    'sales_orders'    => $soRef !== '' ? [$soRef] : [],
-                    'quotations'      => $quoteNo !== '' ? [$quoteNo] : [],
+                    'created_by'         => trim((string) ($row['CreatedByUser'] ?? '')),
+                    'sales_orders'       => $soRef !== '' ? [$soRef] : [],
+                    'quotations'         => $quoteNo !== '' ? [$quoteNo] : [],
+                    'quotation'          => $quoteNo,
+                    'costing_quotation'  => $costingQuoteNo,
+                    'is_validated_quote' => $isValidatedRow,
                 ];
             } else {
-                if ($soRef !== '' && !in_array($soRef, $itemsMap[$itemNo]['sales_orders'], true)) {
-                    $itemsMap[$itemNo]['sales_orders'][] = $soRef;
+                if ($soRef !== '' && !in_array($soRef, $itemsMap[$rowKey]['sales_orders'], true)) {
+                    $itemsMap[$rowKey]['sales_orders'][] = $soRef;
                 }
-                if ($quoteNo !== '' && !in_array($quoteNo, $itemsMap[$itemNo]['quotations'], true)) {
-                    $itemsMap[$itemNo]['quotations'][] = $quoteNo;
+                if ($isValidatedRow) {
+                    $itemsMap[$rowKey]['is_validated_quote'] = true;
+                    $itemsMap[$rowKey]['costing_quotation'] = $costingQuoteNo;
                 }
             }
 
@@ -1347,6 +1384,7 @@ class PoCostValidationService
         $exceptions = 0;
         $needsReview = 0;
         $totalValue = 0.0;
+        $seenValueItems = [];
         foreach ($records as $r) {
             $st = (string) ($r['status'] ?? '');
             if ($st === 'PASS') {
@@ -1356,7 +1394,14 @@ class PoCostValidationService
             } else {
                 $exceptions++;
             }
-            $totalValue += (float) ($r['net_value'] ?? 0);
+            // Same PO item can appear once per QuotationNo — count net value once per item
+            $itemKey = (string) ($r['po_item'] ?? '');
+            if ($itemKey !== '' && !isset($seenValueItems[$itemKey])) {
+                $seenValueItems[$itemKey] = true;
+                $totalValue += (float) ($r['net_value'] ?? 0);
+            } elseif ($itemKey === '') {
+                $totalValue += (float) ($r['net_value'] ?? 0);
+            }
         }
         $primaryCurr = $records !== [] ? (string) ($records[0]['currency'] ?? 'INR') : 'INR';
         return [
