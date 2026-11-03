@@ -58,3 +58,4 @@ trait SapValueFormat
         return $trimmed === '' ? '0' : $trimmed;
     }
 }
+?>

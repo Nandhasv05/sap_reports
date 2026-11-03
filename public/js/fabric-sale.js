@@ -1298,39 +1298,88 @@
             showLookup();
         });
 
+        let fsoCustomCaller = 'header';
+        function openFsoCustomModal(caller = 'header') {
+            fsoCustomCaller = caller;
+            const modal = $('fsoCustomDateModal');
+            if (!modal) return;
+            const fromInput = caller === 'header' ? $('fsoHdrFrom') : $('fsoFrom');
+            const toInput = caller === 'header' ? $('fsoHdrTo') : $('fsoTo');
+            if ($('fsoModalFrom')) $('fsoModalFrom').value = fromInput?.value || '';
+            if ($('fsoModalTo')) $('fsoModalTo').value = toInput?.value || '';
+            if ($('fsoCustomDateError')) $('fsoCustomDateError').hidden = true;
+            modal.hidden = false;
+            $('fsoModalFrom')?.focus();
+        }
+
+        function closeFsoCustomModal(revert = false) {
+            const modal = $('fsoCustomDateModal');
+            if (modal) modal.hidden = true;
+            if (revert) {
+                const presetEl = fsoCustomCaller === 'header' ? $('fsoHdrPreset') : $('fsoPreset');
+                if (presetEl) presetEl.value = currentPreset || 'today';
+            }
+        }
+
+        $('fsoCustomDateApply')?.addEventListener('click', () => {
+            const f = $('fsoModalFrom')?.value || '';
+            const t = $('fsoModalTo')?.value || '';
+            if (!f || !t) {
+                if ($('fsoCustomDateError')) {
+                    $('fsoCustomDateError').textContent = !f ? 'Select From date.' : 'Select To date.';
+                    $('fsoCustomDateError').hidden = false;
+                }
+                return;
+            }
+            if (f > t) {
+                if ($('fsoCustomDateError')) {
+                    $('fsoCustomDateError').textContent = 'To date must be on or after From date.';
+                    $('fsoCustomDateError').hidden = false;
+                }
+                return;
+            }
+            currentPreset = 'custom';
+            currentFrom = f;
+            currentTo = t;
+            if ($('fsoHdrFrom')) $('fsoHdrFrom').value = f;
+            if ($('fsoHdrTo')) $('fsoHdrTo').value = t;
+            if ($('fsoFrom')) $('fsoFrom').value = f;
+            if ($('fsoTo')) $('fsoTo').value = t;
+            closeFsoCustomModal(false);
+            clearSoFields();
+            applySearch(fsoCustomCaller, { prefer: 'date' });
+        });
+        $('fsoCustomDateCancel')?.addEventListener('click', () => closeFsoCustomModal(true));
+        $('fsoCustomDateClose')?.addEventListener('click', () => closeFsoCustomModal(true));
+        $('fsoCustomDateModal')?.addEventListener('click', (e) => {
+            if (e.target === $('fsoCustomDateModal')) closeFsoCustomModal(true);
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && $('fsoCustomDateModal') && !$('fsoCustomDateModal').hidden) {
+                closeFsoCustomModal(true);
+            }
+        });
+
         // Date selected → clear SO, then search by date only
         $('fsoHdrPreset')?.addEventListener('change', () => {
             clearSoFields();
-            syncPresetUi($('fsoHdrPreset'), $('fsoHdrCustomDates'), $('fsoHdrFrom'), $('fsoHdrTo'));
             const preset = ($('fsoHdrPreset')?.value || '').toLowerCase();
+            if (preset === 'custom') {
+                openFsoCustomModal('header');
+                return;
+            }
+            syncPresetUi($('fsoHdrPreset'), $('fsoHdrCustomDates'), $('fsoHdrFrom'), $('fsoHdrTo'));
             if (!preset) return;
             applySearch('header', { prefer: 'date' });
         });
-        $('fsoHdrFrom')?.addEventListener('change', () => {
-            if (($('fsoHdrPreset')?.value || '') === 'custom') {
-                clearSoFields();
-                applySearch('header', { prefer: 'date' });
-            }
-        });
-        $('fsoHdrTo')?.addEventListener('change', () => {
-            if (($('fsoHdrPreset')?.value || '') === 'custom') {
-                clearSoFields();
-                applySearch('header', { prefer: 'date' });
-            }
-        });
-
-        // Typing SO → clear date filter (search runs on submit / Enter)
-        const onSoTyped = () => {
-            if ((($('fsoHdrSo')?.value || $('fsoSoInput')?.value || '')).trim()) {
-                clearDateFields();
-            }
-        };
-        $('fsoHdrSo')?.addEventListener('input', onSoTyped);
-        $('fsoSoInput')?.addEventListener('input', onSoTyped);
-
         $('fsoPreset')?.addEventListener('change', () => {
             setFormError('');
             clearSoFields();
+            const preset = ($('fsoPreset')?.value || '').toLowerCase();
+            if (preset === 'custom') {
+                openFsoCustomModal('landing');
+                return;
+            }
             syncPresetUi($('fsoPreset'), $('fsoCustomDates'), $('fsoFrom'), $('fsoTo'));
         });
 

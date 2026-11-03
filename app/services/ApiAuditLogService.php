@@ -13,6 +13,9 @@ final class ApiAuditLogService
     private static bool $ensured = false;
     private static bool $disabled = false;
 
+    /*
+     * Get client ip address
+    */ 
     public static function clientIp(): string
     {
         $candidates = [
@@ -34,6 +37,9 @@ final class ApiAuditLogService
         return '';
     }
 
+    /*
+     * Get request url
+    */
     public static function requestUrl(): string
     {
         $uri = (string) ($_SERVER['REQUEST_URI'] ?? '/');
@@ -107,6 +113,9 @@ final class ApiAuditLogService
         }
     }
 
+    /*
+     * Encode payload to JSON
+    */  
     private static function encodePayload(array|string|null $payload): ?string
     {
         if ($payload === null) {
@@ -126,6 +135,9 @@ final class ApiAuditLogService
         return $json;
     }
 
+    /*
+     * Ensure table exists
+    */
     private static function ensureTable(PDO $pdo): void
     {
         if (self::$ensured) {

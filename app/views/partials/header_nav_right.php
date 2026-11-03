@@ -3,7 +3,7 @@
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 03/09/2026
  * DESCRIPTION : Header right user profile dropdown (Avatar with dropdown: Back to Card, Back to Portal, Logout)
- */
+*/
 $user = function_exists('portal_user') ? portal_user() : null;
 $userName = !empty($user['username']) ? $user['username'] : 'admin';
 $userRole = !empty($user['role']) ? $user['role'] : (!empty($user['department']) ? $user['department'] : 'Administrator');
@@ -22,12 +22,17 @@ if ($userLower === 'kayal') {
 }
 
 $accessModules = [
-    'utilization' => 'Utilization Report',
-    'fabric' => 'Fabric Utilization',
-    'trims' => 'Trims Utilization',
-    'production' => 'Production Report',
-    'procurement' => 'Procurement Report',
+    'utilization'    => 'Utilization Report',
+    'fabric'         => 'Fabric Utilization',
+    'trims'          => 'Trims Utilization',
+    'production'     => 'Production Report',
+    'procurement'    => 'Procurement Report',
     'purchase-order' => 'Purchase Order Report',
+    'po-costing'     => 'PO Costing Validation',
+    'sales'          => 'Sales Dashboard',
+    'fabric-sale'    => 'Fabric Sale Order',
+    'zcost'          => 'Zcost Costing Sheet',
+    'audit-log'      => 'Audit Log',
 ];
 ?>
 <div class="rpt-bar-right hub-header-right">
@@ -131,12 +136,11 @@ $accessModules = [
     </div>
 </div>
 
-<?php if ($isAdminMenu): ?>
 <div class="hub-modal-backdrop" id="hubAccessModal" hidden role="dialog" aria-modal="true" aria-labelledby="hubAccessTitle">
     <div class="hub-modal-card hub-admin-modal">
         <div class="hub-modal-header">
             <div>
-                <span class="hub-modal-kicker">Administration</span>
+                <span class="hub-modal-kicker">Security & Access</span>
                 <h3 id="hubAccessTitle">User Access Control</h3>
             </div>
             <button type="button" class="hub-modal-close" data-hub-close="hubAccessModal" aria-label="Close modal">
@@ -144,7 +148,7 @@ $accessModules = [
             </button>
         </div>
         <div class="hub-modal-body">
-            <p class="hub-admin-lead">Review SAP Reports module access for <strong><?= e(ucfirst($userName)) ?></strong>, then open the full portal console to grant or revoke permissions.</p>
+            <p class="hub-admin-lead">Review SAP Reports module access for <strong><?= e(ucfirst($userName)) ?></strong> (<?= e(strtoupper($userRole)) ?>).</p>
             <div class="hub-access-grid">
                 <?php foreach ($accessModules as $modKey => $modLabel):
                     $allowed = function_exists('sap_reports_user_can_access') ? sap_reports_user_can_access($modKey, $user) : true;
@@ -156,17 +160,17 @@ $accessModules = [
                 </div>
                 <?php endforeach; ?>
             </div>
+            <?php if ($isAdminMenu): ?>
             <div class="hub-admin-actions">
                 <a class="hub-admin-btn hub-admin-btn-primary" href="<?= e($accessUrl) ?>" target="_blank" rel="noopener">
                     <span class="material-icons-round">open_in_new</span>
-                    Open User Access Control
+                    Manage Permissions in Portal Console
                 </a>
             </div>
+            <?php endif; ?>
         </div>
     </div>
 </div>
-
-<?php endif; ?>
 
 <script>
 (function() {

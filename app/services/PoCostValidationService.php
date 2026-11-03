@@ -27,6 +27,9 @@ class PoCostValidationService
     private SapODataClient $odata;
     private array $cfg;
 
+    /*
+     * Constructor
+    */  
     public function __construct(
         ?SapPurchaseOrderService $poService = null,
         ?SapCostService $costService = null,
@@ -86,6 +89,79 @@ class PoCostValidationService
         $tempfinType = $category === 'fabric' ? 'fabric' : ($category === 'trims' ? 'trims' : 'all');
         $tempfin = (new PoTempfinCostingService())->fetchForPurchaseOrder($poDigits, $tempfinType);
         if (!empty($tempfin['success']) && !empty($tempfin['records'])) {
+            // Also load ZCOST candidates so unmatched TEMPFIN rows can be matched manually
+            $quoteToUse = $customerQuote !== '' ? $customerQuote : ($quotationOverride ?? null);
+            $cds = $this->fetchQuotationZCost($poDigits, $itemOverride, $quoteToUse, $soOverride !== '' ? $soOverride : null);
+            $costLines = [];
+            $quoteOptions = [];
+            $validatedQuotes = [];
+            $nonValidatedQuotes = [];
+            if (!empty($cds['success'])) {
+                $costLines = is_array($cds['cost_lines'] ?? null) ? $cds['cost_lines'] : [];
+                if ($category !== 'all') {
+                    $costLines = array_values(array_filter(
+                        $costLines,
+                        static fn (array $l): bool => ($l['mat_category'] ?? '') === $category
+                            || ($category === 'fabric' && ($l['section'] ?? '') === 'Fabric')
+                            || ($category === 'trims' && in_array((string) ($l['section'] ?? ''), ['Trim', 'Packing', 'Special'], true))
+                    ));
+                }
+                $quoteOptions = is_array($cds['quote_options'] ?? null) ? $cds['quote_options'] : [];
+                $validatedQuotes = is_array($cds['validated_quotations'] ?? null) ? $cds['validated_quotations'] : [];
+                $nonValidatedQuotes = is_array($cds['non_validated_quotations'] ?? null) ? $cds['non_validated_quotations'] : [];
+            }
+
+            // Fallback: if no cost lines found from CDS directly by PO, try searching by linked sales orders
+            if (empty($costLines)) {
+                $linkedSo = array_values(array_unique(array_filter(array_map(
+                    static fn ($r) => trim((string) ($r['salordno'] ?? '')),
+                    $tempfin['records']
+                ))));
+                if ($soOverride !== '' && !in_array($soOverride, $linkedSo, true)) {
+                    $linkedSo[] = $soOverride;
+                }
+                foreach ($linkedSo as $soCandidate) {
+                    if ($soCandidate === '') {
+                        continue;
+                    }
+                    $soCds = $this->fetchQuotationZCost($poDigits, null, null, $soCandidate);
+                    if (!empty($soCds['cost_lines'])) {
+                        $costLines = array_merge($costLines, $soCds['cost_lines']);
+                        $quoteOptions = array_merge($quoteOptions, $soCds['quote_options'] ?? []);
+                        $validatedQuotes = array_merge($validatedQuotes, $soCds['validated_quotations'] ?? []);
+                        $nonValidatedQuotes = array_merge($nonValidatedQuotes, $soCds['non_validated_quotations'] ?? []);
+                    }
+                }
+            }
+
+            // Fallback 2: if still empty, check SAP costService for quotation or SO
+            if (empty($costLines)) {
+                $candidates = array_values(array_unique(array_filter(array_merge(
+                    $quoteToUse ? [$quoteToUse] : [],
+                    $linkedSo ?? []
+                ))));
+                if (!empty($candidates)) {
+                    $costing = $this->costService->fetchForSalesOrders($candidates);
+                    if (!empty($costing['records'])) {
+                        $costLines = $costing['records'];
+                    }
+                }
+            }
+
+            $records = [];
+            foreach ($tempfin['records'] as $rec) {
+                $maktx = trim((string) ($rec['maktx'] ?? $rec['cost_description'] ?? ''));
+                $budget = $rec['budget_cost_per_gmt'] ?? $rec['expected_unit_cost'] ?? null;
+                $st = strtoupper((string) ($rec['status'] ?? ''));
+                $needsManual = $maktx === ''
+                    || ($budget === null || $budget === '' || (float) $budget <= 0.0)
+                    || ($st === 'EXCEPTION' && preg_match('/no matching|no linked|cannot load|no budget/i', (string) ($rec['validation_result'] ?? '')));
+                $rec['needs_manual_match'] = (bool) $needsManual;
+                $rec['selected'] = false;
+                $rec['manual_match'] = false;
+                $records[] = $rec;
+            }
+
             return [
                 'success'                  => true,
                 'purchase_order'           => $this->displayNumber($purchaseOrder),
@@ -97,22 +173,22 @@ class PoCostValidationService
                     'purchase_order' => $this->displayNumber($purchaseOrder),
                     'sales_orders'   => array_values(array_unique(array_filter(array_map(
                         static fn ($r) => (string) ($r['salordno'] ?? ''),
-                        $tempfin['records']
+                        $records
                     )))),
                 ],
                 'summary'                  => $tempfin['summary'],
-                'records'                  => $tempfin['records'],
-                'quote_options'            => [],
-                'validated_quotations'     => [],
-                'non_validated_quotations' => [],
+                'records'                  => $records,
+                'quote_options'            => $quoteOptions,
+                'validated_quotations'     => $validatedQuotes,
+                'non_validated_quotations' => $nonValidatedQuotes,
                 'costing'                  => [
                     'sales_orders' => $tempfin['summary']['sales_orders'] ?? 0,
-                    'quotations'   => [],
-                    'sheets'       => [],
-                    'cost_lines'   => count($tempfin['records']),
-                    'error'        => null,
+                    'quotations'   => $validatedQuotes,
+                    'sheets'       => $quoteOptions,
+                    'cost_lines'   => count($costLines),
+                    'error'        => $cds['error'] ?? null,
                 ],
-                'cost_lines'               => [],
+                'cost_lines'               => $costLines,
                 'flow'                     => [
                     'source'   => 'TEMPFIN_PASSPO',
                     'mat_type' => $tempfin['mat_type'] ?? $tempfinType,
@@ -553,6 +629,37 @@ class PoCostValidationService
             }
         }
 
+        // Fallback: If PO Candidate filter returned 0 rows, but quotation or SO is specified, query directly by QuotationNo / SalesOrderReference
+        if ($rows === [] && (($quotation !== null && trim($quotation) !== '') || ($so !== null && trim($so) !== ''))) {
+            $directFilterParts = [];
+            if ($quotation !== null && trim($quotation) !== '') {
+                $qClean = str_replace("'", "''", trim($quotation));
+                $directFilterParts[] = "QuotationNo eq '{$qClean}'";
+            }
+            if ($so !== null && trim($so) !== '') {
+                $soClean = str_replace("'", "''", trim($so));
+                $directFilterParts[] = "SalesOrderReference eq '{$soClean}'";
+            }
+            if ($item !== null && trim($item) !== '') {
+                $itemClean = preg_replace('/\D/', '', $item) ?? '';
+                if ($itemClean !== '') {
+                    $itemPadded = str_pad(ltrim($itemClean, '0'), 5, '0', STR_PAD_LEFT);
+                    $directFilterParts[] = "PurchaseOrderItem eq '{$itemPadded}'";
+                }
+            }
+            $query = [
+                '$filter' => implode(' and ', $directFilterParts),
+                '$expand' => 'to_Fabric,to_Trim,to_Packing,to_Special',
+            ];
+            $res = $this->odata->fetchResults($service, $query, 1000);
+            if (!empty($res['rows'])) {
+                $rows = $res['rows'];
+                $lastError = null;
+            } elseif (!empty($res['error'])) {
+                $lastError = $res['error'];
+            }
+        }
+
         if ($rows === []) {
             return [
                 'success'                   => false,
@@ -752,10 +859,10 @@ class PoCostValidationService
                         'is_validated'        => $isValidatedRow,
                         'so_item'             => $posnr,
                         'line_no'             => $zline,
-                        'item'                => $itemCode !== '' ? $itemCode : $maktx,
+                        'item'                => $itemCode,
                         'description'         => $maktx,
                         'maktx'               => $maktx,
-                        'material'            => $itemCode !== '' ? $itemCode : $maktx,
+                        'material'            => $itemCode,
                         'wid_siz'             => trim((string) ($line['WID_SIZ'] ?? '')),
                         'net'                 => $this->sapNumber($line['NET'] ?? 0),
                         'waste'               => $this->sapNumber($line['WSTE'] ?? 0),
@@ -1168,6 +1275,9 @@ class PoCostValidationService
             'sell_price'         => $match['sell_price'] ?? null,
             'making'             => $match['making'] ?? null,
             'selected'           => false,
+            'manual_match'       => false,
+            'needs_manual_match' => $match === null
+                || $status === 'EXCEPTION' && preg_match('/no matching|no linked|cannot load|no reliable/i', (string) $result),
         ];
     }
 

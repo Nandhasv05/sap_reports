@@ -12,3 +12,4 @@ if (!defined('EVOLV_ROOT')) {
 require EVOLV_ROOT . '/app/core/helpers.php';
 header('Location: ' . sap_reports_evol_url('login.php'));
 exit;
+?>

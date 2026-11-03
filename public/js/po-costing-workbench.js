@@ -54,18 +54,19 @@
     const ZCOST_COLS = new Set([
         'cost_item', 'maktx',
         'budgeted_cons', 'budget_inr', 'budget_currency', 'budget_conv_rt', 'budget_cost_per_gmt',
-        'conv', 'buom', 'actual_cost', 'cost_matrix', 'variance_pct', 'validation_result',
+        'conv', 'buom', 'actual_cost', 'variance_pct', 'validation_result',
     ]);
     const EXPLAIN_COLS = new Set([
         'so_qty', 'prwise_so_qty', 'consumption', 'reqqty', 'tot_poqty',
         'so_wise_poqty', 'so_wise_po_val', 'ouom', 'porate', 'totvalue',
         'po_currency', 'budgeted_cons', 'budget_inr', 'budget_currency',
         'budget_conv_rt', 'budget_cost_per_gmt', 'conv', 'buom', 'actual_cost',
-        'cost_matrix', 'variance_pct',
+        'variance_pct',
     ]);
     const colGroup = (key) => (ZCOST_COLS.has(key) ? 'zcost' : 'po');
 
     let rows = [];
+    let costLines = [];
     let quoteOptions = [];
     let validatedQuotes = [];
     let nonValidatedQuotes = [];
@@ -77,6 +78,8 @@
     let colFeatures = null;
     let filterVisible = true;
     let formulaAnchor = null;
+    let matchRowIndex = null;
+    let matchPickKey = '';
 
     function nVal(v) {
         const n = Number(v);
@@ -445,6 +448,371 @@
         positionFormulaPop(anchor);
     }
 
+    function closeCardDetailModal() {
+        const modal = $('pcwCardDetailModal');
+        const backdrop = $('pcwCardDetailBackdrop');
+        if (modal) modal.hidden = true;
+        if (backdrop) backdrop.hidden = true;
+    }
+
+    function filterTableByStatus(status) {
+        const statusTh = $('rptFilterRow')?.querySelector('th[data-col-id="status"] input');
+        if (statusTh) {
+            statusTh.value = status;
+            statusTh.dispatchEvent(new Event('input', { bubbles: true }));
+        } else {
+            const searchInput = $('rptTableSearch');
+            if (searchInput) {
+                searchInput.value = status;
+                searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        }
+    }
+
+    function openCardDetailModal(cardKey) {
+        const s = summarizeRows(rows);
+        const modal = $('pcwCardDetailModal');
+        const backdrop = $('pcwCardDetailBackdrop');
+        if (!modal || !backdrop) return;
+
+        let icon = 'analytics';
+        let subtitle = 'PO DATA Card Details';
+        let title = '';
+        let val = '—';
+        let unit = '';
+        let formula = '';
+        let stepsHtml = '';
+        let tableTitle = 'Contributing Items';
+        let rowsHtml = '';
+        let showFilterBtn = false;
+        let filterStatus = '';
+
+        const curr = s.currency || 'INR';
+        const uom = s.unit || '';
+        const fmt = (n) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+        const fmtDec = (n, d = 2) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d });
+
+        if (cardKey === 'status_total') {
+            icon = 'rule';
+            subtitle = 'Validation Overview';
+            title = 'Total Validation Lines';
+            val = fmt(s.total_records || rows.length);
+            formula = 'Total Lines = Count of all item rows evaluated in Purchase Order';
+            stepsHtml = `
+                <div class="pcw-cdm-step-item"><span>Passed Lines</span><strong>${fmt(s.passed)}</strong></div>
+                <div class="pcw-cdm-step-item"><span>Exception Lines</span><strong>${fmt(s.exceptions)}</strong></div>
+                <div class="pcw-cdm-step-item"><span>Needs Review Lines</span><strong>${fmt(s.needs_review)}</strong></div>
+                <div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Evaluated</span><strong>${fmt(s.total_records || rows.length)}</strong></div>
+            `;
+            rowsHtml = rows.map((r, i) => `<tr>
+                <td>#${esc(r.poitem || (i + 1))}</td>
+                <td><strong>${esc(r.material)}</strong><br><small style="color:#64748b;">${esc(r.mat_desc || '')}</small></td>
+                <td class="num">${qty(r.tot_poqty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
+                <td class="num">₹${money(r.totvalue ?? ((r.porate ?? r.po_unit_cost ?? 0) * (r.tot_poqty || 1)))}</td>
+                <td>${statusPill(r.status)}</td>
+            </tr>`).join('');
+        } else if (cardKey === 'status_pass') {
+            icon = 'check_circle';
+            subtitle = 'Validation Overview';
+            title = 'Passed Lines';
+            val = fmt(s.passed);
+            formula = 'Passed Lines = PO lines where Actual PO Rate ≤ Budget Cost per GMT';
+            showFilterBtn = true;
+            filterStatus = 'PASS';
+            const passRows = rows.filter(r => String(r.status).toUpperCase() === 'PASS');
+            stepsHtml = `
+                <div class="pcw-cdm-step-item"><span>Condition</span><strong>Actual Cost ≤ Budget Cost per GMT</strong></div>
+                <div class="pcw-cdm-step-item"><span>Total Passed Lines</span><strong>${fmt(s.passed)} of ${fmt(rows.length)}</strong></div>
+            `;
+            rowsHtml = passRows.map((r, i) => `<tr>
+                <td>#${esc(r.poitem || (i + 1))}</td>
+                <td><strong>${esc(r.material)}</strong><br><small style="color:#64748b;">${esc(r.mat_desc || '')}</small></td>
+                <td class="num">${qty(r.tot_poqty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
+                <td class="num">₹${money(r.totvalue)}</td>
+                <td>${statusPill(r.status)}</td>
+            </tr>`).join('');
+        } else if (cardKey === 'status_fail') {
+            icon = 'error';
+            subtitle = 'Validation Overview';
+            title = 'Exception Lines';
+            val = fmt(s.exceptions);
+            formula = 'Exceptions = PO lines exceeding budget cost or missing valid costing link';
+            showFilterBtn = true;
+            filterStatus = 'EXCEPTION';
+            const failRows = rows.filter(r => String(r.status).toUpperCase() !== 'PASS' && String(r.status).toUpperCase() !== 'NEEDS_REVIEW');
+            stepsHtml = `
+                <div class="pcw-cdm-step-item"><span>Condition</span><strong>PO Rate > Budget or Unmatched in zCOST</strong></div>
+                <div class="pcw-cdm-step-item"><span>Total Exception Lines</span><strong>${fmt(s.exceptions)} of ${fmt(rows.length)}</strong></div>
+            `;
+            rowsHtml = failRows.map((r, i) => `<tr>
+                <td>#${esc(r.poitem || (i + 1))}</td>
+                <td><strong>${esc(r.material)}</strong><br><small style="color:#64748b;">${esc(r.mat_desc || '')}</small></td>
+                <td class="num">${qty(r.tot_poqty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
+                <td class="num">₹${money(r.totvalue)}</td>
+                <td>${statusPill(r.status)}</td>
+            </tr>`).join('');
+        } else if (cardKey === 'status_review') {
+            icon = 'rate_review';
+            subtitle = 'Validation Overview';
+            title = 'Needs Review Lines';
+            val = fmt(s.needs_review);
+            formula = 'Needs Review = PO lines with zero budget rate or uncertain match requiring review';
+            showFilterBtn = true;
+            filterStatus = 'NEEDS_REVIEW';
+            const revRows = rows.filter(r => String(r.status).toUpperCase() === 'NEEDS_REVIEW');
+            stepsHtml = `
+                <div class="pcw-cdm-step-item"><span>Condition</span><strong>Rate is zero or uncertain mapping</strong></div>
+                <div class="pcw-cdm-step-item"><span>Total Needs Review</span><strong>${fmt(s.needs_review)} of ${fmt(rows.length)}</strong></div>
+            `;
+            rowsHtml = revRows.map((r, i) => `<tr>
+                <td>#${esc(r.poitem || (i + 1))}</td>
+                <td><strong>${esc(r.material)}</strong><br><small style="color:#64748b;">${esc(r.mat_desc || '')}</small></td>
+                <td class="num">${qty(r.tot_poqty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
+                <td class="num">₹${money(r.totvalue)}</td>
+                <td>${statusPill(r.status)}</td>
+            </tr>`).join('');
+        } else if (cardKey === 'po_items') {
+            icon = 'format_list_numbered';
+            subtitle = 'PO DATA';
+            title = 'Total Items';
+            val = fmt(s.po_items);
+            formula = 'Total Items = Count of unique PO Item numbers (distinct poitem)';
+            const seenIt = {};
+            const distItems = rows.filter(r => {
+                const it = String(r.poitem || r.po_item || '').trim();
+                if (it && !seenIt[it]) { seenIt[it] = true; return true; }
+                return false;
+            });
+            stepsHtml = distItems.map(r => `<div class="pcw-cdm-step-item"><span>PO Item #${esc(r.poitem || r.po_item)} (${esc(r.material)})</span><strong>Qty: ${qty(r.tot_poqty || 0)} · Value: ₹${money(r.totvalue)}</strong></div>`).join('')
+                + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Unique Items</span><strong>${fmt(s.po_items)}</strong></div>`;
+            rowsHtml = distItems.map(r => `<tr>
+                <td>#${esc(r.poitem || r.po_item)}</td>
+                <td><strong>${esc(r.material)}</strong><br><small style="color:#64748b;">${esc(r.mat_desc || '')}</small></td>
+                <td class="num">${qty(r.tot_poqty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
+                <td class="num">₹${money(r.totvalue)}</td>
+                <td>${statusPill(r.status)}</td>
+            </tr>`).join('');
+        } else if (cardKey === 'po_materials') {
+            icon = 'category';
+            subtitle = 'PO DATA';
+            title = 'Total Material';
+            val = fmt(s.materials);
+            formula = 'Total Material = Count of distinct Material Codes across PO lines';
+            const seenMat = {};
+            const distMats = rows.filter(r => {
+                const m = String(r.material || '').trim();
+                if (m && !seenMat[m]) { seenMat[m] = true; return true; }
+                return false;
+            });
+            stepsHtml = distMats.map(r => `<div class="pcw-cdm-step-item"><span>${esc(r.material)}</span><strong>${esc(r.mat_desc || r.maktx || '')}</strong></div>`).join('')
+                + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Unique Materials</span><strong>${fmt(s.materials)}</strong></div>`;
+            rowsHtml = distMats.map(r => `<tr>
+                <td>#${esc(r.poitem || 1)}</td>
+                <td><strong>${esc(r.material)}</strong><br><small style="color:#64748b;">${esc(r.mat_desc || '')}</small></td>
+                <td class="num">${qty(r.tot_poqty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
+                <td class="num">₹${money(r.totvalue)}</td>
+                <td>${statusPill(r.status)}</td>
+            </tr>`).join('');
+        } else if (cardKey === 'po_so_qty') {
+            icon = 'inventory_2';
+            subtitle = 'PO DATA';
+            title = 'Total SO Qty';
+            val = fmt(s.total_order_qty || s.total_so_qty);
+            unit = uom;
+            formula = 'Total SO Qty = ∑ (PO Order Quantity across unique items)';
+            const seenIt = {};
+            const itRows = rows.filter(r => {
+                const it = String(r.poitem || r.po_item || '').trim();
+                if (it && !seenIt[it]) { seenIt[it] = true; return true; }
+                return !it;
+            });
+            stepsHtml = itRows.map(r => `<div class="pcw-cdm-step-item"><span>PO Item #${esc(r.poitem || r.po_item)}</span><strong>${qty(r.tot_poqty || r.order_qty || 0)} ${esc(r.ouom || uom)}</strong></div>`).join('')
+                + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Order Qty</span><strong>${fmt(s.total_order_qty || s.total_so_qty)} ${esc(uom)}</strong></div>`;
+            rowsHtml = rows.map((r, i) => `<tr>
+                <td>#${esc(r.poitem || (i + 1))}</td>
+                <td><strong>${esc(r.material)}</strong><br><small style="color:#64748b;">SO: ${esc(r.salordno || r.sales_order || '—')}</small></td>
+                <td class="num">${qty(r.tot_poqty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
+                <td class="num">₹${money(r.totvalue)}</td>
+                <td>${statusPill(r.status)}</td>
+            </tr>`).join('');
+        } else if (cardKey === 'po_value') {
+            icon = 'payments';
+            subtitle = 'PO DATA';
+            title = 'Total Net Value';
+            val = fmt(s.total_po_value);
+            unit = curr;
+            formula = 'Total Net Value = ∑ (PO Order Quantity × PO Unit Rate)';
+            const seenIt = {};
+            const itRows = rows.filter(r => {
+                const it = String(r.poitem || r.po_item || '').trim();
+                if (it && !seenIt[it]) { seenIt[it] = true; return true; }
+                return !it;
+            });
+            stepsHtml = itRows.map(r => `<div class="pcw-cdm-step-item"><span>PO Item #${esc(r.poitem || r.po_item)} (${qty(r.tot_poqty || 0)} × ₹${fmtDec(r.porate ?? r.po_unit_cost, 2)})</span><strong>₹${money(r.totvalue)}</strong></div>`).join('')
+                + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Net Value</span><strong>₹${fmt(s.total_po_value)} ${esc(curr)}</strong></div>`;
+            rowsHtml = rows.map((r, i) => `<tr>
+                <td>#${esc(r.poitem || (i + 1))}</td>
+                <td><strong>${esc(r.material)}</strong><br><small style="color:#64748b;">${esc(r.mat_desc || '')}</small></td>
+                <td class="num">${qty(r.tot_poqty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
+                <td class="num">₹${money(r.totvalue)}</td>
+                <td>${statusPill(r.status)}</td>
+            </tr>`).join('');
+        } else if (cardKey === 'zcost_items') {
+            icon = 'format_list_numbered';
+            subtitle = 'zCOST DATA (MATCHED ONLY)';
+            title = 'Total Items';
+            val = fmt(s.zcost_items);
+            formula = 'zCOST Items = Count of PO items with a confirmed zCOST match (unmatched excluded)';
+            const matchedRows = rows.filter(isMatchedRow);
+            const seenZ = {};
+            const distZ = matchedRows.filter(r => {
+                const it = String(r.poitem || r.po_item || '').trim();
+                if (it && !seenZ[it]) { seenZ[it] = true; return true; }
+                return false;
+            });
+            stepsHtml = distZ.length
+                ? distZ.map(r => `<div class="pcw-cdm-step-item"><span>PO Item #${esc(r.poitem)} Matched to zCOST Line</span><strong>${esc(r.maktx || r.cost_description || 'Matched')}</strong></div>`).join('')
+                    + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Matched Items</span><strong>${fmt(s.zcost_items)}</strong></div>`
+                : '<div class="pcw-cdm-step-item"><span>No matched items</span><strong>0</strong></div>';
+            rowsHtml = distZ.map(r => `<tr>
+                <td>#${esc(r.poitem)}</td>
+                <td><strong>${esc(r.material)}</strong><br><small style="color:#4338ca;">zCOST: ${esc(r.maktx || r.cost_description || '—')}</small></td>
+                <td class="num">${qty(r.tot_poqty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">₹${fmtDec(r.budget_cost_per_gmt ?? r.expected_unit_cost, 4)}</td>
+                <td class="num">₹${money((r.budget_cost_per_gmt ?? r.expected_unit_cost) * (r.tot_poqty || 1))}</td>
+                <td>${statusPill(r.status)}</td>
+            </tr>`).join('');
+        } else if (cardKey === 'zcost_materials') {
+            icon = 'category';
+            subtitle = 'zCOST DATA (MATCHED ONLY)';
+            title = 'Total Material';
+            val = fmt(s.zcost_materials);
+            formula = 'zCOST Material = Count of distinct PO materials with a confirmed zCOST match (unmatched excluded)';
+            const matchedRows = rows.filter(isMatchedRow);
+            const seenMat = {};
+            const distMats = matchedRows.filter(r => {
+                const m = String(r.material || '').trim();
+                if (m && !seenMat[m]) { seenMat[m] = true; return true; }
+                return false;
+            });
+            stepsHtml = distMats.length
+                ? distMats.map(r => `<div class="pcw-cdm-step-item"><span>Material: ${esc(r.material)}</span><strong>zCOST: ${esc(r.maktx || r.cost_description || 'Matched')}</strong></div>`).join('')
+                    + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Matched Materials</span><strong>${fmt(s.zcost_materials)}</strong></div>`
+                : '<div class="pcw-cdm-step-item"><span>No matched materials</span><strong>0</strong></div>';
+            rowsHtml = distMats.map(r => `<tr>
+                <td>#${esc(r.poitem || 1)}</td>
+                <td><strong>${esc(r.material)}</strong><br><small style="color:#4338ca;">${esc(r.maktx || r.cost_description || '')}</small></td>
+                <td class="num">${qty(r.tot_poqty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">₹${fmtDec(r.budget_cost_per_gmt ?? r.expected_unit_cost, 4)}</td>
+                <td class="num">₹${money((r.budget_cost_per_gmt ?? r.expected_unit_cost) * (r.tot_poqty || 1))}</td>
+                <td>${statusPill(r.status)}</td>
+            </tr>`).join('');
+        } else if (cardKey === 'zcost_so_qty') {
+            icon = 'inventory_2';
+            subtitle = 'zCOST DATA (MATCHED ONLY)';
+            title = 'Total SO Qty';
+            val = fmt(s.zcost_so_qty);
+            unit = uom;
+            formula = 'zCOST SO Qty = ∑ (Order Quantity of MATCHED PO items only, unmatched excluded)';
+            const matchedRows = rows.filter(isMatchedRow);
+            const seenIt = {};
+            const itRows = matchedRows.filter(r => {
+                const it = String(r.poitem || r.po_item || '').trim();
+                if (it && !seenIt[it]) { seenIt[it] = true; return true; }
+                return !it;
+            });
+            stepsHtml = itRows.length
+                ? itRows.map(r => `<div class="pcw-cdm-step-item"><span>Matched Item #${esc(r.poitem)}</span><strong>${qty(r.tot_poqty || r.order_qty || 0)} ${esc(r.ouom || uom)}</strong></div>`).join('')
+                    + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Matched Qty</span><strong>${fmt(s.zcost_so_qty)} ${esc(uom)}</strong></div>`
+                : '<div class="pcw-cdm-step-item"><span>No matched quantity</span><strong>0</strong></div>';
+            rowsHtml = matchedRows.map((r, i) => `<tr>
+                <td>#${esc(r.poitem || (i + 1))}</td>
+                <td><strong>${esc(r.material)}</strong><br><small style="color:#4338ca;">zCOST: ${esc(r.maktx || r.cost_description || '—')}</small></td>
+                <td class="num">${qty(r.tot_poqty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">₹${fmtDec(r.budget_cost_per_gmt ?? r.expected_unit_cost, 4)}</td>
+                <td class="num">₹${money((r.budget_cost_per_gmt ?? r.expected_unit_cost) * (r.tot_poqty || 1))}</td>
+                <td>${statusPill(r.status)}</td>
+            </tr>`).join('');
+        } else if (cardKey === 'zcost_value') {
+            icon = 'payments';
+            subtitle = 'zCOST DATA (MATCHED ONLY)';
+            title = 'Total Net Value (Budget Total)';
+            val = fmt(s.zcost_net_value);
+            unit = curr;
+            formula = 'zCOST Net Value = ∑ (Cost Quantity × Budget Cost per GMT) for MATCHED items only';
+            const matchedRows = rows.filter(isMatchedRow);
+            stepsHtml = matchedRows.length
+                ? matchedRows.map(r => {
+                    const b = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost) || 0;
+                    const q = Number(r.tot_poqty || r.order_qty || 1);
+                    return `<div class="pcw-cdm-step-item"><span>Item #${esc(r.poitem)} (${qty(q)} × ₹${fmtDec(b, 4)})</span><strong>₹${money(b * q)}</strong></div>`;
+                }).join('')
+                + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Expected Budget</span><strong>₹${fmt(s.zcost_net_value)} ${esc(curr)}</strong></div>`
+                : '<div class="pcw-cdm-step-item"><span>No matched value</span><strong>₹0</strong></div>';
+            rowsHtml = matchedRows.map((r, i) => {
+                const b = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost) || 0;
+                const q = Number(r.tot_poqty || r.order_qty || 1);
+                return `<tr>
+                    <td>#${esc(r.poitem || (i + 1))}</td>
+                    <td><strong>${esc(r.material)}</strong><br><small style="color:#4338ca;">zCOST: ${esc(r.maktx || r.cost_description || '—')}</small></td>
+                    <td class="num">${qty(q)} ${esc(r.ouom || uom)}</td>
+                    <td class="num">₹${fmtDec(b, 4)}</td>
+                    <td class="num">₹${money(b * q)}</td>
+                    <td>${statusPill(r.status)}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        const isZcost = String(cardKey || '').startsWith('zcost_');
+        const thRate = isZcost ? 'Budget Rate' : 'PO Rate';
+        const thVal = isZcost ? 'Budget Value' : 'Net Value';
+        if ($('pcwCardModalTableHead')) {
+            $('pcwCardModalTableHead').innerHTML = `
+                <th># Item</th>
+                <th>${isZcost ? 'PO Material / zCOST Match' : 'Material / Description'}</th>
+                <th class="num">Quantity</th>
+                <th class="num">${thRate}</th>
+                <th class="num">${thVal}</th>
+                <th>Status</th>
+            `;
+        }
+
+        $('pcwCardModalIcon').textContent = icon;
+        $('pcwCardModalSubtitle').textContent = subtitle;
+        $('pcwCardModalTitle').textContent = title;
+        $('pcwCardModalVal').textContent = val;
+        $('pcwCardModalUnit').textContent = unit;
+        $('pcwCardModalFormula').textContent = formula;
+        $('pcwCardModalSteps').innerHTML = stepsHtml || '<p style="color:#64748b; margin:0;">Standard aggregation across active records.</p>';
+        $('pcwCardModalTableBody').innerHTML = rowsHtml || '<tr><td colspan="6" style="text-align:center; color:#94a3b8; padding:20px;">No rows found for this metric.</td></tr>';
+        $('pcwCardModalTableCount').textContent = `Showing ${tableTitle}`;
+
+        const filterBtn = $('pcwCardModalFilterBtn');
+        if (filterBtn) {
+            if (showFilterBtn && filterStatus) {
+                filterBtn.style.display = 'inline-flex';
+                $('pcwCardModalFilterLabel').textContent = `Filter Table by ${filterStatus}`;
+                filterBtn.onclick = () => {
+                    closeCardDetailModal();
+                    filterTableByStatus(filterStatus);
+                };
+            } else {
+                filterBtn.style.display = 'none';
+            }
+        }
+
+        modal.hidden = false;
+        backdrop.hidden = false;
+    }
+
     function showSpinner(on) {
         if (spinner) spinner.hidden = !on;
         document.body.classList.toggle('rpt-loading', !!on);
@@ -495,6 +863,21 @@
         if (btn) btn.disabled = !canPass;
     }
 
+    function isMatchedRow(r) {
+        if (!r) return false;
+        if (r.needs_manual_match === true) return false;
+        if (r.manual_match) return true;
+        const hasMatch = !!(r.maktx || r.cost_description || r.cost_item || r.item || r.matched_line_key);
+        if (!hasMatch) return false;
+        const budget = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost);
+        if (budget === null || budget <= 0) return false;
+        const st = String(r.status || '').toUpperCase();
+        if (st === 'EXCEPTION' && /no matching|no linked|cannot load|no budget/i.test(String(r.validation_result || ''))) {
+            return false;
+        }
+        return true;
+    }
+
     function summarizeRows(list) {
         const materials = {};
         const salesOrders = {};
@@ -505,10 +888,18 @@
         let needsReview = 0;
         let totalValue = 0;
         let totalOrderQty = 0;
+        let poSoQty = 0;
         let totalExpected = 0;
         let totalActual = 0;
         let unit = '';
         let currency = 'INR';
+
+        const zItems = {};
+        const zMaterials = {};
+        const seenZItem = {};
+        let zcostSoQty = 0;
+        let zcostExpected = 0;
+
         (list || []).forEach((r) => {
             const st = String(r.status || '').toUpperCase();
             if (st === 'PASS') passed += 1;
@@ -520,29 +911,66 @@
             if (so) salesOrders[so] = true;
             const item = String(r.poitem || r.po_item || '').trim();
             if (item) items[item] = true;
+
+            const rowSoQty = Number(r.so_qty ?? r.prwise_so_qty ?? 0) || 0;
+            const rowOrderQty = Number(r.tot_poqty ?? r.order_qty ?? r.po_qty ?? 0) || 0;
+            const effectiveQty = rowSoQty > 0 ? rowSoQty : rowOrderQty;
+            poSoQty += effectiveQty;
+
             if (item && !seenValue[item]) {
                 seenValue[item] = true;
                 totalValue += Number(r.totvalue ?? r.net_value ?? 0) || 0;
-                totalOrderQty += Number(r.tot_poqty ?? r.order_qty ?? r.po_qty ?? 0) || 0;
+                totalOrderQty += rowOrderQty;
             } else if (!item) {
                 totalValue += Number(r.totvalue ?? r.net_value ?? 0) || 0;
-                totalOrderQty += Number(r.tot_poqty ?? r.order_qty ?? r.po_qty ?? 0) || 0;
+                totalOrderQty += rowOrderQty;
             }
             const budget = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost);
             const actual = nVal(r.actual_cost ?? r.po_unit_cost);
-            const soQty = Number(r.so_qty ?? r.prwise_so_qty ?? 0) || 0;
-            const costQty = soQty > 0 ? soQty : 1;
+            const costQty = rowSoQty > 0 ? rowSoQty : (rowOrderQty > 0 ? rowOrderQty : 1);
             if (budget !== null) totalExpected += budget * costQty;
             if (actual !== null) totalActual += actual * costQty;
+
+            // Strict match check: only count rows that have a confirmed zCOST match
+            const isMatched = isMatchedRow(r);
+
+            if (isMatched) {
+                if (item) zItems[item] = true;
+                if (mat) zMaterials[mat] = true;
+
+                if (rowSoQty > 0) {
+                    zcostSoQty += rowSoQty;
+                } else if (item && !seenZItem[item]) {
+                    seenZItem[item] = true;
+                    zcostSoQty += rowOrderQty;
+                } else if (!item) {
+                    zcostSoQty += rowOrderQty;
+                }
+                zcostExpected += (budget || 0) * costQty;
+            }
+
             if (!unit) unit = String(r.ouom || r.unit || '').trim();
             if (r.po_currency || r.currency) currency = String(r.po_currency || r.currency);
         });
+
+        const poTotalSoQty = totalOrderQty > 0 ? totalOrderQty : poSoQty;
+        const zcostItemCount = Object.keys(zItems).length;
+        const zcostMatCount = Object.keys(zMaterials).length;
+        const finalZcostSoQty = zcostSoQty;
+        const finalZcostNetValue = zcostExpected;
+
         return {
+            total_records: (list || []).length,
             po_items: Object.keys(items).length || (list || []).length,
             materials: Object.keys(materials).length,
             sales_orders: Object.keys(salesOrders).length,
             total_order_qty: totalOrderQty,
+            total_so_qty: poTotalSoQty,
             total_po_value: totalValue,
+            zcost_items: zcostItemCount,
+            zcost_materials: zcostMatCount,
+            zcost_so_qty: finalZcostSoQty,
+            zcost_net_value: finalZcostNetValue,
             total_expected: totalExpected,
             total_actual: totalActual,
             unit,
@@ -565,6 +993,7 @@
         // Prefer API counts when present; keep row-derived qty/value if API zeros look wrong
         if (!(Number(fromApi.total_order_qty) > 0) && Number(fromRows.total_order_qty) > 0) {
             s.total_order_qty = fromRows.total_order_qty;
+            s.total_so_qty = fromRows.total_so_qty;
             s.unit = fromRows.unit || s.unit;
         }
         if (!(Number(fromApi.total_po_value) > 0) && Number(fromRows.total_po_value) > 0) {
@@ -577,23 +1006,59 @@
             s.total_actual = fromRows.total_actual;
         }
         const fmt = (n) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
-        if ($('pcwKpiItems')) $('pcwKpiItems').textContent = fmt(s.po_items || s.unique_po_items || 0);
-        if ($('pcwKpiMaterials')) $('pcwKpiMaterials').textContent = fmt(s.materials || 0);
-        if ($('pcwKpiOrderQty')) $('pcwKpiOrderQty').textContent = fmt(s.total_order_qty || 0);
-        if ($('pcwKpiOrderQtyUnit')) $('pcwKpiOrderQtyUnit').textContent = s.unit || '';
-        if ($('pcwKpiValue')) $('pcwKpiValue').textContent = fmt(s.total_po_value || 0);
-        if ($('pcwKpiValueUnit')) $('pcwKpiValueUnit').textContent = s.currency || 'INR';
-        if ($('pcwKpiSalesOrders')) $('pcwKpiSalesOrders').textContent = fmt(s.sales_orders || 0);
+        const total = (Number(s.passed) || 0) + (Number(s.exceptions) || 0) + (Number(s.needs_review) || 0) || rows.length || 0;
+
+        // Row 1: Common status
+        if ($('pcwKpiTotal')) $('pcwKpiTotal').textContent = fmt(total);
         if ($('pcwKpiPassed')) $('pcwKpiPassed').textContent = fmt(s.passed || 0);
         if ($('pcwKpiExceptions')) $('pcwKpiExceptions').textContent = fmt(s.exceptions || 0);
         if ($('pcwKpiReview')) $('pcwKpiReview').textContent = fmt(s.needs_review || 0);
-        if ($('pcwKpiExpected')) $('pcwKpiExpected').textContent = fmt(s.total_expected || 0);
-        if ($('pcwKpiExpectedUnit')) $('pcwKpiExpectedUnit').textContent = s.currency || 'INR';
-        if ($('pcwKpiActual')) $('pcwKpiActual').textContent = fmt(s.total_actual || 0);
-        if ($('pcwKpiActualUnit')) $('pcwKpiActualUnit').textContent = s.currency || 'INR';
+
+        // Row 2 Left: PO Data
+        const poItems = Number(s.po_items) > 0 ? s.po_items : (s.unique_po_items || rows.length || 0);
+        const poMaterials = Number(s.materials) > 0 ? s.materials : 0;
+        const poSoQty = Number(s.total_order_qty) > 0 ? s.total_order_qty : (s.total_so_qty || 0);
+        const poNetVal = Number(s.total_po_value) >= 0 ? s.total_po_value : 0;
+        const curr = s.currency || 'INR';
+        const unit = s.unit || '';
+
+        if ($('pcwKpiPoItems')) $('pcwKpiPoItems').textContent = fmt(poItems);
+        if ($('pcwKpiItems')) $('pcwKpiItems').textContent = fmt(poItems);
+
+        if ($('pcwKpiPoMaterials')) $('pcwKpiPoMaterials').textContent = fmt(poMaterials);
+        if ($('pcwKpiMaterials')) $('pcwKpiMaterials').textContent = fmt(poMaterials);
+
+        if ($('pcwKpiPoOrderQty')) $('pcwKpiPoOrderQty').textContent = fmt(poSoQty);
+        if ($('pcwKpiOrderQty')) $('pcwKpiOrderQty').textContent = fmt(poSoQty);
+        if ($('pcwKpiPoOrderQtyUnit')) $('pcwKpiPoOrderQtyUnit').textContent = unit;
+        if ($('pcwKpiOrderQtyUnit')) $('pcwKpiOrderQtyUnit').textContent = unit;
+
+        if ($('pcwKpiPoValue')) $('pcwKpiPoValue').textContent = fmt(poNetVal);
+        if ($('pcwKpiValue')) $('pcwKpiValue').textContent = fmt(poNetVal);
+        if ($('pcwKpiPoValueUnit')) $('pcwKpiPoValueUnit').textContent = curr;
+        if ($('pcwKpiValueUnit')) $('pcwKpiValueUnit').textContent = curr;
+
+        // Row 2 Right: zCOST Data (Matched only)
+        const zItems = fromRows.zcost_items ?? 0;
+        const zMaterials = fromRows.zcost_materials ?? 0;
+        const zSoQty = fromRows.zcost_so_qty ?? 0;
+        const zNetVal = (Number(fromRows.zcost_net_value) > 0)
+            ? Number(fromRows.zcost_net_value)
+            : ((Number(s.total_expected) > 0 && zItems > 0) ? Number(s.total_expected) : 0);
+
+        if ($('pcwKpiZcostItems')) $('pcwKpiZcostItems').textContent = fmt(zItems);
+        if ($('pcwKpiZcostMaterials')) $('pcwKpiZcostMaterials').textContent = fmt(zMaterials);
+        if ($('pcwKpiZcostOrderQty')) $('pcwKpiZcostOrderQty').textContent = fmt(zSoQty);
+        if ($('pcwKpiZcostOrderQtyUnit')) $('pcwKpiZcostOrderQtyUnit').textContent = unit;
+
+        if ($('pcwKpiZcostValue')) $('pcwKpiZcostValue').textContent = fmt(zNetVal);
+        if ($('pcwKpiExpected')) $('pcwKpiExpected').textContent = fmt(zNetVal);
+        if ($('pcwKpiZcostValueUnit')) $('pcwKpiZcostValueUnit').textContent = curr;
+        if ($('pcwKpiExpectedUnit')) $('pcwKpiExpectedUnit').textContent = curr;
+
         setPassStatus(s);
-        const split = $('pcwKpis');
-        if (split) split.hidden = false;
+        if ($('pcwStatusKpis')) $('pcwStatusKpis').hidden = false;
+        if ($('pcwKpis')) $('pcwKpis').hidden = false;
     }
 
     function statusPill(status) {
@@ -634,35 +1099,451 @@
         return lines ? `${q} · ${tag} · ${lines} lines` : `${q} · ${tag}`;
     }
 
-    function needsDropdown(r) {
-        if (currentMode === 'non_validated') return true;
-        if (!validatedQuotes.length) return true;
-        const hasMatch = !!(r.maktx || r.cost_description || r.cost_section || r.cost_nav);
-        if (!hasMatch) return true;
-        const st = String(r.status || '').toUpperCase();
-        if (st === 'EXCEPTION' && /no matching|no linked|cannot load/i.test(String(r.validation_result || ''))) {
-            return true;
-        }
-        return false;
+    function needsManualMatch(r) {
+        return !isMatchedRow(r);
     }
 
-    function selectHtml(kind, selected, exclude) {
-        const opts = optionList(exclude);
-        const placeholder = kind === 'customer' ? 'Select Customer…' : 'Select End User…';
-        const options = [`<option value="">${esc(placeholder)}</option>`]
-            .concat(
-                opts.map((o) => {
-                    const q = String(o.quotation);
-                    const sel = q === String(selected || '') ? ' selected' : '';
-                    return `<option value="${esc(q)}"${sel}>${esc(quoteLabel(o))}</option>`;
-                })
-            )
+    function needsDropdown(r) {
+        return needsManualMatch(r);
+    }
+
+    function lineKey(line, i) {
+        return [
+            String(line.quotation_no || ''),
+            String(line.so_item || ''),
+            String(line.line_no || ''),
+            String(line.item || ''),
+            String(line.maktx || line.description || ''),
+            String(i),
+        ].join('|');
+    }
+
+    function candidateLinesForRow(r) {
+        const mat = selectedMat();
+        const matCode = String(r.material || '').trim().toLowerCase();
+        const desc = String(r.mat_desc || r.material_desc || r.description || '').trim().toLowerCase();
+        const group = String(r.matgroup || '').trim().toLowerCase();
+        return (costLines || []).filter((line) => {
+            if (mat === 'fabric' && String(line.section || '') !== 'Fabric' && line.mat_category !== 'fabric') {
+                return false;
+            }
+            if (mat === 'trims' && String(line.section || '') === 'Fabric' && line.mat_category === 'fabric') {
+                return false;
+            }
+            return true;
+        }).sort((a, b) => {
+            const aItem = String(a.item || a.material || '').toLowerCase();
+            const bItem = String(b.item || b.material || '').toLowerCase();
+            const aDesc = String(a.maktx || a.description || '').toLowerCase();
+            const bDesc = String(b.maktx || b.description || '').toLowerCase();
+            const aScore = (matCode && aItem === matCode ? 100 : 0)
+                + (matCode && aItem.includes(matCode) ? 40 : 0)
+                + (desc && aDesc && (aDesc.includes(desc.slice(0, 24)) || desc.includes(aDesc.slice(0, 24))) ? 30 : 0)
+                + (group && (aItem.includes('thread') || aDesc.includes('thread')) && group.includes('thread') ? 50 : 0);
+            const bScore = (matCode && bItem === matCode ? 100 : 0)
+                + (matCode && bItem.includes(matCode) ? 40 : 0)
+                + (desc && bDesc && (bDesc.includes(desc.slice(0, 24)) || desc.includes(bDesc.slice(0, 24))) ? 30 : 0)
+                + (group && (bItem.includes('thread') || bDesc.includes('thread')) && group.includes('thread') ? 50 : 0);
+            return bScore - aScore;
+        });
+    }
+
+    function findSameValueRows(sourceRow, sourceIndex) {
+        if (!sourceRow) return { exactMatMatches: [], groupMatches: [], checkedMatches: [], allMatches: [] };
+        const sourceMat = String(sourceRow.material || '').trim().toLowerCase();
+        const sourceGroup = String(sourceRow.matgroup || '').trim().toLowerCase();
+
+        const exactMatMatches = [];
+        const groupMatches = [];
+        const checkedMatches = [];
+        const seenIdx = new Set();
+
+        rows.forEach((r, idx) => {
+            if (idx === sourceIndex) return;
+
+            const rMat = String(r.material || '').trim().toLowerCase();
+            const rGroup = String(r.matgroup || '').trim().toLowerCase();
+
+            if (sourceMat && rMat && rMat === sourceMat) {
+                exactMatMatches.push({ index: idx, row: r, reason: 'same_material' });
+                seenIdx.add(idx);
+            } else if (sourceGroup && rGroup && rGroup === sourceGroup) {
+                groupMatches.push({ index: idx, row: r, reason: 'same_group' });
+                seenIdx.add(idx);
+            }
+            if (r.selected && !seenIdx.has(idx)) {
+                checkedMatches.push({ index: idx, row: r, reason: 'selected' });
+                seenIdx.add(idx);
+            }
+        });
+
+        const allMatches = [
+            ...exactMatMatches,
+            ...groupMatches.filter(m => !exactMatMatches.some(e => e.index === m.index)),
+            ...checkedMatches.filter(m => !exactMatMatches.some(e => e.index === m.index) && !groupMatches.some(g => g.index === m.index)),
+        ];
+
+        return { exactMatMatches, groupMatches, checkedMatches, allMatches };
+    }
+
+    let pendingSameValAction = null;
+
+    function closeSameValModal() {
+        const modal = $('pcwSameValModal');
+        const backdrop = $('pcwSameValBackdrop');
+        if (modal) modal.hidden = true;
+        if (backdrop) backdrop.hidden = true;
+        pendingSameValAction = null;
+    }
+
+    function handleZcostDropdownChange(idx, key) {
+        const targetRow = rows[idx];
+        if (!targetRow) return;
+
+        if (!key) {
+            targetRow.cost_item = '';
+            targetRow.item = '';
+            targetRow.maktx = '';
+            targetRow.manual_match = false;
+            targetRow.needs_manual_match = true;
+            targetRow.matched_line_key = '';
+            targetRow._editingMatch = false;
+            fillKpis(summarizeRows(rows));
+            renderTable();
+            return;
+        }
+
+        const cands = candidateLinesForRow(targetRow);
+        const line = (costLines || []).find((l, i) => lineKey(l, i) === key)
+            || cands.find((l, i) => lineKey(l, i) === key);
+        if (!line) return;
+
+        applyCostLineToRow(targetRow, line);
+        targetRow.matched_line_key = key;
+        targetRow._editingMatch = false;
+
+        const matches = findSameValueRows(targetRow, idx);
+        const hasSameMat = matches.exactMatMatches.length > 0;
+        const hasSameGroup = matches.groupMatches.length > 0;
+        const hasChecked = matches.checkedMatches.length > 0;
+
+        if (hasSameMat || hasSameGroup || hasChecked) {
+            const modal = $('pcwSameValModal');
+            const backdrop = $('pcwSameValBackdrop');
+            const matchedBox = $('pcwSameValMatchedBox');
+            const optionsEl = $('pcwSameValOptions');
+            const applyLabel = $('pcwSameValApplyLabel');
+
+            if (matchedBox) {
+                const itName = esc(line.item || line.material || 'zCOST Line');
+                const maktx = esc(line.maktx || line.description || '');
+                const rt = nVal(line.rate) ?? nVal(line.purp);
+                matchedBox.innerHTML = `<strong>Matched PO Item #${esc(targetRow.poitem || targetRow.po_item || (idx + 1))}: ${itName}</strong>
+                    <span>${maktx} ${rt !== null ? `· Rate: ₹${fmtStep(rt, 2)}` : ''}</span>`;
+            }
+
+            let optionsHtml = '';
+
+            if (hasSameMat) {
+                const count = matches.exactMatMatches.length;
+                optionsHtml += `<label class="pcw-svm-option-label is-active">
+                    <input type="radio" name="pcwSvmChoice" value="mat" checked>
+                    <div class="pcw-svm-option-text">
+                        <strong>Match All ${count + 1} Items with Same Material Code (${esc(targetRow.material)})</strong>
+                        <small>Items: #${esc(targetRow.poitem || (idx + 1))}, ${matches.exactMatMatches.map(m => '#' + (m.row.poitem || (m.index + 1))).join(', ')}</small>
+                    </div>
+                </label>`;
+            }
+
+            if (hasSameGroup) {
+                const count = matches.groupMatches.length;
+                const isChk = !hasSameMat ? ' checked' : '';
+                optionsHtml += `<label class="pcw-svm-option-label${!hasSameMat ? ' is-active' : ''}">
+                    <input type="radio" name="pcwSvmChoice" value="group"${isChk}>
+                    <div class="pcw-svm-option-text">
+                        <strong>Match All ${count + 1} Items in Material Group "${esc(targetRow.matgroup || 'Same Group')}"</strong>
+                        <small>Items: #${esc(targetRow.poitem || (idx + 1))}, ${matches.groupMatches.map(m => '#' + (m.row.poitem || (m.index + 1))).join(', ')}</small>
+                    </div>
+                </label>`;
+            }
+
+            if (hasChecked) {
+                const count = matches.checkedMatches.length;
+                const isChk = (!hasSameMat && !hasSameGroup) ? ' checked' : '';
+                optionsHtml += `<label class="pcw-svm-option-label${(!hasSameMat && !hasSameGroup) ? ' is-active' : ''}">
+                    <input type="radio" name="pcwSvmChoice" value="checked"${isChk}>
+                    <div class="pcw-svm-option-text">
+                        <strong>Match All ${count + 1} Currently Selected Items</strong>
+                        <small>Items: #${esc(targetRow.poitem || (idx + 1))}, ${matches.checkedMatches.map(m => '#' + (m.row.poitem || (m.index + 1))).join(', ')}</small>
+                    </div>
+                </label>`;
+            }
+
+            if (optionsEl) optionsEl.innerHTML = optionsHtml;
+            if (applyLabel) applyLabel.textContent = `Match All Items`;
+
+            pendingSameValAction = {
+                line,
+                key,
+                targetIndex: idx,
+                matches,
+            };
+
+            if (modal) modal.hidden = false;
+            if (backdrop) backdrop.hidden = false;
+            return;
+        }
+
+        fillKpis(summarizeRows(rows));
+        renderTable();
+    }
+
+    function applyCostLineToRow(r, line) {
+        const budget = nVal(line.rate) ?? nVal(line.purp) ?? nVal(line.net_price);
+        const actual = nVal(r.actual_cost ?? r.po_unit_cost ?? r.porate);
+        let variancePct = null;
+        let status = 'PASS';
+        let result = 'PASS — manually matched to zCOST line';
+        if (budget !== null && budget > 0 && actual !== null) {
+            variancePct = roundPct(((actual - budget) / budget) * 100);
+            if (actual <= budget) {
+                status = 'PASS';
+                result = 'PASS — manually matched to zCOST line';
+            } else {
+                status = 'EXCEPTION';
+                result = 'EXCEPTION — actual cost exceeds matched budget';
+            }
+        } else if (budget !== null && budget > 0) {
+            status = 'PASS';
+            result = 'PASS — manually matched to zCOST line';
+        }
+
+        r.cost_item = String(line.item || '');
+        r.item = r.cost_item;
+        r.maktx = String(line.maktx || line.description || '');
+        r.cost_description = r.maktx;
+        r.cost_section = String(line.section || '');
+        r.zsection = String(line.zsection || '');
+        r.budgeted_cons = nVal(line.gross) ?? nVal(line.net) ?? r.budgeted_cons;
+        r.budget_inr = nVal(line.total_inr) ?? r.budget_inr;
+        r.budget_currency = String(line.currency || r.budget_currency || 'INR');
+        r.budget_conv_rt = nVal(line.convr) ?? r.budget_conv_rt;
+        r.budget_cost_per_gmt = budget;
+        r.expected_unit_cost = budget;
+        r.conv = nVal(line.convr) ?? r.conv;
+        r.buom = String(line.unit || r.buom || '');
+        if (actual !== null) {
+            r.actual_cost = actual;
+            r.po_unit_cost = actual;
+        }
+        r.variance_pct = variancePct;
+        r.status = status;
+        r.validation_result = result;
+        r.cost_matrix = {
+            budget,
+            actual,
+            status,
+        };
+        r.manual_match = true;
+        r.needs_manual_match = false;
+        r._editingMatch = false;
+        r.matched_quotation = String(line.quotation_no || '');
+        r.matched_line_no = String(line.line_no || '');
+        return r;
+    }
+
+    function roundPct(n) {
+        return Math.round(n * 100) / 100;
+    }
+
+    function syncSameValueHighlights() {
+        const selected = rows.filter((r) => !!r.selected);
+        const trs = tbody?.querySelectorAll('tr.pcw-row') || [];
+        if (selected.length === 0) {
+            trs.forEach((tr) => tr.classList.remove('is-same-mat'));
+            return;
+        }
+        const selMats = new Set(selected.map((r) => String(r.material || '').trim().toLowerCase()).filter(Boolean));
+        const selGroups = new Set(selected.map((r) => String(r.matgroup || '').trim().toLowerCase()).filter(Boolean));
+
+        trs.forEach((tr) => {
+            const idx = Number(tr.getAttribute('data-idx'));
+            const r = rows[idx];
+            if (!r) return;
+            const mat = String(r.material || '').trim().toLowerCase();
+            const grp = String(r.matgroup || '').trim().toLowerCase();
+            const isSame = (mat && selMats.has(mat)) || (grp && selGroups.has(grp));
+            tr.classList.toggle('is-same-mat', isSame && !r.selected);
+        });
+    }
+
+    function syncSelectionUi() {
+        const selected = rows.filter((r) => !!r.selected);
+        const countEl = $('pcwSelectedCount');
+        const matchBtn = $('pcwMatchSelectedBtn');
+        if (countEl) {
+            countEl.hidden = selected.length === 0;
+            countEl.textContent = `${selected.length} selected`;
+        }
+        if (matchBtn) {
+            const canMatch = selected.some((r) => needsManualMatch(r)) && costLines.length > 0;
+            matchBtn.disabled = !canMatch;
+        }
+        const all = $('pcwCheckAll');
+        if (all) {
+            const matchable = rows.filter((r) => needsManualMatch(r));
+            all.checked = matchable.length > 0 && matchable.every((r) => !!r.selected);
+            all.indeterminate = selected.length > 0 && !all.checked;
+        }
+
+        let selectSameBtn = $('pcwSelectSameBtn');
+        if (selected.length === 1) {
+            const selRow = selected[0];
+            const selIdx = rows.indexOf(selRow);
+            const matches = findSameValueRows(selRow, selIdx);
+            const targetMatches = matches.exactMatMatches.length ? matches.exactMatMatches : matches.groupMatches;
+            if (targetMatches.length > 0) {
+                if (!selectSameBtn) {
+                    selectSameBtn = document.createElement('button');
+                    selectSameBtn.type = 'button';
+                    selectSameBtn.id = 'pcwSelectSameBtn';
+                    selectSameBtn.className = 'rpt-tb-btn pcw-select-same-btn';
+                    countEl?.parentNode?.insertBefore(selectSameBtn, countEl.nextSibling);
+                    selectSameBtn.addEventListener('click', () => {
+                        const curMatches = findSameValueRows(rows.find(r => r.selected), rows.findIndex(r => r.selected));
+                        const mList = curMatches.exactMatMatches.length ? curMatches.exactMatMatches : curMatches.groupMatches;
+                        mList.forEach((m) => { m.row.selected = true; });
+                        renderTable();
+                    });
+                }
+                const labelGroup = selRow.material || selRow.matgroup || 'same';
+                selectSameBtn.innerHTML = `<span class="material-icons-round" style="font-size:14px;">done_all</span> Select All ${targetMatches.length + 1} (${esc(labelGroup)})`;
+                selectSameBtn.style.display = 'inline-flex';
+            } else if (selectSameBtn) {
+                selectSameBtn.style.display = 'none';
+            }
+        } else if (selectSameBtn) {
+            selectSameBtn.style.display = 'none';
+        }
+    }
+
+    function openMatchPicker(index) {
+        const r = rows[index];
+        if (!r) return;
+        matchRowIndex = index;
+        matchPickKey = '';
+        const pop = $('pcwMatchPop');
+        const title = $('pcwMatchTitle');
+        const desc = $('pcwMatchDesc');
+        const search = $('pcwMatchSearch');
+        if (title) title.textContent = 'Match zCOST line';
+        if (desc) {
+            desc.textContent = `PO item ${r.poitem || r.po_item || '—'} · ${r.material || '—'} — pick a zCOST line to link.`;
+        }
+
+        const matches = findSameValueRows(r, index);
+        const sameCount = matches.exactMatMatches.length || matches.groupMatches.length;
+        const lbl = $('pcwMatchMultiCheckLabel');
+        if (lbl) {
+            const reason = matches.exactMatMatches.length
+                ? `same Material (${r.material})`
+                : (matches.groupMatches.length ? `same Group (${r.matgroup || 'THREADS1'})` : 'same values');
+            lbl.textContent = sameCount > 0
+                ? `Match all ${sameCount + 1} items with ${reason}`
+                : `Match all selected items`;
+        }
+
+        if (search) search.value = '';
+        renderMatchList();
+        if (pop) pop.hidden = false;
+        $('pcwMatchApply') && ($('pcwMatchApply').disabled = true);
+        search?.focus();
+    }
+
+    function closeMatchPicker() {
+        const pop = $('pcwMatchPop');
+        if (pop) pop.hidden = true;
+        matchRowIndex = null;
+        matchPickKey = '';
+    }
+
+    function renderMatchList() {
+        const list = $('pcwMatchList');
+        if (!list || matchRowIndex === null) return;
+        const r = rows[matchRowIndex];
+        const q = String($('pcwMatchSearch')?.value || '').trim().toLowerCase();
+        let lines = candidateLinesForRow(r || {});
+        if (q) {
+            lines = lines.filter((line) => {
+                const blob = [
+                    line.item, line.material, line.maktx, line.description,
+                    line.quotation_no, line.section, line.rate, line.currency,
+                ].join(' ').toLowerCase();
+                return blob.includes(q);
+            });
+        }
+        if (!lines.length) {
+            list.innerHTML = `<div class="pcw-match-empty">
+                <span class="material-icons-round" style="font-size:32px; color:#f59e0b; display:block; margin-bottom:6px;">search_off</span>
+                <p style="margin:0 0 10px; font-weight:700; color:#334155;">
+                    ${costLines.length ? 'No zCOST lines match this search filter.' : 'No zCOST candidates automatically found for this PO.'}
+                </p>
+                ${!costLines.length ? `
+                <div style="background:#fff; border:1px solid #cbd5e1; border-radius:8px; padding:12px; margin-top:8px;">
+                    <div style="font-size:12px; font-weight:700; color:#1e1b4b; margin-bottom:6px;">Load Costing Lines by Quotation # or Sales Order #:</div>
+                    <div style="display:flex; gap:6px;">
+                        <input type="text" id="pcwManualQuoteInput" class="rpt-tb-input" placeholder="e.g. 22004502 or 3115" style="flex:1; height:32px; font-size:12px;">
+                        <button type="button" id="pcwManualQuoteBtn" class="rpt-tb-btn rpt-tb-btn-primary" style="height:32px;">
+                            <span class="material-icons-round" style="font-size:14px;">download</span> Load
+                        </button>
+                    </div>
+                    <div id="pcwManualQuoteStatus" style="font-size:11px; margin-top:4px; color:#64748b;"></div>
+                </div>` : ''}
+            </div>`;
+
+            $('pcwManualQuoteBtn')?.addEventListener('click', async () => {
+                const qVal = String($('pcwManualQuoteInput')?.value || '').trim();
+                if (!qVal) return;
+                const statusEl = $('pcwManualQuoteStatus');
+                if (statusEl) { statusEl.textContent = 'Loading costing lines from SAP…'; statusEl.style.color = '#4f46e5'; }
+                try {
+                    await runValidate({ customer: qVal, mode: 'non_validated' });
+                    renderMatchList();
+                } catch (e) {
+                    if (statusEl) { statusEl.textContent = 'Failed: ' + e.message; statusEl.style.color = '#ef4444'; }
+                }
+            });
+            return;
+        }
+        list.innerHTML = lines
+            .slice(0, 120)
+            .map((line, i) => {
+                const key = lineKey(line, i);
+                const checked = key === matchPickKey ? ' checked' : '';
+                const rate = nVal(line.rate) ?? nVal(line.purp);
+                return `<label class="pcw-match-option${checked ? ' is-active' : ''}" data-key="${esc(key)}">
+                    <input type="radio" name="pcwMatchPick" value="${esc(key)}"${checked}>
+                    <span class="pcw-match-option-body">
+                        <strong>${esc(line.item || '—')}</strong>
+                        <em>${esc(line.maktx || line.description || '—')}</em>
+                        <small>
+                            ${esc(line.section || '—')}
+                            · Q ${esc(line.quotation_no || '—')}
+                            · ${rate !== null ? esc(fmtStep(rate, 4)) : '—'}
+                            ${esc(line.currency || '')}
+                        </small>
+                    </span>
+                </label>`;
+            })
             .join('');
-        return `<select class="pcw-row-select" data-kind="${kind}">${options}</select>`;
+        // stash lines on list for apply by key
+        list._pcwLines = lines.slice(0, 120);
     }
 
     function cellValue(key, r, index) {
         switch (key) {
+            case 'check':
+                return r.selected ? '1' : '0';
             case 'sno':
                 return String(index + 1);
             case 'status':
@@ -790,12 +1671,29 @@
         const classes = [];
         if (NUM_COLS.has(key) || key === 'sno') classes.push('num');
         if (key === 'sno') classes.push('sno');
+        if (key === 'check') classes.push('pcw-check');
         classes.push(`pcw-col-${group}`);
         if (HIGHLIGHT_COLS.has(key)) classes.push('pcw-hl-cost');
         if (EXPLAIN_COLS.has(key)) classes.push('is-explainable');
         const cls = classes.length ? ` class="${classes.join(' ')}"` : '';
         let inner = '—';
         switch (key) {
+            case 'check': {
+                const unmatched = needsManualMatch(r);
+                const checked = r.selected ? ' checked' : '';
+                inner = `<div class="pcw-select-cell">
+                    <input type="checkbox" class="pcw-check-input pcw-row-check" data-idx="${index}"${checked} title="${unmatched ? 'Select unmatched row' : 'Select row'}" aria-label="Select row ${index + 1}">
+                    ${unmatched
+                        ? `<button type="button" class="pcw-match-btn" data-idx="${index}" title="Manually match this PO item to a zCOST line">
+                            <span class="material-icons-round">link</span>
+                            Match
+                        </button>`
+                        : (r.manual_match
+                            ? `<span class="pcw-match-tag" title="Manually matched">Manual</span>`
+                            : '')}
+                </div>`;
+                break;
+            }
             case 'sno':
                 inner = esc(index + 1);
                 break;
@@ -811,11 +1709,11 @@
             case 'mat_desc':
                 inner = `<span class="pcw-compare-po" title="${esc(r.mat_desc || r.material_desc || '')}">${dash(r.mat_desc || r.material_desc)}</span>`;
                 break;
-            case 'cost_item':
-                inner = r.cost_item || r.item
-                    ? `<span class="pcw-nav-chip">${esc(r.cost_item || r.item)}</span>`
-                    : '—';
+            case 'cost_item': {
+                const itDisplay = (r.cost_item || r.item || '').trim();
+                inner = `<span class="pcw-compare-po" title="${esc(r.maktx || r.cost_description || '')}">${dash(itDisplay)}</span>`;
                 break;
+            }
             case 'maktx':
                 inner = `<span class="pcw-compare-maktx" title="${esc(r.maktx || r.cost_description || '')}">${dash(r.maktx || r.cost_description)}</span>`;
                 break;
@@ -971,12 +1869,15 @@
                 const open = needsDropdown(row) ? ' is-open' : '';
                 const pass = st === 'PASS' ? ' is-pass-row' : '';
                 const fail = st === 'EXCEPTION' ? ' is-fail-row' : '';
-                return `<tr class="pcw-row${open}${pass}${fail}" data-idx="${index}">${COLS.map((k) => renderCell(k, row, index)).join('')}</tr>`;
+                const sel = row.selected ? ' is-selected' : '';
+                return `<tr class="pcw-row${open}${pass}${fail}${sel}" data-idx="${index}">${COLS.map((k) => renderCell(k, row, index)).join('')}</tr>`;
             })
             .join('');
         if (noMatch) tbody.appendChild(noMatch);
         colFeatures?.refresh?.();
         syncGroupHeaders();
+        syncSelectionUi();
+        syncSameValueHighlights();
     }
 
     async function runValidate(opts) {
@@ -1012,12 +1913,16 @@
             }
             const data = json.data || {};
             rows = Array.isArray(data.records) ? data.records : [];
+            costLines = Array.isArray(data.cost_lines) ? data.cost_lines : [];
             quoteOptions = Array.isArray(data.quote_options) ? data.quote_options : [];
             validatedQuotes = Array.isArray(data.validated_quotations) ? data.validated_quotations : [];
             nonValidatedQuotes = Array.isArray(data.non_validated_quotations) ? data.non_validated_quotations : [];
             currentMode = data.mode || mode;
             selectedCustomer = String(data.customer_quotation || customer || '');
             selectedEndUser = String(data.end_user_quotation || endUser || '');
+            rows.forEach((r) => {
+                if (typeof r.selected !== 'boolean') r.selected = false;
+            });
 
             fillKpis(data.summary || {});
             renderTable();
@@ -1040,6 +1945,7 @@
             }
         } catch (err) {
             rows = [];
+            costLines = [];
             fillKpis({});
             renderTable();
         } finally {
@@ -1048,6 +1954,27 @@
     }
 
     function onRowSelectChange(e) {
+        const check = e.target.closest('input.pcw-row-check');
+        if (check) {
+            e.stopPropagation();
+            const idx = Number(check.getAttribute('data-idx'));
+            if (Number.isFinite(idx) && rows[idx]) {
+                rows[idx].selected = !!check.checked;
+                const tr = check.closest('tr.pcw-row');
+                tr?.classList.toggle('is-selected', !!check.checked);
+                syncSelectionUi();
+                syncSameValueHighlights();
+            }
+            return;
+        }
+        const zcostSel = e.target.closest('select.pcw-zcost-select');
+        if (zcostSel) {
+            e.stopPropagation();
+            const idx = Number(zcostSel.getAttribute('data-idx'));
+            const key = zcostSel.value;
+            handleZcostDropdownChange(idx, key);
+            return;
+        }
         const sel = e.target.closest('select.pcw-row-select');
         if (!sel) return;
         e.stopPropagation();
@@ -1065,6 +1992,44 @@
             return;
         }
         void runValidate({ mode: 'non_validated', customer: selectedCustomer, endUser: selectedEndUser });
+    }
+
+    function onMatchApply() {
+        if (matchRowIndex === null || !matchPickKey) return;
+        const list = $('pcwMatchList');
+        const lines = list?._pcwLines || [];
+        const line = lines.find((l, i) => lineKey(l, i) === matchPickKey);
+        if (!line || !rows[matchRowIndex]) return;
+
+        const targetRow = rows[matchRowIndex];
+        applyCostLineToRow(targetRow, line);
+        targetRow.matched_line_key = matchPickKey;
+        targetRow.selected = true;
+
+        const applyAllSame = $('pcwMatchApplyAllSame')?.checked ?? true;
+        if (applyAllSame) {
+            const matches = findSameValueRows(targetRow, matchRowIndex);
+            if (matches.checkedMatches.length > 0) {
+                matches.checkedMatches.forEach((m) => {
+                    applyCostLineToRow(m.row, line);
+                    m.row.matched_line_key = matchPickKey;
+                });
+            } else if (matches.exactMatMatches.length > 0) {
+                matches.exactMatMatches.forEach((m) => {
+                    applyCostLineToRow(m.row, line);
+                    m.row.matched_line_key = matchPickKey;
+                });
+            } else if (matches.groupMatches.length > 0) {
+                matches.groupMatches.forEach((m) => {
+                    applyCostLineToRow(m.row, line);
+                    m.row.matched_line_key = matchPickKey;
+                });
+            }
+        }
+
+        closeMatchPicker();
+        fillKpis(summarizeRows(rows));
+        renderTable();
     }
 
     function clearFilters() {
@@ -1130,7 +2095,7 @@
             // Allow drag; single click sorts
             if (e.defaultPrevented) return;
             const key = th.getAttribute('data-col-id');
-            if (!key || key === 'customer' || key === 'end_user') return;
+            if (!key || key === 'check' || key === 'customer' || key === 'end_user') return;
             if (sortKey === key) {
                 sortDir = sortDir === 'asc' ? 'desc' : sortDir === 'desc' ? null : 'asc';
                 if (!sortDir) sortKey = null;
@@ -1170,6 +2135,7 @@
             const trims = controlBar?.querySelector('input[name="mat_cat"][value="trims"]');
             if (trims) trims.checked = true;
             rows = [];
+            costLines = [];
             fillKpis({});
             renderTable();
             setPassStatus({});
@@ -1197,8 +2163,63 @@
             });
         });
 
+        $('pcwCheckAll')?.addEventListener('change', (e) => {
+            const on = !!e.target.checked;
+            rows.forEach((r) => {
+                if (needsManualMatch(r)) r.selected = on;
+                else if (!on) r.selected = false;
+            });
+            renderTable();
+        });
+        $('pcwMatchSelectedBtn')?.addEventListener('click', () => {
+            const idx = rows.findIndex((r) => r.selected && needsManualMatch(r));
+            if (idx < 0) return;
+            openMatchPicker(idx);
+        });
+        $('pcwMatchClose')?.addEventListener('click', closeMatchPicker);
+        $('pcwMatchCancel')?.addEventListener('click', closeMatchPicker);
+        $('pcwMatchApply')?.addEventListener('click', onMatchApply);
+        $('pcwMatchSearch')?.addEventListener('input', () => {
+            matchPickKey = '';
+            $('pcwMatchApply') && ($('pcwMatchApply').disabled = true);
+            renderMatchList();
+        });
+        $('pcwMatchList')?.addEventListener('change', (e) => {
+            const radio = e.target.closest('input[name="pcwMatchPick"]');
+            if (!radio) return;
+            matchPickKey = String(radio.value || '');
+            $('pcwMatchApply') && ($('pcwMatchApply').disabled = !matchPickKey);
+            $('pcwMatchList')?.querySelectorAll('.pcw-match-option').forEach((el) => {
+                el.classList.toggle('is-active', el.getAttribute('data-key') === matchPickKey);
+            });
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && $('pcwMatchPop') && !$('pcwMatchPop').hidden) {
+                closeMatchPicker();
+            }
+        });
+
         tbody?.addEventListener('change', onRowSelectChange);
         tbody?.addEventListener('click', (e) => {
+            const matchBtn = e.target.closest('button.pcw-match-btn');
+            if (matchBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const idx = Number(matchBtn.getAttribute('data-idx'));
+                if (Number.isFinite(idx)) openMatchPicker(idx);
+                return;
+            }
+            const changeBtn = e.target.closest('button.pcw-match-change-btn');
+            if (changeBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const idx = Number(changeBtn.getAttribute('data-idx'));
+                if (Number.isFinite(idx) && rows[idx]) {
+                    rows[idx]._editingMatch = true;
+                    renderTable();
+                }
+                return;
+            }
             const btn = e.target.closest('button.pcw-formula-cell');
             if (!btn) return;
             e.preventDefault();
@@ -1212,6 +2233,47 @@
                 return;
             }
             openFormulaPop(key, row, btn);
+        });
+
+        $('pcwSameValApply')?.addEventListener('click', () => {
+            if (!pendingSameValAction) return;
+            const choice = $('pcwSameValOptions')?.querySelector('input[name="pcwSvmChoice"]:checked')?.value || 'mat';
+            const { line, key, matches } = pendingSameValAction;
+
+            let targets = [];
+            if (choice === 'mat') targets = matches.exactMatMatches;
+            else if (choice === 'group') targets = matches.groupMatches;
+            else if (choice === 'checked') targets = matches.checkedMatches;
+            else targets = matches.allMatches;
+
+            targets.forEach(({ row }) => {
+                applyCostLineToRow(row, line);
+                row.matched_line_key = key;
+            });
+
+            closeSameValModal();
+            fillKpis(summarizeRows(rows));
+            renderTable();
+        });
+
+        $('pcwSameValCancel')?.addEventListener('click', () => {
+            closeSameValModal();
+            fillKpis(summarizeRows(rows));
+            renderTable();
+        });
+
+        $('pcwSameValBackdrop')?.addEventListener('click', () => {
+            closeSameValModal();
+            fillKpis(summarizeRows(rows));
+            renderTable();
+        });
+
+        $('pcwSameValOptions')?.addEventListener('change', (e) => {
+            const rad = e.target.closest('input[name="pcwSvmChoice"]');
+            if (!rad) return;
+            $('pcwSameValOptions').querySelectorAll('.pcw-svm-option-label').forEach((lbl) => {
+                lbl.classList.toggle('is-active', lbl.contains(rad));
+            });
         });
         $('pcwFormulaClose')?.addEventListener('click', closeFormulaPop);
         document.addEventListener('keydown', (e) => {
@@ -1228,6 +2290,29 @@
         }, true);
         window.addEventListener('resize', () => {
             if (formulaAnchor && !$('pcwFormulaPop')?.hidden) positionFormulaPop(formulaAnchor);
+        });
+
+        $('pcwStatusKpis')?.addEventListener('click', (e) => {
+            const card = e.target.closest('[data-card-key]');
+            if (!card) return;
+            e.preventDefault();
+            const key = card.getAttribute('data-card-key');
+            if (key) openCardDetailModal(key);
+        });
+        $('pcwKpis')?.addEventListener('click', (e) => {
+            const card = e.target.closest('[data-card-key]');
+            if (!card) return;
+            e.preventDefault();
+            const key = card.getAttribute('data-card-key');
+            if (key) openCardDetailModal(key);
+        });
+        $('pcwCardModalClose')?.addEventListener('click', closeCardDetailModal);
+        $('pcwCardModalDone')?.addEventListener('click', closeCardDetailModal);
+        $('pcwCardDetailBackdrop')?.addEventListener('click', closeCardDetailModal);
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && $('pcwCardDetailModal') && !$('pcwCardDetailModal').hidden) {
+                closeCardDetailModal();
+            }
         });
 
         if (typeof window.rptSetupColumnFeatures === 'function' && table) {

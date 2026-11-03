@@ -10,6 +10,9 @@ final class UserTablePreferenceModel
 {
     private ?PDO $pdo;
 
+    /*
+     * Constructor
+    */
     public function __construct(?PDO $pdo = null)
     {
         $this->pdo = $pdo;
@@ -17,7 +20,7 @@ final class UserTablePreferenceModel
 
     /*
      * Saved row (column_order, hidden_columns, updated_at) or null when the user has none for this table
-     */
+    */
     public function find(int $userId, string $tableKey): ?array
     {
         $stmt = $this->db()->prepare(
@@ -51,6 +54,9 @@ final class UserTablePreferenceModel
         return (string) $stmt->fetchColumn();
     }
 
+    /*
+     * Delete the user's row
+    */
     public function delete(int $userId, string $tableKey): void
     {
         $stmt = $this->db()->prepare(
@@ -64,3 +70,4 @@ final class UserTablePreferenceModel
         return $this->pdo ??= Database::connection();
     }
 }
+?>

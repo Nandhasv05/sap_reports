@@ -19,3 +19,4 @@ return [
     'env'       => $onServer ? 'production' : 'local' ,
     'base_path' => '',
 ];
+?>

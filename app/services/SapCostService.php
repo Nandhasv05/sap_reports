@@ -14,6 +14,7 @@ class SapCostService
     private const DEFAULT_SERVICE = '/sap/opu/odata/sap/ZCOST_SRV/ZCOSTHSet';
     private const EXPAND = 'to_Fabric,to_Trim,to_Special,to_Packing';
 
+    
     private const NAV_SECTIONS = [
         'to_Fabric'  => 'Fabric',
         'to_Trim'    => 'Trim',
@@ -32,7 +33,7 @@ class SapCostService
 
     /*
      * Columns for PO Costing Validation detail table
-     */
+    */
     public static function costingColumns(): array
     {
         return [
@@ -230,6 +231,9 @@ class SapCostService
         ];
     }
 
+    /*
+     * Fetch by filter
+    */
     private function fetchByFilter(string $vbeln): array
     {
         $service = (string) ($this->cfg['cost_service'] ?? self::DEFAULT_SERVICE);
@@ -251,6 +255,9 @@ class SapCostService
         return ['sheets' => $sheets, 'error' => null];
     }
 
+    /*
+     * Fetch by key
+    */
     private function fetchByKey(string $vbeln, string $posnr): array
     {
         $base = rtrim((string) ($this->cfg['base_url'] ?? ''), '/');
@@ -313,6 +320,9 @@ class SapCostService
         return $lines;
     }
 
+    /*
+     * Map line
+    */
     private function mapLine(array $row, string $section, string $vbeln, string $posnr, array $header): array
     {
         $sectionLower = strtolower($section);
@@ -362,6 +372,9 @@ class SapCostService
         ];
     }
 
+    /*
+     * Line totals
+    */
     private function lineTotals(array $lines): array
     {
         $totalInr = 0.0;
@@ -407,6 +420,9 @@ class SapCostService
         return array_values(array_unique($variants));
     }
 
+    /*
+     * Pad posnr
+    */
     private function padPosnr(string $posnr): string
     {
         $p = preg_replace('/\D/', '', $posnr) ?? '';
@@ -416,3 +432,4 @@ class SapCostService
         return str_pad($p, 6, '0', STR_PAD_LEFT);
     }
 }
+?>

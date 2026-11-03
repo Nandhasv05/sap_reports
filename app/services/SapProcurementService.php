@@ -11,6 +11,9 @@ class SapProcurementService
 {
     use SapValueFormat;
 
+    /*
+     * Defalut Service URL
+    */
     private const DEFAULT_SERVICE = '/sap/opu/odata/sap/ZBUSINESS_API_SRV/ProcurementDashboardSet';
 
     private SapODataClient $client;
@@ -158,6 +161,9 @@ class SapProcurementService
         return $out;
     }
 
+    /*
+     * Map row
+    */
     private function mapRow(array $row): array
     {
         $q = fn (string $field): float => $this->sapNumber($row[$field] ?? '');
@@ -242,6 +248,9 @@ class SapProcurementService
         ];
     }
 
+    /*
+     * Map PR Line
+    */
     private function mapPrLine(array $pr): array
     {
         return [

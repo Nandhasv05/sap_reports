@@ -11,3 +11,4 @@ if (!defined('EVOLV_ROOT')) {
 }
 
 require __DIR__ . '/public/login.php';
+?>

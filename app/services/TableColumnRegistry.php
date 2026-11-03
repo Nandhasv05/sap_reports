@@ -85,8 +85,7 @@ final class TableColumnRegistry
                 'status'       => 'Validation Status',
                 'last'         => 'Last Validated',
                 'validated_by' => 'Validated By',
-                'actions'      => 'Actions',
-            ], [], ['check', 'actions']),
+            ], [], ['check']),
             'purchase_order_costing_items_table' => self::define([
                 'check'              => 'Select',
                 'status'             => 'Status',
@@ -116,6 +115,7 @@ final class TableColumnRegistry
                 'sell_price', 'making', 'quoted_uom', 'quoted_currency',
             ], ['check']),
             'purchase_order_costing_workbench_table' => self::define([
+                'check'               => 'Select',
                 'sno'                 => 'S.No',
                 'status'              => 'Status',
                 'pono'                => 'PONO',
@@ -138,7 +138,7 @@ final class TableColumnRegistry
                 'mat_desc'            => 'MAT_DESC',
                 'po_currency'         => 'PO_CURRENCY',
                 'cost_item'           => 'ITEM',
-                'maktx'               => 'MAKTX',
+                'maktx'               => 'Material Desc',
                 'budgeted_cons'       => 'BUDGETED_CONS',
                 'budget_inr'          => 'BUDGET_INR',
                 'budget_currency'     => 'BUDGET_CURRENCY',
@@ -147,12 +147,11 @@ final class TableColumnRegistry
                 'conv'                => 'CONV',
                 'buom'                => 'BUOM',
                 'actual_cost'         => 'ACTUAL_COST',
-                'cost_matrix'         => 'zCOST Matrix',
                 'variance_pct'        => 'Variance %',
                 'validation_result'   => 'Validation Result',
             ], [
                 'prno',
-            ], ['sno', 'status']),
+            ], ['check', 'sno', 'status']),
             'fabric_utilization_table' => self::define([
                 'sno'                     => 'S.No',
                 'sales_order'             => 'Sales Order',
@@ -302,3 +301,4 @@ final class TableColumnRegistry
         ];
     }
 }
+?>

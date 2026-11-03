@@ -120,3 +120,4 @@ class Router
         (new ErrorController())->notFound();
     }
 }
+?>

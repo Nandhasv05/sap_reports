@@ -414,3 +414,4 @@ class SapODataClient
         return substr($text, 0, $max) . '…';
     }
 }
+?>

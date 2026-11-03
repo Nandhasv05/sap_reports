@@ -12,8 +12,8 @@ class AuditLogController extends Controller
 {
     public function page(): void
     {
-        if (!$this->isAdmin()) {
-            $_SESSION['flash_error'] = 'Admin access required for Audit Log.';
+        if (function_exists('sap_reports_user_can_access') && !sap_reports_user_can_access('audit-log')) {
+            $_SESSION['flash_error'] = 'Access restricted: You do not have permission to view Audit Log.';
             $this->redirect(url('/'));
             return;
         }
@@ -30,10 +30,10 @@ class AuditLogController extends Controller
     public function index(): void
     {
         ApiAuditLogService::withoutLogging(function () {
-            if (!$this->isAdmin()) {
+            if (function_exists('sap_reports_user_can_access') && !sap_reports_user_can_access('audit-log')) {
                 $this->jsonResponse([
                     'success' => false,
-                    'message' => 'Admin access required.',
+                    'message' => 'Access restricted: You do not have permission to view Audit Log.',
                     'data' => [],
                 ], 403);
             }
@@ -65,3 +65,4 @@ class AuditLogController extends Controller
         return in_array($role, ['admin', 'it_admin', 'super_admin', 'administrator', 'director', 'management'], true);
     }
 }
+?>

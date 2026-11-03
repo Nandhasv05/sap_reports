@@ -530,7 +530,7 @@
         const modalClose = $('poCustomDateClose');
         let lastNonCustomRange = rangeSelect && rangeSelect.value !== 'custom'
             ? rangeSelect.value
-            : 'this_month';
+            : 'today';
 
         function ymdDaysAgo(days) {
             const d = new Date();

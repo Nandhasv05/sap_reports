@@ -97,7 +97,7 @@ class SapPurchaseOrderService
     {
         $tz = new DateTimeZone(self::RANGE_TIMEZONE);
         $today = new DateTimeImmutable('today', $tz);
-        $preset = array_key_exists($preset, self::rangePresets()) ? $preset : 'this_month';
+        $preset = array_key_exists($preset, self::rangePresets()) ? $preset : 'today';
         $out = ['preset' => $preset, 'from' => '', 'to' => '', 'label' => self::rangePresets()[$preset], 'error' => null];
 
         [$start, $end] = match ($preset) {
@@ -281,7 +281,7 @@ class SapPurchaseOrderService
      */
     public function listReport(array $filters = []): array
     {
-        $preset = strtolower(trim((string) ($filters['range'] ?? 'this_month')));
+        $preset = strtolower(trim((string) ($filters['range'] ?? 'today')));
         $range = self::resolveRange($preset, (string) ($filters['from'] ?? ''), (string) ($filters['to'] ?? ''));
         $plant = strtoupper(trim((string) ($filters['plant'] ?? '')));
         $rawSuppliers = $filters['supplier'] ?? $filters['vendor'] ?? '';
@@ -768,3 +768,4 @@ class SapPurchaseOrderService
         return $dir === null ? null : $dir . DIRECTORY_SEPARATOR . 'sap_po_v' . (int) ($this->cfg['cache_version'] ?? 1) . '_' . $name . '.json';
     }
 }
+?>

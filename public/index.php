@@ -49,3 +49,4 @@ if ($routePath === '/' || $routePath === '') {
 $router = new Router();
 require EVOLV_ROOT . '/routes/web.php';
 $router->dispatch($_SERVER['REQUEST_METHOD'] ?? 'GET', $routePath);
+?>

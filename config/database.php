@@ -46,3 +46,4 @@ return [
     'password' => $env('SAP_REPORTS_DB_PASSWORD', 'Developer@123'),
     'timeout'  => 8,
 ];
+?>

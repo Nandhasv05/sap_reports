@@ -22,8 +22,8 @@ $pageHeading = $isCostingView
 $isCostingBulk = $isCostingView && $isList;
 $plant = (string) ($plant ?? '');
 $plants = is_array($plants ?? null) ? $plants : [];
-$range = is_array($range ?? null) ? $range : ['preset' => 'this_month', 'from' => '', 'to' => '', 'label' => 'This Month'];
-$rangePreset = (string) ($rangePreset ?? 'this_month');
+$range = is_array($range ?? null) ? $range : ['preset' => 'today', 'from' => '', 'to' => '', 'label' => 'Today'];
+$rangePreset = (string) ($rangePreset ?? 'today');
 $rangeError = $rangeError ?? null;
 $presets = is_array($presets ?? null) ? $presets : [];
 $presetDates = is_array($presetDates ?? null) ? $presetDates : [];
@@ -147,9 +147,9 @@ $listCards = $isCostingView
         <?php elseif ($isCostingBulk): ?>
             <?php
                 $bulkPresets = is_array($presets ?? null) && $presets !== [] ? $presets : SapPurchaseOrderService::rangePresets();
-                $bulkRangePreset = (string) ($rangePreset ?? ($range['preset'] ?? 'this_month'));
+                $bulkRangePreset = (string) ($rangePreset ?? ($range['preset'] ?? 'today'));
                 if (!array_key_exists($bulkRangePreset, $bulkPresets)) {
-                    $bulkRangePreset = 'this_month';
+                    $bulkRangePreset = 'today';
                 }
                 $bulkMatHeader = (string) ($matCat ?? 'all');
                 $dateMin = date('Y-m-d', strtotime('-' . SapPurchaseOrderService::MAX_RANGE_DAYS . ' days'));
@@ -165,16 +165,8 @@ $listCards = $isCostingView
                         <?php endforeach; ?>
                     </select>
                 </label>
-                <div class="date-custom pcb-header-custom" id="pcbCustomDates"<?= $bulkRangePreset === 'custom' ? '' : ' hidden' ?> style="display: <?= $bulkRangePreset === 'custom' ? 'flex' : 'none' ?>; gap: 6px;">
-                    <label class="rpt-field rpt-field-date" title="From date (max <?= (int) SapPurchaseOrderService::MAX_RANGE_DAYS ?> days)">
-                        <span class="date-cap">From</span>
-                        <input type="date" id="pcbFrom" name="from" min="<?= e($dateMin) ?>" max="<?= e($dateMax) ?>" value="<?= e($range['from'] ?? '') ?>" aria-label="From date">
-                    </label>
-                    <label class="rpt-field rpt-field-date" title="To date (max <?= (int) SapPurchaseOrderService::MAX_RANGE_DAYS ?> days)">
-                        <span class="date-cap">To</span>
-                        <input type="date" id="pcbTo" name="to" min="<?= e($dateMin) ?>" max="<?= e($dateMax) ?>" value="<?= e($range['to'] ?? '') ?>" aria-label="To date">
-                    </label>
-                </div>
+                <input type="hidden" id="pcbFrom" name="from" value="<?= e($range['from'] ?? '') ?>">
+                <input type="hidden" id="pcbTo" name="to" value="<?= e($range['to'] ?? '') ?>">
                 <label class="rpt-field rpt-field-mat-cat" title="Material type">
                     <span class="material-icons-round">category</span>
                     <select id="pcbMat" name="mat_cat" aria-label="Material type">
@@ -389,7 +381,7 @@ $listCards = $isCostingView
         <?php endif; ?>
     </header>
 
-    <?php if ($isList && !$isCostingBulk): ?>
+    <?php if ($isList): ?>
         <?php
             $poDateMin = $poDateMin ?? date('Y-m-d', strtotime('-' . SapPurchaseOrderService::MAX_RANGE_DAYS . ' days'));
             $poDateMax = $poDateMax ?? date('Y-m-d');
@@ -720,9 +712,7 @@ $pcbCurrentUser = trim((string) (
 <?php
     require_once base_path('app/services/TableColumnRegistry.php');
     $bulkTableKey = 'purchase_order_costing_bulk_table';
-    $bulkItemsTableKey = 'purchase_order_costing_items_table';
     $bulkTableDef = TableColumnRegistry::get($bulkTableKey);
-    $bulkItemsDef = TableColumnRegistry::get($bulkItemsTableKey);
 ?>
 <script type="application/json" id="pcbTablePrefs"><?= json_encode([
     'tableKey'      => $bulkTableKey,
@@ -730,13 +720,6 @@ $pcbCurrentUser = trim((string) (
     'userId'        => (string) ($_SESSION['user_id'] ?? ''),
     'columns'       => $bulkTableDef['columns'] ?? [],
     'defaultHidden' => $bulkTableDef['defaultHidden'] ?? [],
-], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
-<script type="application/json" id="pcbItemTablePrefs"><?= json_encode([
-    'tableKey'      => $bulkItemsTableKey,
-    'apiUrl'        => url('api/user/table-preferences/' . $bulkItemsTableKey),
-    'userId'        => (string) ($_SESSION['user_id'] ?? ''),
-    'columns'       => $bulkItemsDef['columns'] ?? [],
-    'defaultHidden' => $bulkItemsDef['defaultHidden'] ?? [],
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
 <script src="<?= e(asset('js/table-columns.js')) ?>"></script>
 <script src="<?= e(asset('js/po-costing-bulk.js')) ?>"></script>

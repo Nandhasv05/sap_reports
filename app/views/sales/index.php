@@ -29,10 +29,10 @@ window.SALES_PAGE = {
     salesApiHubUrl: <?= json_encode(url('sales/sales-api')) ?>,
     currencySymbol: <?= json_encode($currencySymbol) ?>,
     year: <?= $year ?>,
-    defaultPeriod: 'this_week',
+    defaultPeriod: 'today',
     defaultFrom: <?= json_encode($defaultFrom ?? '') ?>,
     defaultTo: <?= json_encode($defaultTo ?? '') ?>,
-    defaultLabel: 'This Week',
+    defaultLabel: 'Today',
     pageSize: 8000
 };
 </script>
@@ -89,13 +89,13 @@ $extraScripts = ob_get_clean();
             <div class="period-filter" id="periodFilter">
                 <button type="button" class="period-trigger" id="periodTrigger" aria-haspopup="listbox" aria-expanded="false" title="Filter by date condition">
                     <span class="material-icons-round">calendar_today</span>
-                    <span id="periodTriggerLabel"><?= e($periodLabel ?? 'This Week') ?></span>
+                    <span id="periodTriggerLabel"><?= e($periodLabel ?? 'Today') ?></span>
                     <span class="material-icons-round chev">expand_more</span>
                 </button>
                 <div class="period-menu" id="periodMenu" role="listbox" hidden>
-                    <button type="button" class="period-option" data-period="today">Today</button>
+                    <button type="button" class="period-option active" data-period="today">Today</button>
                     <button type="button" class="period-option" data-period="yesterday">Yesterday</button>
-                    <button type="button" class="period-option active" data-period="this_week">This Week</button>
+                    <button type="button" class="period-option" data-period="this_week">This Week</button>
                     <button type="button" class="period-option" data-period="prev_week">Previous Week</button>
                     <button type="button" class="period-option" data-period="this_month">This Month</button>
                     <button type="button" class="period-option" data-period="prev_month">Previous Month</button>

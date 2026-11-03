@@ -15,3 +15,4 @@ final class TablePreferenceException extends RuntimeException
         parent::__construct($message);
     }
 }
+?>

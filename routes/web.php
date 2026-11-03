@@ -79,3 +79,21 @@ if ($hasAuditLog) {
     $router->get('audit-log', [AuditLogController::class, 'page']);
     $router->get('api/audit-log', [AuditLogController::class, 'index']);
 }
+
+require_once base_path('app/controllers/ZcostController.php');
+$router->get('zcost', [ZcostController::class, 'page']);
+$router->get('zcost/api', [ZcostController::class, 'api']);
+$router->post('zcost/api', [ZcostController::class, 'api']);
+$router->get('zcost/api.php', [ZcostController::class, 'api']);
+$router->post('zcost/api.php', [ZcostController::class, 'api']);
+$router->get('zcost/audit', [ZcostController::class, 'audit']);
+$router->get('zcost/audit.php', [ZcostController::class, 'audit']);
+
+
+require_once base_path('app/controllers/UserAccessControlController.php');
+$router->get('user-access-control', [UserAccessControlController::class, 'index']);
+$router->get('user-access', [UserAccessControlController::class, 'index']);
+$router->get('useraccesscontrol', [UserAccessControlController::class, 'index']);
+$router->get('api/user-access-control/get', [UserAccessControlController::class, 'getUserPermissions']);
+$router->post('api/user-access-control/save', [UserAccessControlController::class, 'saveUserPermissions']);
+?>

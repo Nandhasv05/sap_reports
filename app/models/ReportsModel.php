@@ -74,6 +74,46 @@ class ReportsModel
                 'bg'    => '#ffe4e6',
                 'group' => 'Procurement Reports',
             ],
+            'po-costing' => [
+                'title' => 'PO Costing Validation',
+                'blurb' => 'Pre-costing validation comparing SAP Purchase Orders against Zcost.',
+                'icon'  => 'fa-scale-balanced',
+                'color' => '#7c3aed',
+                'bg'    => '#f3e8ff',
+                'group' => 'Procurement Reports',
+            ],
+            'fabric-sale' => [
+                'title' => 'Fabric Sale Order',
+                'blurb' => 'Fabric sales quotations and orders with buyer intelligence and revenue.',
+                'icon'  => 'fa-shirt',
+                'color' => '#0e7490',
+                'bg'    => '#cffafe',
+                'group' => 'Sales',
+            ],
+            'audit-log' => [
+                'title' => 'Audit Log',
+                'blurb' => 'Real-time activity logs, user transactions, and SAP API operation trail.',
+                'icon'  => 'fa-clock-rotate-left',
+                'color' => '#475569',
+                'bg'    => '#f1f5f9',
+                'group' => 'Security & Governance',
+            ],
+            'user-access-control' => [
+                'title' => 'User Access Control',
+                'blurb' => 'Role-based access permissions, department privileges, and page security.',
+                'icon'  => 'fa-user-lock',
+                'color' => '#e11d48',
+                'bg'    => '#ffe4e6',
+                'group' => 'Security & Governance',
+            ],
+            'zcost' => [
+                'title' => 'Zcost',
+                'blurb' => 'Garment costing sheet, pre-costing matrix, and budget vs actual variance.',
+                'icon'  => 'fa-calculator',
+                'color' => '#ea580c',
+                'bg'    => '#ffedd5',
+                'group' => 'Costing',
+            ],
         ];
     }
 
@@ -219,3 +259,4 @@ class ReportsModel
         return $payload;
     }
 }
+?>

@@ -15,3 +15,4 @@ evolv_boot_app_base();
 portal_logout();
 header('Location: ' . sap_reports_evol_url('login.php'));
 exit;
+?>

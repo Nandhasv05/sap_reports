@@ -44,3 +44,4 @@ try {
     fwrite(STDERR, 'Migration failed: ' . $e->getMessage() . "\n");
     exit(1);
 }
+?>

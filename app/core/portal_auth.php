@@ -80,3 +80,4 @@ if (!function_exists('portal_logout')) {
         session_destroy();
     }
 }
+?>

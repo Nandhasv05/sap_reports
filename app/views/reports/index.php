@@ -14,6 +14,8 @@ $homeUrl = sap_reports_evol_url('portal_dashboard.php');
 $logoutUrl = url('logout.php');
 $logoUrl = sap_reports_logo_url();
 $currentYear = date('Y');
+$uacAllowedAdmins = ['admin', 'saravan', 'saravanan', 'nandhakumar'];
+$canAccessUac = in_array(strtolower(trim((string) $userName)), $uacAllowedAdmins, true);
 ?>
 
 <div class="hub-wrapper" id="hubWrapper">
@@ -306,6 +308,86 @@ $currentYear = date('Y');
                 </div>
                 <div class="hub-bento-footer">
                     <span class="hub-bento-action-label">Launch Fabric Sale Order</span>
+                    <span class="hub-bento-arrow"><i class="fas fa-arrow-right"></i></span>
+                </div>
+            </a>
+
+            <!-- 10. Audit Log -->
+            <a class="hub-bento-card is-audit-log animate-card" style="--stagger: 10;" href="<?= e(url('audit-log')) ?>" data-category="admin" data-keywords="audit log security activity trace events history api transactions admin">
+                <div class="hub-bento-ambient-glow"></div>
+                <div class="hub-bento-shine"></div>
+                <div class="hub-bento-head">
+                    <div class="hub-bento-icon-medallion"><i class="fas fa-clock-rotate-left"></i></div>
+                    <div class="hub-bento-head-meta">
+                        <div class="hub-bento-kicker"><span class="hub-bento-dot"></span><span>MODULE 10 • ACTIVITY LOG</span></div>
+                        <span class="hub-bento-tag">AUDIT LOG</span>
+                    </div>
+                </div>
+                <div class="hub-bento-body">
+                    <h2 class="hub-bento-title">Audit Log</h2>
+                    <p class="hub-bento-desc">Full-screen activity logs, user transactions, and SAP API operation trail.</p>
+                    <div class="hub-bento-chips">
+                        <span class="hub-bento-chip"><i class="fas fa-list-check"></i> Real-time Logs</span>
+                        <span class="hub-bento-chip"><i class="fas fa-user-shield"></i> User Auditing</span>
+                        <span class="hub-bento-chip"><i class="fas fa-shield"></i> API Trace</span>
+                    </div>
+                </div>
+                <div class="hub-bento-footer">
+                    <span class="hub-bento-action-label">Open Audit Log</span>
+                    <span class="hub-bento-arrow"><i class="fas fa-arrow-right"></i></span>
+                </div>
+            </a>
+
+            <?php if ($canAccessUac): ?>
+            <!-- 11. User Access Control (Visible only to admin, saravan, nandhakumar) -->
+            <a class="hub-bento-card is-uac animate-card" style="--stagger: 11;" href="<?= e(url('user-access-control')) ?>" data-category="admin" data-keywords="user access control rbac permissions security roles department admin useracesscontrol">
+                <div class="hub-bento-ambient-glow"></div>
+                <div class="hub-bento-shine"></div>
+                <div class="hub-bento-head">
+                    <div class="hub-bento-icon-medallion"><i class="fas fa-user-lock"></i></div>
+                    <div class="hub-bento-head-meta">
+                        <div class="hub-bento-kicker"><span class="hub-bento-dot"></span><span>MODULE 11 • PERMISSIONS</span></div>
+                        <span class="hub-bento-tag">ACCESS CONTROL</span>
+                    </div>
+                </div>
+                <div class="hub-bento-body">
+                    <h2 class="hub-bento-title">UserAcessControl</h2>
+                    <p class="hub-bento-desc">Review and configure granular role-based permissions (Add, View, Edit, Approve) across all 12 SAP report pages.</p>
+                    <div class="hub-bento-chips">
+                        <span class="hub-bento-chip"><i class="fas fa-users-gear"></i> Role Permissions</span>
+                        <span class="hub-bento-chip"><i class="fas fa-toggle-on"></i> Add/View/Edit/Approve</span>
+                        <span class="hub-bento-chip"><i class="fas fa-shield"></i> Page Access</span>
+                    </div>
+                </div>
+                <div class="hub-bento-footer">
+                    <span class="hub-bento-action-label">Open User Access Control</span>
+                    <span class="hub-bento-arrow"><i class="fas fa-arrow-right"></i></span>
+                </div>
+            </a>
+            <?php endif; ?>
+
+            <!-- 12. Zcost -->
+            <a class="hub-bento-card is-zcost animate-card" style="--stagger: 12;" href="<?= e(url('zcost')) ?>" data-category="costing" data-keywords="zcost costing matrix sheet precosting actual budget variance garment cost z cost">
+                <div class="hub-bento-ambient-glow"></div>
+                <div class="hub-bento-shine"></div>
+                <div class="hub-bento-head">
+                    <div class="hub-bento-icon-medallion"><i class="fas fa-calculator"></i></div>
+                    <div class="hub-bento-head-meta">
+                        <div class="hub-bento-kicker"><span class="hub-bento-dot"></span><span>MODULE 12 • COST SHEET</span></div>
+                        <span class="hub-bento-tag">ZCOST MATRIX</span>
+                    </div>
+                </div>
+                <div class="hub-bento-body">
+                    <h2 class="hub-bento-title">Zcost</h2>
+                    <p class="hub-bento-desc">Garment costing sheet, pre-costing matrix, approval flow, and budget vs actual variance.</p>
+                    <div class="hub-bento-chips">
+                        <span class="hub-bento-chip"><i class="fas fa-table-cells"></i> Cost Matrix</span>
+                        <span class="hub-bento-chip"><i class="fas fa-file-invoice-dollar"></i> Pre-Costing</span>
+                        <span class="hub-bento-chip"><i class="fas fa-check-double"></i> Approvals</span>
+                    </div>
+                </div>
+                <div class="hub-bento-footer">
+                    <span class="hub-bento-action-label">Launch Zcost Module</span>
                     <span class="hub-bento-arrow"><i class="fas fa-arrow-right"></i></span>
                 </div>
             </a>
@@ -1258,6 +1340,46 @@ html, body {
     --card-footer-hover-bg: rgba(209, 250, 229, 0.45);
 }
 
+.is-audit-log {
+    --card-color: #475569;
+    --card-gradient: linear-gradient(135deg, #334155, #64748b);
+    --card-glow: rgba(71, 85, 105, 0.45);
+    --card-glow-soft: rgba(71, 85, 105, 0.18);
+    --card-glow-shadow: rgba(71, 85, 105, 0.18);
+    --card-border-soft: rgba(71, 85, 105, 0.35);
+    --card-tag-bg: #f1f5f9;
+    --card-tag-color: #1e293b;
+    --card-tag-border: #cbd5e1;
+    --card-footer-hover-bg: rgba(241, 245, 249, 0.6);
+}
+
+.is-uac {
+    --card-color: #e11d48;
+    --card-gradient: linear-gradient(135deg, #e11d48, #f43f5e);
+    --card-glow: rgba(225, 29, 72, 0.45);
+    --card-glow-soft: rgba(225, 29, 72, 0.18);
+    --card-glow-shadow: rgba(225, 29, 72, 0.18);
+    --card-border-soft: rgba(225, 29, 72, 0.35);
+    --card-tag-bg: #ffe4e6;
+    --card-tag-color: #9f1239;
+    --card-tag-border: #fecdd3;
+    --card-footer-hover-bg: rgba(254, 226, 226, 0.5);
+    cursor: pointer;
+}
+
+.is-zcost {
+    --card-color: #ea580c;
+    --card-gradient: linear-gradient(135deg, #ea580c, #f97316);
+    --card-glow: rgba(234, 88, 12, 0.45);
+    --card-glow-soft: rgba(234, 88, 12, 0.18);
+    --card-glow-shadow: rgba(234, 88, 12, 0.18);
+    --card-border-soft: rgba(234, 88, 12, 0.35);
+    --card-tag-bg: #ffedd5;
+    --card-tag-color: #9a3412;
+    --card-tag-border: #fed7aa;
+    --card-footer-hover-bg: rgba(254, 243, 199, 0.5);
+}
+
 /* Staggered entrance animations */
 @keyframes cardEntrance {
     from {
@@ -1743,6 +1865,16 @@ document.addEventListener('DOMContentLoaded', function () {
             if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
                 openModal();
+            }
+        });
+    }
+
+    var uacCard = document.getElementById('openUacCardBtn');
+    if (uacCard) {
+        uacCard.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                uacCard.click();
             }
         });
     }

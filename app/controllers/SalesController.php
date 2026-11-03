@@ -30,6 +30,11 @@ class SalesController extends Controller
      */
     public function index(): void
     {
+        if (function_exists('sap_reports_user_can_access') && !sap_reports_user_can_access('sales')) {
+            $_SESSION['flash_error'] = 'Access restricted: You do not have permission to view Sales Dashboard.';
+            $this->redirect(url('/'));
+            return;
+        }
         $dashModel = new DashboardModel();
         $year = $dashModel->year();
         $live = $this->model->salesPage($year);
@@ -53,9 +58,9 @@ class SalesController extends Controller
             'primaryDark'      => $cfg['primary_dark'],
             'showPeriodFilter' => true,
             'year'      => $year,
-            'defaultFrom'      => $thisWeekFrom,
-            'defaultTo'        => $thisWeekTo,
-            'periodLabel'      => 'This Week',
+            'defaultFrom'      => $now->format('Y-m-d'),
+            'defaultTo'        => $now->format('Y-m-d'),
+            'periodLabel'      => 'Today',
             'navDashboards'    => $dashModel->kapis(),
             'dataSource'       => $live['data_source'],
             'sapError'         => $live['sap_error'],

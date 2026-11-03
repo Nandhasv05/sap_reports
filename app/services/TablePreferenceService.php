@@ -181,3 +181,4 @@ final class TablePreferenceService
         return is_array($value) && array_is_list($value) ? $value : [];
     }
 }
+?>

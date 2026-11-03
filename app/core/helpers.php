@@ -152,3 +152,4 @@ function evolv_boot_app_base(): void
         $GLOBALS['app_base'] = '/sap_reports';
     }
 }
+?>

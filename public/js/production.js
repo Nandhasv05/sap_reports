@@ -50,32 +50,112 @@
 
     /*
      * Filters: Plant text input (required) + SO creation date preset dropdown and / or sales order (optional).
-     * From / To inputs are shown only for Custom Date.
+     * Custom Date opens the custom date modal.
      */
     function bindDateFilters() {
         const presetDates = cfg.presetDates || {};
         const dmy = (ymd) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd || ''); return m ? `${m[3]}/${m[2]}/${m[1]}` : ''; };
         const filterError = document.querySelector('[data-filter-error]');
+        let activeFormForModal = null;
+        let lastNonCustomPreset = cfg.range?.preset || 'today';
+
+        const customModal = document.getElementById('prodCustomDateModal');
+        const modalFrom = document.getElementById('prodModalFrom');
+        const modalTo = document.getElementById('prodModalTo');
+        const modalError = document.getElementById('prodCustomModalError');
+
+        function openProdModal(form) {
+            activeFormForModal = form;
+            if (!customModal) return;
+            const fromInput = form.querySelector('input[name="from"]');
+            const toInput = form.querySelector('input[name="to"]');
+            const today = new Date().toISOString().slice(0, 10);
+            if (modalFrom) modalFrom.value = fromInput?.value || today;
+            if (modalTo) modalTo.value = toInput?.value || today;
+            if (modalError) {
+                modalError.textContent = '';
+                modalError.style.display = 'none';
+            }
+            customModal.hidden = false;
+            customModal.classList.add('is-open');
+            modalFrom?.focus();
+        }
+
+        function closeProdModal(revert = false) {
+            if (!customModal) return;
+            customModal.classList.remove('is-open');
+            customModal.hidden = true;
+            if (revert && activeFormForModal) {
+                const select = activeFormForModal.querySelector('[data-range-select]');
+                if (select) select.value = lastNonCustomPreset;
+            }
+        }
+
+        if (customModal) {
+            document.getElementById('prodCustomModalClose')?.addEventListener('click', () => closeProdModal(true));
+            document.getElementById('prodCustomModalCancel')?.addEventListener('click', () => closeProdModal(true));
+            customModal.querySelector('.po-custom-modal-backdrop')?.addEventListener('click', () => closeProdModal(true));
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && !customModal.hidden) closeProdModal(true);
+            });
+
+            document.getElementById('prodCustomModalApply')?.addEventListener('click', () => {
+                const from = modalFrom?.value || '';
+                const to = modalTo?.value || '';
+                const setModalError = (msg) => {
+                    if (modalError) {
+                        modalError.textContent = msg;
+                        modalError.style.display = 'block';
+                    }
+                };
+                if (!from || !to) {
+                    setModalError('Please select both From and To dates.');
+                    return;
+                }
+                if (from > to) {
+                    setModalError('From date cannot be after To date.');
+                    return;
+                }
+                if ((Date.parse(to) - Date.parse(from)) / 86400000 + 1 > maxRangeDays) {
+                    setModalError(`Choose a range of ${maxRangeDays} days or less.`);
+                    return;
+                }
+                if (modalError) modalError.style.display = 'none';
+                if (activeFormForModal) {
+                    const fromInput = activeFormForModal.querySelector('input[name="from"]');
+                    const toInput = activeFormForModal.querySelector('input[name="to"]');
+                    const select = activeFormForModal.querySelector('[data-range-select]');
+                    if (fromInput) fromInput.value = from;
+                    if (toInput) toInput.value = to;
+                    if (select) select.value = 'custom';
+                    closeProdModal(false);
+                    activeFormForModal.requestSubmit();
+                } else {
+                    closeProdModal(false);
+                }
+            });
+        }
 
         document.querySelectorAll('[data-date-filter]').forEach(form => {
             const plantInput = form.querySelector('[data-plant-input], [data-plant-select], select[name="plant"], input[name="plant"]');
             const select = form.querySelector('[data-range-select]');
-            const dateInputs = Array.from(form.querySelectorAll('input[type="date"]'));
-            const [fromInput, toInput] = dateInputs;
+            const fromInput = form.querySelector('input[name="from"]');
+            const toInput = form.querySelector('input[name="to"]');
             const soInput = form.querySelector('input[name="so"]');
-            const customBlocks = Array.from(form.querySelectorAll('[data-date-custom]'));
             const isHeader = form.classList.contains('prod-filters') || !!form.closest('.rpt-bar');
-            const fields = [plantInput, soInput, select, ...dateInputs].filter(Boolean);
             const currentPreset = () => (select ? select.value : '');
             const boxOf = (field) => field?.closest('label');
 
             function clearErrors() {
-                fields.forEach(field => { field.setCustomValidity(''); boxOf(field)?.classList.remove('is-invalid'); });
+                [plantInput, soInput, select].filter(Boolean).forEach(field => {
+                    field.setCustomValidity('');
+                    boxOf(field)?.classList.remove('is-invalid');
+                });
                 if (filterError) filterError.hidden = true;
             }
 
             function showError(message, target, alsoMark = []) {
-                [target, ...alsoMark].forEach(field => {
+                [target, ...alsoMark].filter(Boolean).forEach(field => {
                     boxOf(field)?.classList.add('is-invalid');
                 });
                 if (filterError) {
@@ -88,30 +168,16 @@
                 }
             }
 
-            function showCustom(on) {
-                customBlocks.forEach(el => { el.hidden = !on; });
-                dateInputs.forEach(input => { input.disabled = !on; });
-            }
-
             function applyPreset(key) {
                 clearErrors();
                 const dates = presetDates[key];
                 if (dates) {
                     if (fromInput) fromInput.value = dates.from;
                     if (toInput) toInput.value = dates.to;
-                } else if (key === 'custom') {
-                    const today = new Date();
-                    const sevenDaysAgo = new Date();
-                    sevenDaysAgo.setDate(today.getDate() - 7);
-                    const pad = (n) => String(n).padStart(2, '0');
-                    const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-                    if (fromInput && !fromInput.value) fromInput.value = fmt(sevenDaysAgo);
-                    if (toInput && !toInput.value) toInput.value = fmt(today);
                 } else if (key === '') {
-                    dateInputs.forEach(input => { input.value = ''; });
+                    if (fromInput) fromInput.value = '';
+                    if (toInput) toInput.value = '';
                 }
-                showCustom(key === 'custom');
-                if (key === 'custom') fromInput?.focus();
             }
 
             const canSubmit = () => {
@@ -133,13 +199,13 @@
             plantInput?.addEventListener('change', onPlantChange);
 
             select?.addEventListener('change', () => {
-                applyPreset(select.value);
-                if (select.value !== 'custom' && canSubmit()) form.requestSubmit();
-            });
-
-            dateInputs.forEach(input => {
-                input.addEventListener('input', clearErrors);
-                if (isHeader) input.addEventListener('change', () => { if (fromInput?.value && toInput?.value && canSubmit()) form.requestSubmit(); });
+                if (select.value === 'custom') {
+                    openProdModal(form);
+                } else {
+                    lastNonCustomPreset = select.value || 'today';
+                    applyPreset(select.value);
+                    if (canSubmit()) form.requestSubmit();
+                }
             });
 
             soInput?.addEventListener('input', () => {
@@ -148,8 +214,7 @@
             });
 
             window.addEventListener('pageshow', (e) => {
-                [plantInput, select, soInput, ...dateInputs].forEach(field => { if (field) field.disabled = false; });
-                showCustom(currentPreset() === 'custom');
+                [plantInput, select, soInput].forEach(field => { if (field) field.disabled = false; });
                 if (e && e.persisted) {
                     showSpinner(false);
                 }
@@ -189,7 +254,6 @@
                     return;
                 }
 
-                if (preset !== 'custom') dateInputs.forEach(input => { input.disabled = true; });
                 if (!preset && select) select.disabled = true;
                 if (soInput && !so) soInput.disabled = true;
                 showSpinner(true);

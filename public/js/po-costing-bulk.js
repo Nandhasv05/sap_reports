@@ -49,7 +49,6 @@
         { key: 'status', label: 'Validation Status' },
         { key: 'last', label: 'Last Validated' },
         { key: 'validated_by', label: 'Validated By' },
-        { key: 'actions', label: 'Actions', locked: true },
     ];
     let hiddenCols = new Set();
     let pcbTablePrefManager = null;
@@ -777,7 +776,6 @@
                 <td data-col-key="status">${statusBadge(r._validation_status)}</td>
                 <td data-col-key="last">${dash(r._last_validated)}</td>
                 <td data-col-key="validated_by">${dash(r._validated_by)}</td>
-                <td data-col-key="actions"><button type="button" class="pcb-btn pcb-btn-sm pcb-drill-btn" data-po="${esc(r.purchase_order)}">View</button></td>
             </tr>`;
         }).join('');
 
@@ -804,9 +802,6 @@
                     <div class="pcb-card-meta">
                         <span>${dash(r._last_validated)}</span>
                         <span title="Validated by">${dash(r._validated_by)}</span>
-                    </div>
-                    <div class="pcb-card-actions">
-                        <button type="button" class="pcb-btn pcb-btn-sm pcb-drill-btn" data-po="${esc(r.purchase_order)}">View</button>
                     </div>
                 </article>`;
             }).join('');
@@ -842,31 +837,83 @@
         return `${y}-${m}-${day}`;
     }
 
-    function applyRangePreset(key, { fillDates = true } = {}) {
-        const customWrap = $('pcbCustomDates');
-        const isCustom = key === 'custom';
-        if (customWrap) {
-            customWrap.hidden = !isCustom;
-            customWrap.style.display = isCustom ? 'flex' : 'none';
+    let lastNonCustomRange = 'today';
+
+    function setCustomDateError(message) {
+        const modalError = $('poCustomDateError');
+        if (!modalError) return;
+        if (!message) {
+            modalError.hidden = true;
+            modalError.textContent = '';
+            return;
         }
+        modalError.textContent = message;
+        modalError.hidden = false;
+    }
+
+    function openCustomDateModal() {
+        const modal = $('poCustomDateModal');
+        if (!modal) return;
+        const fromVal = $('pcbFrom')?.value || ymdDaysAgo(7);
+        const toVal = $('pcbTo')?.value || ymdDaysAgo(0);
+        if ($('poCustomModalFrom')) $('poCustomModalFrom').value = fromVal;
+        if ($('poCustomModalTo')) $('poCustomModalTo').value = toVal;
+        setCustomDateError('');
+        modal.hidden = false;
+        document.body.classList.add('po-modal-open');
+        $('poCustomModalFrom')?.focus();
+    }
+
+    function closeCustomDateModal({ revertSelect = false } = {}) {
+        const modal = $('poCustomDateModal');
+        if (modal) modal.hidden = true;
+        document.body.classList.remove('po-modal-open');
+        if (revertSelect && $('pcbRange')) {
+            $('pcbRange').value = lastNonCustomRange || 'today';
+            applyRangePreset($('pcbRange').value, { fillDates: true });
+        }
+    }
+
+    function applyCustomDatesAndLoad() {
+        const fVal = $('poCustomModalFrom')?.value.trim() || '';
+        const tVal = $('poCustomModalTo')?.value.trim() || '';
+        if (!fVal || !tVal) {
+            setCustomDateError(!fVal ? 'Select a From date.' : 'Select a To date.');
+            (!fVal ? $('poCustomModalFrom') : $('poCustomModalTo'))?.focus();
+            return;
+        }
+        if (fVal > tVal) {
+            setCustomDateError('To date must be on or after From date.');
+            $('poCustomModalTo')?.focus();
+            return;
+        }
+        const maxDays = Number($('poCustomDateModal')?.getAttribute('data-max-days')) || 100;
+        const minYmd = ymdDaysAgo(maxDays);
+        if (fVal < minYmd) {
+            setCustomDateError(`Select dates within the last ${maxDays} days.`);
+            $('poCustomModalFrom')?.focus();
+            return;
+        }
+        if ($('pcbFrom')) $('pcbFrom').value = fVal;
+        if ($('pcbTo')) $('pcbTo').value = tVal;
+        lastNonCustomRange = 'custom';
+        closeCustomDateModal({ revertSelect: false });
+        void fetchPos();
+    }
+
+    function applyRangePreset(key, { fillDates = true } = {}) {
+        const isCustom = key === 'custom';
         if (!isCustom && fillDates) {
             const dates = presetDates()[key];
             if (dates) {
                 if ($('pcbFrom')) $('pcbFrom').value = dates.from || '';
                 if ($('pcbTo')) $('pcbTo').value = dates.to || '';
             }
-        } else if (isCustom && fillDates) {
-            const fromEl = $('pcbFrom');
-            const toEl = $('pcbTo');
-            if (fromEl && toEl && (!fromEl.value || !toEl.value)) {
-                fromEl.value = ymdDaysAgo(7);
-                toEl.value = ymdDaysAgo(0);
-            }
         }
     }
 
     function currentRange() {
-        return String($('pcbRange')?.value || cfg.range?.preset || 'this_month');
+        return String($('pcbRange')?.value || cfg.range?.preset || 'today');
     }
 
     async function fetchPos(e) {
@@ -1005,7 +1052,7 @@
 
         // 3. If a full PO number (8-10 digits) was typed and not in current list, open workbench
         if (po.length >= 8) {
-            window.location.href = workbenchUrl(po);
+            window.open(workbenchUrl(po), '_blank');
             return;
         }
 
@@ -1907,27 +1954,9 @@
         renderTable();
     }
 
-    async function openDrill(po) {
+    function openDrill(po) {
         if (!po) return;
-        const switching = activePo && activePo !== po;
-        activePo = po;
-        if (switching) {
-            activeItemIdx = -1;
-            clearItemFilters();
-            hideItemDetail();
-        }
-        renderDrill(po);
-        if (!itemCache[po]) {
-            try {
-                await validateOne(po);
-                syncRow(po);
-                fillKpis();
-                if (activePo === po) renderDrill(po);
-            } catch (err) {
-                if ($('pcbDrillSub')) $('pcbDrillSub').textContent = err.message || 'Validation failed';
-                toast(err.message || 'Validation failed', 'error');
-            }
-        }
+        window.open(workbenchUrl(po), '_blank');
     }
 
     function exportCsv() {
@@ -1970,15 +1999,37 @@
             void fetchPos(e);
         });
         $('pcbRange')?.addEventListener('change', () => {
-            applyRangePreset(currentRange(), { fillDates: true });
+            const range = currentRange();
+            if (range === 'custom') {
+                openCustomDateModal();
+                return;
+            }
+            lastNonCustomRange = range;
+            applyRangePreset(range, { fillDates: true });
             void fetchPos();
         });
-        $('pcbFrom')?.addEventListener('change', () => {
-            if (currentRange() === 'custom') void fetchPos();
+
+        // Custom Date Modal handlers
+        $('poCustomDateApply')?.addEventListener('click', applyCustomDatesAndLoad);
+        $('poCustomDateCancel')?.addEventListener('click', () => closeCustomDateModal({ revertSelect: true }));
+        $('poCustomDateClose')?.addEventListener('click', () => closeCustomDateModal({ revertSelect: true }));
+        $('poCustomDateModal')?.addEventListener('click', (e) => {
+            if (e.target === $('poCustomDateModal')) closeCustomDateModal({ revertSelect: true });
         });
-        $('pcbTo')?.addEventListener('change', () => {
-            if (currentRange() === 'custom') void fetchPos();
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && $('poCustomDateModal') && !$('poCustomDateModal').hidden) {
+                closeCustomDateModal({ revertSelect: true });
+            }
         });
+        $('poCustomModalFrom')?.addEventListener('input', () => setCustomDateError(''));
+        $('poCustomModalTo')?.addEventListener('input', () => setCustomDateError(''));
+        $('poCustomModalFrom')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); applyCustomDatesAndLoad(); }
+        });
+        $('poCustomModalTo')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); applyCustomDatesAndLoad(); }
+        });
+
         $('pcbMat')?.addEventListener('change', () => void fetchPos());
         $('pcbSupplier')?.addEventListener('change', () => void fetchPos());
         $('pcbPoSearchBtn')?.addEventListener('click', () => searchPoHeader());
@@ -1989,8 +2040,9 @@
             }
         });
         $('pcbResetBtn')?.addEventListener('click', () => {
-            if ($('pcbRange')) $('pcbRange').value = 'this_month';
-            applyRangePreset('this_month', { fillDates: true });
+            if ($('pcbRange')) $('pcbRange').value = 'today';
+            lastNonCustomRange = 'today';
+            applyRangePreset('today', { fillDates: true });
             if ($('pcbSupplier')) $('pcbSupplier').value = '';
             if ($('pcbValStatus')) $('pcbValStatus').value = 'all';
             if ($('pcbMat')) $('pcbMat').value = 'all';
@@ -2063,32 +2115,32 @@
         });
 
         const onListClick = (e) => {
+            const checkCell = e.target.closest('.pcb-check');
             const check = e.target.closest('.pcb-row-check, .pcb-card-check');
-            if (check) {
-                const input = check.matches('input') ? check : check.querySelector('input');
-                if (input) {
+            if (check || checkCell) {
+                const input = (check && check.matches('input')) ? check : (checkCell || check).querySelector('input');
+                if (input && e.target !== input) {
+                    input.checked = !input.checked;
                     setChecked(input.getAttribute('data-po'), input.checked);
-                    e.stopPropagation();
-                    if ($('pcbSelectAll')) {
-                        const rows = pageRows();
-                        const pageChecked = rows.length && rows.every((r) => r._checked);
-                        $('pcbSelectAll').checked = pageChecked;
-                        $('pcbSelectAll').indeterminate = !pageChecked && rows.some((r) => r._checked);
-                    }
+                } else if (input) {
+                    setChecked(input.getAttribute('data-po'), input.checked);
+                }
+                e.stopPropagation();
+                if ($('pcbSelectAll')) {
+                    const rows = pageRows();
+                    const pageChecked = rows.length && rows.every((r) => r._checked);
+                    $('pcbSelectAll').checked = pageChecked;
+                    $('pcbSelectAll').indeterminate = !pageChecked && rows.some((r) => r._checked);
                 }
                 return;
             }
-            const poBtn = e.target.closest('[data-po].pcb-drill-btn, button.pcb-po-link[data-po]');
-            if (poBtn) {
-                e.preventDefault();
-                const po = poBtn.getAttribute('data-po');
-                if (po) void openDrill(po);
-                return;
-            }
-            const row = e.target.closest('tr.pcb-row, article.pcb-card');
+            const row = e.target.closest('tr.pcb-row, article.pcb-card, button.pcb-po-link');
             if (!row) return;
             const po = row.getAttribute('data-po');
-            if (po) void openDrill(po);
+            if (po) {
+                e.preventDefault();
+                window.open(workbenchUrl(po), '_blank');
+            }
         };
         $('pcbTableBody')?.addEventListener('click', onListClick);
         $('pcbCards')?.addEventListener('click', onListClick);

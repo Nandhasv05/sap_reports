@@ -58,16 +58,8 @@ $extraHead = '<link rel="stylesheet" href="' . e(asset('css/fabricSale.css')) . 
                     <?php endforeach; ?>
                 </select>
             </label>
-            <div class="date-custom fso-hdr-custom" id="fsoHdrCustomDates"<?= $isCustom ? '' : ' hidden' ?> style="display: <?= $isCustom ? 'flex' : 'none' ?>; gap: 6px;">
-                <label class="rpt-field rpt-field-date" title="From date">
-                    <span class="date-cap">From</span>
-                    <input type="date" id="fsoHdrFrom" name="from" value="<?= e($from) ?>" aria-label="From date">
-                </label>
-                <label class="rpt-field rpt-field-date" title="To date">
-                    <span class="date-cap">To</span>
-                    <input type="date" id="fsoHdrTo" name="to" value="<?= e($to) ?>" aria-label="To date">
-                </label>
-            </div>
+            <input type="hidden" id="fsoHdrFrom" name="from" value="<?= e($from) ?>">
+            <input type="hidden" id="fsoHdrTo" name="to" value="<?= e($to) ?>">
             <label class="rpt-field po-direct-search fso-hdr-search" title="Search sales order">
                 <span class="material-icons-round">search</span>
                 <input type="search" id="fsoHdrSo" name="so" value="<?= e($soQuery) ?>" placeholder="Search SO #" inputmode="numeric" autocomplete="off" aria-label="Search sales order">
@@ -115,16 +107,8 @@ $extraHead = '<link rel="stylesheet" href="' . e(asset('css/fabricSale.css')) . 
                     </label>
                 </div>
 
-                <div class="date-custom" id="fsoCustomDates"<?= $isCustom ? '' : ' hidden' ?> style="display: flex; gap: 10px; margin-top: 10px;">
-                    <label class="lookup-so date-input" title="From date">
-                        <span class="material-icons-round">event</span>
-                        <input type="date" id="fsoFrom" name="from" value="<?= e($from) ?>" aria-label="From date">
-                    </label>
-                    <label class="lookup-so date-input" title="To date">
-                        <span class="material-icons-round">event</span>
-                        <input type="date" id="fsoTo" name="to" value="<?= e($to) ?>" aria-label="To date">
-                    </label>
-                </div>
+                <input type="hidden" id="fsoFrom" name="from" value="<?= e($from) ?>">
+                <input type="hidden" id="fsoTo" name="to" value="<?= e($to) ?>">
 
                 <p class="date-error" role="alert" id="fsoFormError" hidden></p>
 
@@ -287,6 +271,41 @@ $extraHead = '<link rel="stylesheet" href="' . e(asset('css/fabricSale.css')) . 
             </div>
         </div>
     </section>
+
+    <div class="modal-backdrop po-custom-modal" id="fsoCustomDateModal" hidden>
+        <div class="modal-card po-custom-modal-card" role="dialog" aria-modal="true" aria-labelledby="fsoCustomDateTitle">
+            <div class="modal-header">
+                <div>
+                    <span class="modal-kicker po-custom-modal-kicker">Fabric Sale Order</span>
+                    <h3 id="fsoCustomDateTitle">Custom Date Range</h3>
+                    <p>Choose From and To date range.</p>
+                </div>
+                <button type="button" class="modal-close" id="fsoCustomDateClose" title="Close" aria-label="Close">
+                    <span class="material-icons-round">close</span>
+                </button>
+            </div>
+            <div class="modal-body po-custom-modal-body">
+                <div class="po-custom-modal-fields">
+                    <label class="po-custom-modal-field">
+                        <span class="date-cap">From</span>
+                        <input type="date" id="fsoModalFrom" value="<?= e($from) ?>" aria-label="From date">
+                    </label>
+                    <label class="po-custom-modal-field">
+                        <span class="date-cap">To</span>
+                        <input type="date" id="fsoModalTo" value="<?= e($to) ?>" aria-label="To date">
+                    </label>
+                </div>
+                <p class="po-custom-modal-error" id="fsoCustomDateError" hidden></p>
+                <div class="po-custom-modal-actions">
+                    <button type="button" class="rpt-btn rpt-btn-ghost" id="fsoCustomDateCancel">Cancel</button>
+                    <button type="button" class="rpt-btn" id="fsoCustomDateApply">
+                        <span class="material-icons-round">check</span>
+                        <span>Apply &amp; Load</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <?php require base_path('app/views/partials/footer.php'); ?>
 

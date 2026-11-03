@@ -118,7 +118,8 @@ $cards = [
                         <?php endforeach; ?>
                     </select>
                 </label>
-                <?= $dateInputs('rpt-field rpt-field-date') ?>
+                <input type="hidden" name="from" id="prodHdrFrom" value="<?= e($dateFrom) ?>">
+                <input type="hidden" name="to" id="prodHdrTo" value="<?= e($dateTo) ?>">
                 <?= $soInput('rpt-field rpt-field-so', 'Sales order') ?>
                 <button class="rpt-btn" type="submit" title="Load report">
                     <span class="material-icons-round">sync</span>
@@ -157,9 +158,8 @@ $cards = [
                             </select>
                         </label>
                     </div>
-                    <div class="date-custom" data-date-custom<?= $isCustom ? '' : ' hidden' ?> style="display: flex; gap: 10px; margin-top: 10px;">
-                        <?= $dateInputs('lookup-so date-input') ?>
-                    </div>
+                    <input type="hidden" name="from" id="prodLookupFrom" value="<?= e($dateFrom) ?>">
+                    <input type="hidden" name="to" id="prodLookupTo" value="<?= e($dateTo) ?>">
                     <p class="date-error" role="alert" data-filter-error<?= $rangeError === '' ? ' hidden' : '' ?>><?= e($rangeError) ?></p>
 
                     <button class="rpt-btn lookup-submit" type="submit">
@@ -371,6 +371,37 @@ $cards = [
             </div>
         </main>
     <?php endif; ?>
+
+    <div class="po-custom-modal" id="prodCustomDateModal" hidden>
+        <div class="po-custom-modal-backdrop" data-close-modal></div>
+        <div class="po-custom-modal-card" role="dialog" aria-modal="true" aria-labelledby="prodCustomModalTitle">
+            <div class="po-custom-modal-header">
+                <div>
+                    <span class="po-custom-modal-badge">DATE RANGE</span>
+                    <h3 id="prodCustomModalTitle">Select Custom Date</h3>
+                    <p class="po-custom-modal-sub">Choose a From and To date (up to <?= (int) SapProductionService::MAX_RANGE_DAYS ?> days).</p>
+                </div>
+                <button type="button" class="po-custom-modal-close" id="prodCustomModalClose" aria-label="Close modal">&times;</button>
+            </div>
+            <div class="po-custom-modal-body">
+                <div class="po-custom-grid">
+                    <div class="po-custom-field">
+                        <label for="prodModalFrom">From Date</label>
+                        <input type="date" id="prodModalFrom" max="<?= e($today) ?>" value="<?= e($dateFrom) ?>">
+                    </div>
+                    <div class="po-custom-field">
+                        <label for="prodModalTo">To Date</label>
+                        <input type="date" id="prodModalTo" max="<?= e($today) ?>" value="<?= e($dateTo) ?>">
+                    </div>
+                </div>
+                <div class="po-custom-error" id="prodCustomModalError" role="alert" style="display:none;"></div>
+            </div>
+            <div class="po-custom-modal-footer">
+                <button type="button" class="po-btn-modal-cancel" id="prodCustomModalCancel">Cancel</button>
+                <button type="button" class="po-btn-modal-apply" id="prodCustomModalApply">Apply Range</button>
+            </div>
+        </div>
+    </div>
 
     <?php require base_path('app/views/partials/footer.php'); ?>
 </div>

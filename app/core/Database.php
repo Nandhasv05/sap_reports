@@ -43,3 +43,4 @@ final class Database
         throw new PDOException('Could not connect to ' . $c['database'] . ' on ' . $server . '. ' . ($errors[0] ?? ''));
     }
 }
+?>

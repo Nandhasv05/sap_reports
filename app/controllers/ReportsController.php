@@ -572,6 +572,11 @@ class ReportsController extends Controller
      */
     public function showFabricSale(): void
     {
+        if (function_exists('sap_reports_user_can_access') && !sap_reports_user_can_access('fabric-sale')) {
+            $_SESSION['flash_error'] = 'Access restricted: You do not have permission to view Fabric Sale Order.';
+            $this->redirect(url('/'));
+            return;
+        }
         require_once base_path('app/services/SapPurchaseOrderService.php');
         $soQuery = trim((string) ($_GET['so'] ?? ''));
         // Mutually exclusive: SO search OR date range — never both
@@ -582,10 +587,10 @@ class ReportsController extends Controller
         if ($soQuery === '') {
             $presetIn = strtolower(trim((string) ($_GET['range'] ?? '')));
             if ($autoSearch && $presetIn === '') {
-                $presetIn = 'yesterday';
+                $presetIn = 'today';
             }
             if ($presetIn !== '' && !array_key_exists($presetIn, $presets)) {
-                $presetIn = 'yesterday';
+                $presetIn = 'today';
             }
             if ($presetIn !== '') {
                 $range = SapPurchaseOrderService::resolveRange(
@@ -622,12 +627,19 @@ class ReportsController extends Controller
      */
     public function showPurchaseOrder(): void
     {
+        $isCosting = strtolower((string) ($_GET['view'] ?? '')) === 'costing';
+        $perm = $isCosting ? 'po-costing' : 'purchase-order';
+        if (function_exists('sap_reports_user_can_access') && !sap_reports_user_can_access($perm)) {
+            $_SESSION['flash_error'] = 'Access restricted: You do not have permission to view ' . ($isCosting ? 'PO Costing Validation' : 'Purchase Orders') . '.';
+            $this->redirect(url('/'));
+            return;
+        }
         $input = preg_replace('/[\s,]/', '', (string) ($_GET['po'] ?? '')) ?? '';
         $error = $input !== '' && !preg_match('/^\d{1,10}$/', $input) ? 'Purchase order must be a number of up to 10 digits.' : null;
         $mode = ($input !== '' && $error === null) ? 'detail' : 'list';
 
         $service = new SapPurchaseOrderService();
-        $rangePreset = strtolower(trim((string) ($_GET['range'] ?? 'this_month')));
+        $rangePreset = strtolower(trim((string) ($_GET['range'] ?? 'today')));
         $range = SapPurchaseOrderService::resolveRange($rangePreset, (string) ($_GET['from'] ?? ''), (string) ($_GET['to'] ?? ''));
         $rangePreset = (string) ($range['preset'] ?? $rangePreset);
         $plant = strtoupper(trim((string) ($_GET['plant'] ?? '')));

@@ -396,6 +396,9 @@ class SapProductionService
         return $out;
     }
 
+    /*
+     * All Range Orders
+    */
     private function allRangeOrders(string $from, string $to): array
     {
         $cacheName = 'orders_' . $from . '_' . $to;
@@ -654,3 +657,4 @@ class SapProductionService
         ];
     }
 }
+?>
