@@ -15,14 +15,14 @@ $wbTableDef = TableColumnRegistry::get($wbTableKey) ?? ['columns' => [], 'defaul
 $wbColumns = $wbTableDef['columns'] ?? [];
 $wbColCount = max(1, count($wbColumns));
 $wbNumKeys = [
-    'sno', 'poitem', 'so_qty', 'prwise_so_qty', 'consumption', 'reqqty', 'tot_poqty',
+    'poitem', 'so_qty', 'prwise_so_qty', 'consumption', 'reqqty', 'tot_poqty',
     'so_wise_poqty', 'so_wise_po_val', 'porate', 'totvalue', 'budgeted_cons', 'budget_inr',
     'budget_conv_rt', 'budget_cost_per_gmt', 'conv', 'actual_cost', 'variance_pct',
 ];
 $wbZcostKeys = [
-    'cost_item', 'maktx',
+    'costing_quotation_no', 'costing_item_no', 'maktx',
     'budgeted_cons', 'budget_inr', 'budget_currency', 'budget_conv_rt', 'budget_cost_per_gmt',
-    'conv', 'buom', 'actual_cost', 'variance_pct', 'validation_result',
+    'conv', 'buom', 'actual_cost', 'variance_pct',
 ];
 $wbPoColCount = 0;
 $wbZcostColCount = 0;
@@ -34,6 +34,10 @@ foreach ($wbColumns as $col) {
         $wbPoColCount++;
     }
 }
+$wbLoginUser = trim((string) (
+    $_SESSION['username']
+    ?? ($_SESSION['user_name'] ?? ($_SESSION['name'] ?? 'User'))
+));
 ?>
 <section class="pcw" id="poCostingWorkbench" data-po="<?= e($wbPo) ?>" data-so="<?= e($wbSo) ?>" data-mat="<?= e($wbMat) ?>">
     <!-- Row 1: Common status overview -->
@@ -172,12 +176,6 @@ foreach ($wbColumns as $col) {
 
         <div class="rpt-tb-actions">
             <span class="rpt-tb-count" id="rptTableCount">—</span>
-            <span class="pcw-selected-count" id="pcwSelectedCount" hidden>0 selected</span>
-
-            <button type="button" class="rpt-tb-btn" id="pcwMatchSelectedBtn" title="Manually match selected unmatched PO row to a zCOST line" disabled>
-                <span class="material-icons-round">link</span>
-                <span>Match zCOST</span>
-            </button>
 
             <button type="button" class="rpt-tb-btn is-active" id="rptToggleStickyScroll" title="Keep table header fixed and scroll body only">
                 <i class="fas fa-arrows-up-down"></i>
@@ -204,9 +202,14 @@ foreach ($wbColumns as $col) {
                 <span>Clear All</span>
             </button>
 
-            <button type="button" class="rpt-tb-btn rpt-tb-btn-primary" id="pcwRevalidateBtn" title="Revalidate">
-                <span class="material-icons-round">refresh</span>
-                <span>Revalidate</span>
+            <button type="button" class="rpt-tb-btn" id="pcwHistoryBtn" title="View validation history for this PO">
+                <span class="material-icons-round">history</span>
+                <span>View History</span>
+            </button>
+
+            <button type="button" class="rpt-tb-btn rpt-tb-btn-primary" id="pcwOpenValidateBtn" title="Assign next user, set Validate / Not Validate, save remarks">
+                <span class="material-icons-round">fact_check</span>
+                <span>Assign &amp; Validate</span>
             </button>
         </div>
     </div>
@@ -237,6 +240,127 @@ foreach ($wbColumns as $col) {
         </div>
     </div>
 
+    <div class="pcw-action-offcanvas is-validate" id="pcwValidateModal" hidden aria-hidden="true">
+        <div class="pcw-action-offcanvas-backdrop" id="pcwValidateBackdrop"></div>
+        <aside class="pcw-action-offcanvas-panel" role="dialog" aria-modal="true" aria-labelledby="pcwValidateTitle">
+            <div class="pcw-action-offcanvas-head">
+                <div class="pcw-action-offcanvas-head-left">
+                    <span class="pcw-action-offcanvas-icon material-icons-round">fact_check</span>
+                    <div>
+                        <span class="pcw-action-offcanvas-kicker">PO Costing Workbench</span>
+                        <strong id="pcwValidateTitle">Assign &amp; Validate PO</strong>
+                        <p id="pcwValidateDesc">Record one validation decision for this purchase order and assign the next-level user.</p>
+                    </div>
+                </div>
+                <button type="button" class="pcw-cdm-close" id="pcwValidateClose" aria-label="Close">&times;</button>
+            </div>
+            <div class="pcw-action-offcanvas-body">
+                <div class="pcw-validate-meta" id="pcwValidateMeta"></div>
+                <div class="pcw-validate-layout">
+                    <section class="pcw-validate-card">
+                        <header class="pcw-validate-card-head">
+                            <span class="material-icons-round">badge</span>
+                            <div>
+                                <strong>People</strong>
+                                <small>Who validates now and who reviews next</small>
+                            </div>
+                        </header>
+                        <div class="pcw-validate-grid">
+                            <div class="pcw-validate-field">
+                                <span>Logged-in User</span>
+                                <div class="pcw-login-user" id="pcwLoginUserChip">
+                                    <span class="material-icons-round">account_circle</span>
+                                    <strong id="pcwLoginUserName"><?= e($wbLoginUser) ?></strong>
+                                </div>
+                            </div>
+                            <div class="pcw-validate-field">
+                                <span>Assign Next Level User</span>
+                                <div class="pcw-user-assign is-modal" id="pcwUserAssign">
+                                    <span class="material-icons-round">person_search</span>
+                                    <input type="search" id="pcwUserSearch" class="pcw-user-search" placeholder="Search username…" autocomplete="off" spellcheck="false">
+                                    <input type="hidden" id="pcwUserId" value="">
+                                    <input type="hidden" id="pcwUserName" value="">
+                                    <div class="pcw-user-menu" id="pcwUserMenu" hidden role="listbox"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                    <section class="pcw-validate-card">
+                        <header class="pcw-validate-card-head">
+                            <span class="material-icons-round">rule</span>
+                            <div>
+                                <strong>Decision</strong>
+                                <small>Choose Validate PO or Not Validate</small>
+                            </div>
+                        </header>
+                        <div class="pcw-validate-field">
+                            <span>Status</span>
+                            <div class="pcw-validate-status-seg" role="radiogroup" aria-label="Validation status">
+                                <label class="is-active">
+                                    <input type="radio" name="pcwValidateStatus" value="VALIDATE_PO" checked>
+                                    <span class="material-icons-round">verified</span>
+                                    <em>Validate PO</em>
+                                </label>
+                                <label>
+                                    <input type="radio" name="pcwValidateStatus" value="NOT_VALIDATE">
+                                    <span class="material-icons-round">cancel</span>
+                                    <em>Not Validate</em>
+                                </label>
+                            </div>
+                        </div>
+                    </section>
+                    <section class="pcw-validate-card is-remarks">
+                        <header class="pcw-validate-card-head">
+                            <span class="material-icons-round">notes</span>
+                            <div>
+                                <strong>Remarks</strong>
+                                <small>Optional note saved with this PO validation</small>
+                            </div>
+                        </header>
+                        <div class="pcw-validate-field">
+                            <textarea id="pcwValidateRemarks" rows="8" placeholder="Enter remarks for this validation decision…"></textarea>
+                        </div>
+                    </section>
+                </div>
+            </div>
+            <div class="pcw-action-offcanvas-foot">
+                <button type="button" class="rpt-tb-btn" id="pcwValidateCancel">Cancel</button>
+                <button type="button" class="rpt-tb-btn rpt-tb-btn-primary" id="pcwValidateSave">
+                    <span class="material-icons-round">save</span>
+                    Save Validation
+                </button>
+            </div>
+        </aside>
+    </div>
+
+    <div class="pcw-action-offcanvas is-history" id="pcwHistoryModal" hidden aria-hidden="true">
+        <div class="pcw-action-offcanvas-backdrop" id="pcwHistoryBackdrop"></div>
+        <aside class="pcw-action-offcanvas-panel" role="dialog" aria-modal="true" aria-labelledby="pcwHistoryTitle">
+            <div class="pcw-action-offcanvas-head">
+                <div class="pcw-action-offcanvas-head-left">
+                    <span class="pcw-action-offcanvas-icon material-icons-round">history</span>
+                    <div>
+                        <span class="pcw-action-offcanvas-kicker">PO Costing Workbench</span>
+                        <strong id="pcwHistoryTitle">Validation History</strong>
+                        <p id="pcwHistoryDesc">One entry per PO validation — newest first.</p>
+                    </div>
+                </div>
+                <div class="pcw-action-offcanvas-head-actions">
+                    <span class="pcw-history-count" id="pcwHistoryCount">—</span>
+                    <button type="button" class="pcw-cdm-close" id="pcwHistoryClose" aria-label="Close">&times;</button>
+                </div>
+            </div>
+            <div class="pcw-action-offcanvas-body is-history-body">
+                <div class="pcw-history-list" id="pcwHistoryBody" role="list">
+                    <div class="pcw-history-empty">No history yet.</div>
+                </div>
+            </div>
+            <div class="pcw-action-offcanvas-foot">
+                <button type="button" class="rpt-tb-btn rpt-tb-btn-primary" id="pcwHistoryDone">Close</button>
+            </div>
+        </aside>
+    </div>
+
     <div class="pcw-same-val-backdrop" id="pcwSameValBackdrop" hidden></div>
     <div class="pcw-same-val-modal" id="pcwSameValModal" hidden role="dialog" aria-modal="true" aria-labelledby="pcwSameValTitle">
         <div class="pcw-svm-head">
@@ -257,63 +381,65 @@ foreach ($wbColumns as $col) {
         </div>
     </div>
 
-    <!-- Card Detail & Calculation Modal -->
-    <div class="pcw-card-detail-backdrop" id="pcwCardDetailBackdrop" hidden></div>
-    <div class="pcw-card-detail-modal" id="pcwCardDetailModal" hidden role="dialog" aria-modal="true" aria-labelledby="pcwCardModalTitle">
-        <div class="pcw-cdm-head">
-            <div class="pcw-cdm-head-left">
-                <span class="pcw-cdm-icon material-icons-round" id="pcwCardModalIcon">analytics</span>
-                <div>
-                    <span class="pcw-cdm-subtitle" id="pcwCardModalSubtitle">Card Details &amp; Calculation</span>
-                    <h3 class="pcw-cdm-title" id="pcwCardModalTitle">—</h3>
+    <!-- Card detail 50% offcanvas -->
+    <div class="pcw-card-offcanvas" id="pcwCardDetailModal" hidden aria-hidden="true">
+        <div class="pcw-card-detail-backdrop" id="pcwCardDetailBackdrop"></div>
+        <aside class="pcw-card-offcanvas-panel" id="pcwCardOffcanvasPanel" role="dialog" aria-modal="true" aria-labelledby="pcwCardModalTitle">
+            <div class="pcw-cdm-head">
+                <div class="pcw-cdm-head-left">
+                    <span class="pcw-cdm-icon material-icons-round" id="pcwCardModalIcon">analytics</span>
+                    <div>
+                        <span class="pcw-cdm-subtitle" id="pcwCardModalSubtitle">Card Details &amp; Calculation</span>
+                        <h3 class="pcw-cdm-title" id="pcwCardModalTitle">—</h3>
+                    </div>
+                </div>
+                <div class="pcw-cdm-head-right">
+                    <div class="pcw-cdm-val-badge">
+                        <span id="pcwCardModalVal">—</span>
+                        <small id="pcwCardModalUnit"></small>
+                    </div>
+                    <button type="button" class="pcw-cdm-close" id="pcwCardModalClose" aria-label="Close details">&times;</button>
                 </div>
             </div>
-            <div class="pcw-cdm-head-right">
-                <div class="pcw-cdm-val-badge">
-                    <span id="pcwCardModalVal">—</span>
-                    <small id="pcwCardModalUnit"></small>
+            <div class="pcw-cdm-body">
+                <div class="pcw-cdm-calc-box">
+                    <div class="pcw-cdm-calc-head">
+                        <span class="material-icons-round">calculate</span>
+                        <strong>Calculation Method &amp; Formula</strong>
+                    </div>
+                    <div class="pcw-cdm-formula" id="pcwCardModalFormula">—</div>
+                    <div class="pcw-cdm-steps" id="pcwCardModalSteps"></div>
                 </div>
-                <button type="button" class="pcw-cdm-close" id="pcwCardModalClose" aria-label="Close modal">&times;</button>
-            </div>
-        </div>
-        <div class="pcw-cdm-body">
-            <div class="pcw-cdm-calc-box">
-                <div class="pcw-cdm-calc-head">
-                    <span class="material-icons-round">calculate</span>
-                    <strong>Calculation Method &amp; Formula</strong>
-                </div>
-                <div class="pcw-cdm-formula" id="pcwCardModalFormula">—</div>
-                <div class="pcw-cdm-steps" id="pcwCardModalSteps"></div>
-            </div>
-            <div class="pcw-cdm-breakdown">
-                <div class="pcw-cdm-breakdown-head">
-                    <strong id="pcwCardModalTableTitle">Contributing Items Breakdown</strong>
-                    <span class="pcw-cdm-breakdown-count" id="pcwCardModalTableCount">—</span>
-                </div>
-                <div class="pcw-cdm-table-wrap">
-                    <table class="pcw-cdm-table" id="pcwCardModalTable">
-                        <thead>
-                            <tr id="pcwCardModalTableHead">
-                                <th># Item</th>
-                                <th>Material / Description</th>
-                                <th class="num">Quantity</th>
-                                <th class="num">Rate</th>
-                                <th class="num">Value</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody id="pcwCardModalTableBody"></tbody>
-                    </table>
+                <div class="pcw-cdm-breakdown">
+                    <div class="pcw-cdm-breakdown-head">
+                        <strong id="pcwCardModalTableTitle">Contributing Items Breakdown</strong>
+                        <span class="pcw-cdm-breakdown-count" id="pcwCardModalTableCount">—</span>
+                    </div>
+                    <div class="pcw-cdm-table-wrap">
+                        <table class="pcw-cdm-table" id="pcwCardModalTable">
+                            <thead>
+                                <tr id="pcwCardModalTableHead">
+                                    <th># Item</th>
+                                    <th>Material / Description</th>
+                                    <th class="num">Quantity</th>
+                                    <th class="num">Rate</th>
+                                    <th class="num">Value</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="pcwCardModalTableBody"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
-        </div>
-        <div class="pcw-cdm-foot">
-            <button type="button" class="rpt-tb-btn" id="pcwCardModalFilterBtn" style="display: none;">
-                <span class="material-icons-round">filter_alt</span>
-                <span id="pcwCardModalFilterLabel">Filter Table</span>
-            </button>
-            <button type="button" class="rpt-tb-btn rpt-tb-btn-primary" id="pcwCardModalDone">Close</button>
-        </div>
+            <div class="pcw-cdm-foot">
+                <button type="button" class="rpt-tb-btn" id="pcwCardModalFilterBtn" style="display: none;">
+                    <span class="material-icons-round">filter_alt</span>
+                    <span id="pcwCardModalFilterLabel">Filter Table</span>
+                </button>
+                <button type="button" class="rpt-tb-btn rpt-tb-btn-primary" id="pcwCardModalDone">Close</button>
+            </div>
+        </aside>
     </div>
 
     <div class="pcw-formula-pop" id="pcwFormulaPop" hidden role="dialog" aria-modal="false" aria-labelledby="pcwFormulaTitle">
@@ -364,14 +490,7 @@ foreach ($wbColumns as $col) {
                         $isNum = in_array($key, $wbNumKeys, true);
                         $group = in_array($key, $wbZcostKeys, true) ? 'zcost' : 'po';
                         ?>
-                        <?php if ($key === 'check'): ?>
-                        <th class="pcw-check pcw-col-po" data-col="<?= (int) $i ?>" data-col-id="check" data-col-group="po" title="Select rows for manual zCOST match">
-                            <div class="th-content">
-                                <input type="checkbox" id="pcwCheckAll" class="pcw-check-input" title="Select all unmatched rows" aria-label="Select all unmatched rows">
-                            </div>
-                        </th>
-                        <?php else: ?>
-                        <th class="is-sortable<?= $isNum ? ' num' : '' ?><?= $key === 'sno' ? ' sno' : '' ?> pcw-col-<?= e($group) ?>"
+                        <th class="is-sortable<?= $isNum ? ' num' : '' ?> pcw-col-<?= e($group) ?>"
                             data-col="<?= (int) $i ?>"
                             data-col-id="<?= e($key) ?>"
                             data-col-group="<?= e($group) ?>"
@@ -379,7 +498,6 @@ foreach ($wbColumns as $col) {
                             title="Click to sort · drag to reorder">
                             <div class="th-content<?= $isNum ? ' num' : '' ?>"><span><?= e($col['label'] ?? $key) ?></span></div>
                         </th>
-                        <?php endif; ?>
                     <?php endforeach; ?>
                 </tr>
                 <tr class="rpt-filter-row" id="rptFilterRow">
@@ -389,21 +507,11 @@ foreach ($wbColumns as $col) {
                         $isNum = in_array($key, $wbNumKeys, true);
                         $group = in_array($key, $wbZcostKeys, true) ? 'zcost' : 'po';
                         ?>
-                        <?php if ($key === 'check'): ?>
-                            <th class="pcw-check" data-col-id="check" data-col-group="po"></th>
-                        <?php elseif ($key === 'sno'): ?>
-                            <th class="num sno" data-col-id="sno" data-col-group="po">
+                        <?php if ($key === 'status'): ?>
+                            <th data-col-id="status" data-col-group="po">
                                 <button type="button" class="rpt-col-filter-reset" id="rptColFilterReset" title="Clear all column filters" aria-label="Clear all column filters">
                                     <i class="fas fa-eraser"></i>
                                 </button>
-                            </th>
-                        <?php elseif (in_array($key, ['status'], true)): ?>
-                            <th data-col-id="<?= e($key) ?>" data-col-group="<?= e($group) ?>">
-                                <div class="rpt-col-input-wrap">
-                                    <input type="text" class="rpt-col-input" data-col="<?= (int) $i ?>" data-col-key="<?= e($key) ?>"
-                                           placeholder="Filter…" title="Filter Status">
-                                    <button type="button" class="rpt-col-clear" tabindex="-1">&times;</button>
-                                </div>
                             </th>
                         <?php else: ?>
                             <th<?= $isNum ? ' class="num"' : '' ?> data-col-id="<?= e($key) ?>" data-col-group="<?= e($group) ?>">

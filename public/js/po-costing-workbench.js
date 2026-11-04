@@ -46,15 +46,15 @@
 
     const COLS = (prefsCfg && Array.isArray(prefsCfg.columns) ? prefsCfg.columns : []).map((c) => c.id);
     const NUM_COLS = new Set([
-        'sno', 'poitem', 'so_qty', 'prwise_so_qty', 'consumption', 'reqqty', 'tot_poqty',
+        'poitem', 'so_qty', 'prwise_so_qty', 'consumption', 'reqqty', 'tot_poqty',
         'so_wise_poqty', 'so_wise_po_val', 'porate', 'totvalue', 'budgeted_cons', 'budget_inr',
         'budget_conv_rt', 'budget_cost_per_gmt', 'conv', 'actual_cost', 'variance_pct',
     ]);
     const HIGHLIGHT_COLS = new Set(['budget_cost_per_gmt', 'actual_cost']);
     const ZCOST_COLS = new Set([
-        'cost_item', 'maktx',
+        'costing_quotation_no', 'costing_item_no', 'maktx',
         'budgeted_cons', 'budget_inr', 'budget_currency', 'budget_conv_rt', 'budget_cost_per_gmt',
-        'conv', 'buom', 'actual_cost', 'variance_pct', 'validation_result',
+        'conv', 'buom', 'actual_cost', 'variance_pct',
     ]);
     const EXPLAIN_COLS = new Set([
         'so_qty', 'prwise_so_qty', 'consumption', 'reqqty', 'tot_poqty',
@@ -80,6 +80,8 @@
     let formulaAnchor = null;
     let matchRowIndex = null;
     let matchPickKey = '';
+    let assignedUser = { id: '', username: '' };
+    let userSearchTimer = null;
 
     function nVal(v) {
         const n = Number(v);
@@ -100,31 +102,34 @@
         rows.forEach((row) => {
             if (String(row.pono || row.purchase_order || '') !== pono) return;
             if (String(row.poitem || row.po_item || '') !== item) return;
-            const q = nVal(row.reqqty);
+            const q = nVal(row.reqqty) ?? nVal(row.ReqBOMQuantity);
             if (q !== null) total += q;
         });
+        if (total === 0) {
+            total = nVal(r.reqqty) || nVal(r.tot_poqty) || nVal(r.order_qty) || 1;
+        }
         return total;
     }
 
     function explainFor(key, r) {
-        const soQty = nVal(r.so_qty) ?? nVal(r.prwise_so_qty);
-        const prSo = nVal(r.prwise_so_qty) ?? soQty;
-        const cons = nVal(r.consumption);
-        const req = nVal(r.reqqty);
-        const totPo = nVal(r.tot_poqty);
-        const soPoQty = nVal(r.so_wise_poqty);
-        const soPoVal = nVal(r.so_wise_po_val);
-        const porate = nVal(r.porate);
-        const conv = nVal(r.conv) ?? 1;
-        const budget = nVal(r.budget_cost_per_gmt);
-        const actual = nVal(r.actual_cost);
-        const totValue = nVal(r.totvalue ?? r.net_value);
-        const budgetCons = nVal(r.budgeted_cons);
-        const budgetInr = nVal(r.budget_inr);
-        const budgetConv = nVal(r.budget_conv_rt);
-        const poCur = String(r.po_currency || r.currency || '—');
-        const budCur = String(r.budget_currency || '—');
-        const buom = String(r.buom || '—');
+        const soQty = nVal(r.so_qty) ?? nVal(r.prwise_so_qty) ?? nVal(r.tot_poqty) ?? nVal(r.order_qty) ?? nVal(r.po_qty);
+        const prSo = nVal(r.prwise_so_qty) ?? nVal(r.so_qty) ?? soQty;
+        const cons = nVal(r.consumption) ?? nVal(r.budgeted_cons) ?? nVal(r.gross) ?? nVal(r.net) ?? (prSo && nVal(r.reqqty) ? nVal(r.reqqty) / prSo : 1);
+        const req = nVal(r.reqqty) ?? (prSo !== null && cons !== null ? prSo * cons : nVal(r.tot_poqty) ?? nVal(r.order_qty));
+        const totPo = nVal(r.tot_poqty) ?? nVal(r.order_qty) ?? nVal(r.po_qty);
+        const soPoQty = nVal(r.so_wise_poqty) ?? totPo;
+        const porate = nVal(r.porate) ?? nVal(r.po_unit_cost) ?? nVal(r.net_price) ?? (totPo && nVal(r.totvalue ?? r.net_value) ? (nVal(r.totvalue ?? r.net_value) / totPo) : null);
+        const conv = nVal(r.conv) ?? nVal(r.convr) ?? nVal(r.budget_conv_rt) ?? 1;
+        const budget = nVal(r.budget_cost_per_gmt) ?? nVal(r.expected_unit_cost) ?? nVal(r.rate);
+        const actual = nVal(r.actual_cost) ?? (porate !== null ? porate * conv * (cons ?? 1) : nVal(r.po_unit_cost));
+        const totValue = nVal(r.totvalue ?? r.net_value) ?? (porate !== null && totPo !== null ? porate * totPo : null);
+        const soPoVal = nVal(r.so_wise_po_val) ?? (porate !== null && soPoQty !== null ? porate * soPoQty * conv : totValue);
+        const budgetCons = nVal(r.budgeted_cons) ?? nVal(r.gross) ?? nVal(r.net) ?? cons;
+        const budgetInr = nVal(r.budget_inr) ?? nVal(r.cost_total_inr) ?? nVal(r.total_inr) ?? (budget !== null && totPo !== null ? budget * totPo : null);
+        const budgetConv = nVal(r.budget_conv_rt) ?? nVal(r.convr) ?? conv;
+        const poCur = String(r.po_currency || r.currency || 'INR');
+        const budCur = String(r.budget_currency || r.curunit || r.quoted_currency || 'INR');
+        const buom = String(r.buom || r.ouom || r.unit || 'EA');
         const totalReq = totalReqForItem(r);
         const withinBudget =
             budget !== null && actual !== null && actual <= budget
@@ -324,20 +329,6 @@
                         ? `${fmtStep(porate, 4)} × ${fmtStep(conv, 4)} × ${fmtStep(cons, 4)}\n= ${fmtStep(actual ?? porate * conv * (cons ?? 1), 4)}`
                         : `= ${fmtStep(actual, 4)}`,
             },
-            cost_matrix: {
-                title: 'zCOST Matrix',
-                desc: 'Budget cost per GMT vs Actual cost side by side',
-                example: 'Green when actual stays within budget; review when actual is higher.',
-                steps: [
-                    { label: 'Budget / GMT', value: fmtStep(budget, 4) },
-                    { label: 'Actual cost', value: fmtStep(actual, 4) },
-                ],
-                resultLabel: 'zCOST Matrix',
-                resultExpr:
-                    budget !== null && actual !== null
-                        ? `Budget ${fmtStep(budget, 4)}  ·  Actual ${fmtStep(actual, 4)}`
-                        : '—',
-            },
             variance_pct: {
                 title: 'Variance %',
                 desc: '(Actual − Budget) ÷ Budget × 100',
@@ -355,21 +346,6 @@
             },
         };
         return defs[key] || null;
-    }
-
-    function costMatrixHtml(r) {
-        const budget = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost);
-        const actual = nVal(r.actual_cost ?? r.po_unit_cost);
-        if (budget === null && actual === null) return '—';
-        const max = Math.max(budget || 0, actual || 0, 0.0001);
-        const bPct = Math.max(4, Math.round(((budget || 0) / max) * 100));
-        const aPct = Math.max(4, Math.round(((actual || 0) / max) * 100));
-        const ok = budget !== null && actual !== null && actual <= budget;
-        const tone = ok ? 'is-ok' : 'is-over';
-        return `<div class="pcw-cost-matrix ${tone}">
-            <div class="pcw-cost-matrix-row"><span>B</span><i style="width:${bPct}%"></i><strong>${esc(fmtStep(budget, 4))}</strong></div>
-            <div class="pcw-cost-matrix-row"><span>A</span><i style="width:${aPct}%"></i><strong>${esc(fmtStep(actual, 4))}</strong></div>
-        </div>`;
     }
 
     function closeFormulaPop() {
@@ -449,10 +425,14 @@
     }
 
     function closeCardDetailModal() {
-        const modal = $('pcwCardDetailModal');
-        const backdrop = $('pcwCardDetailBackdrop');
-        if (modal) modal.hidden = true;
-        if (backdrop) backdrop.hidden = true;
+        const shell = $('pcwCardDetailModal');
+        if (!shell) return;
+        shell.classList.remove('is-open');
+        shell.setAttribute('aria-hidden', 'true');
+        document.body.classList.remove('pcw-card-offcanvas-open');
+        window.setTimeout(() => {
+            if (!shell.classList.contains('is-open')) shell.hidden = true;
+        }, 280);
     }
 
     function filterTableByStatus(status) {
@@ -469,11 +449,16 @@
         }
     }
 
+    function detailSourceRows() {
+        return rows.filter((r) => !isFooterRow(r));
+    }
+
     function openCardDetailModal(cardKey) {
-        const s = summarizeRows(rows);
-        const modal = $('pcwCardDetailModal');
-        const backdrop = $('pcwCardDetailBackdrop');
-        if (!modal || !backdrop) return;
+        const detailRows = detailSourceRows();
+        const s = summarizeRows(detailRows);
+        const shell = $('pcwCardDetailModal');
+        const panel = $('pcwCardOffcanvasPanel');
+        if (!shell || !panel) return;
 
         let icon = 'analytics';
         let subtitle = 'PO DATA Card Details';
@@ -486,6 +471,7 @@
         let rowsHtml = '';
         let showFilterBtn = false;
         let filterStatus = '';
+        let rowCount = 0;
 
         const curr = s.currency || 'INR';
         const uom = s.unit || '';
@@ -496,15 +482,15 @@
             icon = 'rule';
             subtitle = 'Validation Overview';
             title = 'Total Validation Lines';
-            val = fmt(s.total_records || rows.length);
+            val = fmt(s.total_records || detailRows.length);
             formula = 'Total Lines = Count of all item rows evaluated in Purchase Order';
             stepsHtml = `
                 <div class="pcw-cdm-step-item"><span>Passed Lines</span><strong>${fmt(s.passed)}</strong></div>
                 <div class="pcw-cdm-step-item"><span>Exception Lines</span><strong>${fmt(s.exceptions)}</strong></div>
                 <div class="pcw-cdm-step-item"><span>Needs Review Lines</span><strong>${fmt(s.needs_review)}</strong></div>
-                <div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Evaluated</span><strong>${fmt(s.total_records || rows.length)}</strong></div>
+                <div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Evaluated</span><strong>${fmt(s.total_records || detailRows.length)}</strong></div>
             `;
-            rowsHtml = rows.map((r, i) => `<tr>
+            rowsHtml = detailRows.map((r, i) => `<tr>
                 <td>#${esc(r.poitem || (i + 1))}</td>
                 <td><strong>${esc(r.material)}</strong><br><small style="color:#64748b;">${esc(r.mat_desc || '')}</small></td>
                 <td class="num">${qty(r.tot_poqty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
@@ -512,6 +498,7 @@
                 <td class="num">₹${money(r.totvalue ?? ((r.porate ?? r.po_unit_cost ?? 0) * (r.tot_poqty || 1)))}</td>
                 <td>${statusPill(r.status)}</td>
             </tr>`).join('');
+            rowCount = detailRows.length;
         } else if (cardKey === 'status_pass') {
             icon = 'check_circle';
             subtitle = 'Validation Overview';
@@ -520,19 +507,20 @@
             formula = 'Passed Lines = PO lines where Actual PO Rate ≤ Budget Cost per GMT';
             showFilterBtn = true;
             filterStatus = 'PASS';
-            const passRows = rows.filter(r => String(r.status).toUpperCase() === 'PASS');
+            const passRows = detailRows.filter(r => String(r.status).toUpperCase() === 'PASS');
             stepsHtml = `
                 <div class="pcw-cdm-step-item"><span>Condition</span><strong>Actual Cost ≤ Budget Cost per GMT</strong></div>
-                <div class="pcw-cdm-step-item"><span>Total Passed Lines</span><strong>${fmt(s.passed)} of ${fmt(rows.length)}</strong></div>
+                <div class="pcw-cdm-step-item"><span>Total Passed Lines</span><strong>${fmt(s.passed)} of ${fmt(detailRows.length)}</strong></div>
             `;
             rowsHtml = passRows.map((r, i) => `<tr>
-                <td>#${esc(r.poitem || (i + 1))}</td>
+                <td>#${esc(r.poitem || r.po_item || r.item || (i + 1))}</td>
                 <td><strong>${esc(r.material)}</strong><br><small style="color:#64748b;">${esc(r.mat_desc || '')}</small></td>
-                <td class="num">${qty(r.tot_poqty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">${qty(r.tot_poqty || r.order_qty || r.po_qty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
                 <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
-                <td class="num">₹${money(r.totvalue)}</td>
+                <td class="num">₹${money(r.totvalue ?? r.net_value ?? ((r.porate ?? r.po_unit_cost ?? 0) * (r.tot_poqty || r.order_qty || 1)))}</td>
                 <td>${statusPill(r.status)}</td>
             </tr>`).join('');
+            rowCount = passRows.length;
         } else if (cardKey === 'status_fail') {
             icon = 'error';
             subtitle = 'Validation Overview';
@@ -541,19 +529,20 @@
             formula = 'Exceptions = PO lines exceeding budget cost or missing valid costing link';
             showFilterBtn = true;
             filterStatus = 'EXCEPTION';
-            const failRows = rows.filter(r => String(r.status).toUpperCase() !== 'PASS' && String(r.status).toUpperCase() !== 'NEEDS_REVIEW');
+            const failRows = detailRows.filter(r => String(r.status).toUpperCase() !== 'PASS' && String(r.status).toUpperCase() !== 'NEEDS_REVIEW');
             stepsHtml = `
                 <div class="pcw-cdm-step-item"><span>Condition</span><strong>PO Rate > Budget or Unmatched in zCOST</strong></div>
-                <div class="pcw-cdm-step-item"><span>Total Exception Lines</span><strong>${fmt(s.exceptions)} of ${fmt(rows.length)}</strong></div>
+                <div class="pcw-cdm-step-item"><span>Total Exception Lines</span><strong>${fmt(s.exceptions)} of ${fmt(detailRows.length)}</strong></div>
             `;
             rowsHtml = failRows.map((r, i) => `<tr>
-                <td>#${esc(r.poitem || (i + 1))}</td>
+                <td>#${esc(r.poitem || r.po_item || r.item || (i + 1))}</td>
                 <td><strong>${esc(r.material)}</strong><br><small style="color:#64748b;">${esc(r.mat_desc || '')}</small></td>
-                <td class="num">${qty(r.tot_poqty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">${qty(r.tot_poqty || r.order_qty || r.po_qty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
                 <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
-                <td class="num">₹${money(r.totvalue)}</td>
+                <td class="num">₹${money(r.totvalue ?? r.net_value ?? ((r.porate ?? r.po_unit_cost ?? 0) * (r.tot_poqty || r.order_qty || 1)))}</td>
                 <td>${statusPill(r.status)}</td>
             </tr>`).join('');
+            rowCount = failRows.length;
         } else if (cardKey === 'status_review') {
             icon = 'rate_review';
             subtitle = 'Validation Overview';
@@ -562,19 +551,20 @@
             formula = 'Needs Review = PO lines with zero budget rate or uncertain match requiring review';
             showFilterBtn = true;
             filterStatus = 'NEEDS_REVIEW';
-            const revRows = rows.filter(r => String(r.status).toUpperCase() === 'NEEDS_REVIEW');
+            const revRows = detailRows.filter(r => String(r.status).toUpperCase() === 'NEEDS_REVIEW');
             stepsHtml = `
                 <div class="pcw-cdm-step-item"><span>Condition</span><strong>Rate is zero or uncertain mapping</strong></div>
-                <div class="pcw-cdm-step-item"><span>Total Needs Review</span><strong>${fmt(s.needs_review)} of ${fmt(rows.length)}</strong></div>
+                <div class="pcw-cdm-step-item"><span>Total Needs Review</span><strong>${fmt(s.needs_review)} of ${fmt(detailRows.length)}</strong></div>
             `;
             rowsHtml = revRows.map((r, i) => `<tr>
-                <td>#${esc(r.poitem || (i + 1))}</td>
+                <td>#${esc(r.poitem || r.po_item || r.item || (i + 1))}</td>
                 <td><strong>${esc(r.material)}</strong><br><small style="color:#64748b;">${esc(r.mat_desc || '')}</small></td>
-                <td class="num">${qty(r.tot_poqty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">${qty(r.tot_poqty || r.order_qty || r.po_qty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
                 <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
-                <td class="num">₹${money(r.totvalue)}</td>
+                <td class="num">₹${money(r.totvalue ?? r.net_value ?? ((r.porate ?? r.po_unit_cost ?? 0) * (r.tot_poqty || r.order_qty || 1)))}</td>
                 <td>${statusPill(r.status)}</td>
             </tr>`).join('');
+            rowCount = revRows.length;
         } else if (cardKey === 'po_items') {
             icon = 'format_list_numbered';
             subtitle = 'PO DATA';
@@ -582,21 +572,22 @@
             val = fmt(s.po_items);
             formula = 'Total Items = Count of unique PO Item numbers (distinct poitem)';
             const seenIt = {};
-            const distItems = rows.filter(r => {
-                const it = String(r.poitem || r.po_item || '').trim();
+            const distItems = detailRows.filter(r => {
+                const it = String(r.poitem || r.po_item || r.item || '').trim();
                 if (it && !seenIt[it]) { seenIt[it] = true; return true; }
                 return false;
             });
-            stepsHtml = distItems.map(r => `<div class="pcw-cdm-step-item"><span>PO Item #${esc(r.poitem || r.po_item)} (${esc(r.material)})</span><strong>Qty: ${qty(r.tot_poqty || 0)} · Value: ₹${money(r.totvalue)}</strong></div>`).join('')
+            stepsHtml = distItems.map(r => `<div class="pcw-cdm-step-item"><span>PO Item #${esc(r.poitem || r.po_item || r.item)} (${esc(r.material)})</span><strong>Qty: ${qty(r.tot_poqty || r.order_qty || 0)} · Value: ₹${money(r.totvalue ?? r.net_value ?? ((r.porate ?? r.po_unit_cost ?? 0) * (r.tot_poqty || r.order_qty || 1)))}</strong></div>`).join('')
                 + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Unique Items</span><strong>${fmt(s.po_items)}</strong></div>`;
             rowsHtml = distItems.map(r => `<tr>
-                <td>#${esc(r.poitem || r.po_item)}</td>
+                <td>#${esc(r.poitem || r.po_item || r.item)}</td>
                 <td><strong>${esc(r.material)}</strong><br><small style="color:#64748b;">${esc(r.mat_desc || '')}</small></td>
-                <td class="num">${qty(r.tot_poqty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">${qty(r.tot_poqty || r.order_qty || 0)} ${esc(r.ouom || uom)}</td>
                 <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
-                <td class="num">₹${money(r.totvalue)}</td>
+                <td class="num">₹${money(r.totvalue ?? r.net_value ?? ((r.porate ?? r.po_unit_cost ?? 0) * (r.tot_poqty || r.order_qty || 1)))}</td>
                 <td>${statusPill(r.status)}</td>
             </tr>`).join('');
+            rowCount = distItems.length;
         } else if (cardKey === 'po_materials') {
             icon = 'category';
             subtitle = 'PO DATA';
@@ -604,7 +595,7 @@
             val = fmt(s.materials);
             formula = 'Total Material = Count of distinct Material Codes across PO lines';
             const seenMat = {};
-            const distMats = rows.filter(r => {
+            const distMats = detailRows.filter(r => {
                 const m = String(r.material || '').trim();
                 if (m && !seenMat[m]) { seenMat[m] = true; return true; }
                 return false;
@@ -612,13 +603,14 @@
             stepsHtml = distMats.map(r => `<div class="pcw-cdm-step-item"><span>${esc(r.material)}</span><strong>${esc(r.mat_desc || r.maktx || '')}</strong></div>`).join('')
                 + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Unique Materials</span><strong>${fmt(s.materials)}</strong></div>`;
             rowsHtml = distMats.map(r => `<tr>
-                <td>#${esc(r.poitem || 1)}</td>
+                <td>#${esc(r.poitem || r.po_item || r.item || 1)}</td>
                 <td><strong>${esc(r.material)}</strong><br><small style="color:#64748b;">${esc(r.mat_desc || '')}</small></td>
-                <td class="num">${qty(r.tot_poqty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">${qty(r.tot_poqty || r.order_qty || 0)} ${esc(r.ouom || uom)}</td>
                 <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
-                <td class="num">₹${money(r.totvalue)}</td>
+                <td class="num">₹${money(r.totvalue ?? r.net_value ?? ((r.porate ?? r.po_unit_cost ?? 0) * (r.tot_poqty || r.order_qty || 1)))}</td>
                 <td>${statusPill(r.status)}</td>
             </tr>`).join('');
+            rowCount = distMats.length;
         } else if (cardKey === 'po_so_qty') {
             icon = 'inventory_2';
             subtitle = 'PO DATA';
@@ -627,21 +619,22 @@
             unit = uom;
             formula = 'Total SO Qty = ∑ (PO Order Quantity across unique items)';
             const seenIt = {};
-            const itRows = rows.filter(r => {
-                const it = String(r.poitem || r.po_item || '').trim();
+            const itRows = detailRows.filter(r => {
+                const it = String(r.poitem || r.po_item || r.item || '').trim();
                 if (it && !seenIt[it]) { seenIt[it] = true; return true; }
                 return !it;
             });
-            stepsHtml = itRows.map(r => `<div class="pcw-cdm-step-item"><span>PO Item #${esc(r.poitem || r.po_item)}</span><strong>${qty(r.tot_poqty || r.order_qty || 0)} ${esc(r.ouom || uom)}</strong></div>`).join('')
+            stepsHtml = itRows.map(r => `<div class="pcw-cdm-step-item"><span>PO Item #${esc(r.poitem || r.po_item || r.item)}</span><strong>${qty(r.tot_poqty || r.order_qty || 0)} ${esc(r.ouom || uom)}</strong></div>`).join('')
                 + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Order Qty</span><strong>${fmt(s.total_order_qty || s.total_so_qty)} ${esc(uom)}</strong></div>`;
-            rowsHtml = rows.map((r, i) => `<tr>
-                <td>#${esc(r.poitem || (i + 1))}</td>
+            rowsHtml = detailRows.map((r, i) => `<tr>
+                <td>#${esc(r.poitem || r.po_item || r.item || (i + 1))}</td>
                 <td><strong>${esc(r.material)}</strong><br><small style="color:#64748b;">SO: ${esc(r.salordno || r.sales_order || '—')}</small></td>
-                <td class="num">${qty(r.tot_poqty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">${qty(r.tot_poqty || r.order_qty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
                 <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
-                <td class="num">₹${money(r.totvalue)}</td>
+                <td class="num">₹${money(r.totvalue ?? r.net_value ?? ((r.porate ?? r.po_unit_cost ?? 0) * (r.tot_poqty || 1)))}</td>
                 <td>${statusPill(r.status)}</td>
             </tr>`).join('');
+            rowCount = detailRows.length;
         } else if (cardKey === 'po_value') {
             icon = 'payments';
             subtitle = 'PO DATA';
@@ -650,53 +643,55 @@
             unit = curr;
             formula = 'Total Net Value = ∑ (PO Order Quantity × PO Unit Rate)';
             const seenIt = {};
-            const itRows = rows.filter(r => {
-                const it = String(r.poitem || r.po_item || '').trim();
+            const itRows = detailRows.filter(r => {
+                const it = String(r.poitem || r.po_item || r.item || '').trim();
                 if (it && !seenIt[it]) { seenIt[it] = true; return true; }
                 return !it;
             });
-            stepsHtml = itRows.map(r => `<div class="pcw-cdm-step-item"><span>PO Item #${esc(r.poitem || r.po_item)} (${qty(r.tot_poqty || 0)} × ₹${fmtDec(r.porate ?? r.po_unit_cost, 2)})</span><strong>₹${money(r.totvalue)}</strong></div>`).join('')
+            stepsHtml = itRows.map(r => `<div class="pcw-cdm-step-item"><span>PO Item #${esc(r.poitem || r.po_item || r.item)} (${qty(r.tot_poqty || r.order_qty || 0)} × ₹${fmtDec(r.porate ?? r.po_unit_cost, 2)})</span><strong>₹${money(r.totvalue ?? r.net_value ?? ((r.porate ?? r.po_unit_cost ?? 0) * (r.tot_poqty || 1)))}</strong></div>`).join('')
                 + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Net Value</span><strong>₹${fmt(s.total_po_value)} ${esc(curr)}</strong></div>`;
-            rowsHtml = rows.map((r, i) => `<tr>
-                <td>#${esc(r.poitem || (i + 1))}</td>
+            rowsHtml = detailRows.map((r, i) => `<tr>
+                <td>#${esc(r.poitem || r.po_item || r.item || (i + 1))}</td>
                 <td><strong>${esc(r.material)}</strong><br><small style="color:#64748b;">${esc(r.mat_desc || '')}</small></td>
-                <td class="num">${qty(r.tot_poqty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">${qty(r.tot_poqty || r.order_qty || 0)} ${esc(r.ouom || uom)}</td>
                 <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
-                <td class="num">₹${money(r.totvalue)}</td>
+                <td class="num">₹${money(r.totvalue ?? r.net_value ?? ((r.porate ?? r.po_unit_cost ?? 0) * (r.tot_poqty || 1)))}</td>
                 <td>${statusPill(r.status)}</td>
             </tr>`).join('');
+            rowCount = detailRows.length;
         } else if (cardKey === 'zcost_items') {
             icon = 'format_list_numbered';
             subtitle = 'zCOST DATA (MATCHED ONLY)';
             title = 'Total Items';
             val = fmt(s.zcost_items);
             formula = 'zCOST Items = Count of PO items with a confirmed zCOST match (unmatched excluded)';
-            const matchedRows = rows.filter(isMatchedRow);
+            const matchedRows = detailRows.filter(isMatchedRow);
             const seenZ = {};
             const distZ = matchedRows.filter(r => {
-                const it = String(r.poitem || r.po_item || '').trim();
+                const it = String(r.poitem || r.po_item || r.item || '').trim();
                 if (it && !seenZ[it]) { seenZ[it] = true; return true; }
                 return false;
             });
             stepsHtml = distZ.length
-                ? distZ.map(r => `<div class="pcw-cdm-step-item"><span>PO Item #${esc(r.poitem)} Matched to zCOST Line</span><strong>${esc(r.maktx || r.cost_description || 'Matched')}</strong></div>`).join('')
+                ? distZ.map(r => `<div class="pcw-cdm-step-item"><span>PO Item #${esc(r.poitem || r.po_item || r.item)} Matched to zCOST Line</span><strong>${esc(r.maktx || r.cost_description || 'Matched')}</strong></div>`).join('')
                     + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Matched Items</span><strong>${fmt(s.zcost_items)}</strong></div>`
                 : '<div class="pcw-cdm-step-item"><span>No matched items</span><strong>0</strong></div>';
             rowsHtml = distZ.map(r => `<tr>
-                <td>#${esc(r.poitem)}</td>
+                <td>#${esc(r.poitem || r.po_item || r.item)}</td>
                 <td><strong>${esc(r.material)}</strong><br><small style="color:#4338ca;">zCOST: ${esc(r.maktx || r.cost_description || '—')}</small></td>
-                <td class="num">${qty(r.tot_poqty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">${qty(r.tot_poqty || r.order_qty || 0)} ${esc(r.ouom || uom)}</td>
                 <td class="num">₹${fmtDec(r.budget_cost_per_gmt ?? r.expected_unit_cost, 4)}</td>
-                <td class="num">₹${money((r.budget_cost_per_gmt ?? r.expected_unit_cost) * (r.tot_poqty || 1))}</td>
+                <td class="num">₹${money((r.budget_cost_per_gmt ?? r.expected_unit_cost) * (r.tot_poqty || r.order_qty || 1))}</td>
                 <td>${statusPill(r.status)}</td>
             </tr>`).join('');
+            rowCount = distZ.length;
         } else if (cardKey === 'zcost_materials') {
             icon = 'category';
             subtitle = 'zCOST DATA (MATCHED ONLY)';
             title = 'Total Material';
             val = fmt(s.zcost_materials);
             formula = 'zCOST Material = Count of distinct PO materials with a confirmed zCOST match (unmatched excluded)';
-            const matchedRows = rows.filter(isMatchedRow);
+            const matchedRows = detailRows.filter(isMatchedRow);
             const seenMat = {};
             const distMats = matchedRows.filter(r => {
                 const m = String(r.material || '').trim();
@@ -708,13 +703,14 @@
                     + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Matched Materials</span><strong>${fmt(s.zcost_materials)}</strong></div>`
                 : '<div class="pcw-cdm-step-item"><span>No matched materials</span><strong>0</strong></div>';
             rowsHtml = distMats.map(r => `<tr>
-                <td>#${esc(r.poitem || 1)}</td>
+                <td>#${esc(r.poitem || r.po_item || r.item || 1)}</td>
                 <td><strong>${esc(r.material)}</strong><br><small style="color:#4338ca;">${esc(r.maktx || r.cost_description || '')}</small></td>
-                <td class="num">${qty(r.tot_poqty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">${qty(r.tot_poqty || r.order_qty || 0)} ${esc(r.ouom || uom)}</td>
                 <td class="num">₹${fmtDec(r.budget_cost_per_gmt ?? r.expected_unit_cost, 4)}</td>
-                <td class="num">₹${money((r.budget_cost_per_gmt ?? r.expected_unit_cost) * (r.tot_poqty || 1))}</td>
+                <td class="num">₹${money((r.budget_cost_per_gmt ?? r.expected_unit_cost) * (r.tot_poqty || r.order_qty || 1))}</td>
                 <td>${statusPill(r.status)}</td>
             </tr>`).join('');
+            rowCount = distMats.length;
         } else if (cardKey === 'zcost_so_qty') {
             icon = 'inventory_2';
             subtitle = 'zCOST DATA (MATCHED ONLY)';
@@ -722,25 +718,26 @@
             val = fmt(s.zcost_so_qty);
             unit = uom;
             formula = 'zCOST SO Qty = ∑ (Order Quantity of MATCHED PO items only, unmatched excluded)';
-            const matchedRows = rows.filter(isMatchedRow);
+            const matchedRows = detailRows.filter(isMatchedRow);
             const seenIt = {};
             const itRows = matchedRows.filter(r => {
-                const it = String(r.poitem || r.po_item || '').trim();
+                const it = String(r.poitem || r.po_item || r.item || '').trim();
                 if (it && !seenIt[it]) { seenIt[it] = true; return true; }
                 return !it;
             });
             stepsHtml = itRows.length
-                ? itRows.map(r => `<div class="pcw-cdm-step-item"><span>Matched Item #${esc(r.poitem)}</span><strong>${qty(r.tot_poqty || r.order_qty || 0)} ${esc(r.ouom || uom)}</strong></div>`).join('')
+                ? itRows.map(r => `<div class="pcw-cdm-step-item"><span>Matched Item #${esc(r.poitem || r.po_item || r.item)}</span><strong>${qty(r.tot_poqty || r.order_qty || 0)} ${esc(r.ouom || uom)}</strong></div>`).join('')
                     + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Matched Qty</span><strong>${fmt(s.zcost_so_qty)} ${esc(uom)}</strong></div>`
                 : '<div class="pcw-cdm-step-item"><span>No matched quantity</span><strong>0</strong></div>';
             rowsHtml = matchedRows.map((r, i) => `<tr>
-                <td>#${esc(r.poitem || (i + 1))}</td>
+                <td>#${esc(r.poitem || r.po_item || r.item || (i + 1))}</td>
                 <td><strong>${esc(r.material)}</strong><br><small style="color:#4338ca;">zCOST: ${esc(r.maktx || r.cost_description || '—')}</small></td>
-                <td class="num">${qty(r.tot_poqty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">${qty(r.tot_poqty || r.order_qty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
                 <td class="num">₹${fmtDec(r.budget_cost_per_gmt ?? r.expected_unit_cost, 4)}</td>
-                <td class="num">₹${money((r.budget_cost_per_gmt ?? r.expected_unit_cost) * (r.tot_poqty || 1))}</td>
+                <td class="num">₹${money((r.budget_cost_per_gmt ?? r.expected_unit_cost) * (r.tot_poqty || r.order_qty || 1))}</td>
                 <td>${statusPill(r.status)}</td>
             </tr>`).join('');
+            rowCount = matchedRows.length;
         } else if (cardKey === 'zcost_value') {
             icon = 'payments';
             subtitle = 'zCOST DATA (MATCHED ONLY)';
@@ -748,12 +745,12 @@
             val = fmt(s.zcost_net_value);
             unit = curr;
             formula = 'zCOST Net Value = ∑ (Cost Quantity × Budget Cost per GMT) for MATCHED items only';
-            const matchedRows = rows.filter(isMatchedRow);
+            const matchedRows = detailRows.filter(isMatchedRow);
             stepsHtml = matchedRows.length
                 ? matchedRows.map(r => {
                     const b = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost) || 0;
                     const q = Number(r.tot_poqty || r.order_qty || 1);
-                    return `<div class="pcw-cdm-step-item"><span>Item #${esc(r.poitem)} (${qty(q)} × ₹${fmtDec(b, 4)})</span><strong>₹${money(b * q)}</strong></div>`;
+                    return `<div class="pcw-cdm-step-item"><span>Item #${esc(r.poitem || r.po_item || r.item)} (${qty(q)} × ₹${fmtDec(b, 4)})</span><strong>₹${money(b * q)}</strong></div>`;
                 }).join('')
                 + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Expected Budget</span><strong>₹${fmt(s.zcost_net_value)} ${esc(curr)}</strong></div>`
                 : '<div class="pcw-cdm-step-item"><span>No matched value</span><strong>₹0</strong></div>';
@@ -761,7 +758,7 @@
                 const b = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost) || 0;
                 const q = Number(r.tot_poqty || r.order_qty || 1);
                 return `<tr>
-                    <td>#${esc(r.poitem || (i + 1))}</td>
+                    <td>#${esc(r.poitem || r.po_item || r.item || (i + 1))}</td>
                     <td><strong>${esc(r.material)}</strong><br><small style="color:#4338ca;">zCOST: ${esc(r.maktx || r.cost_description || '—')}</small></td>
                     <td class="num">${qty(q)} ${esc(r.ouom || uom)}</td>
                     <td class="num">₹${fmtDec(b, 4)}</td>
@@ -769,9 +766,11 @@
                     <td>${statusPill(r.status)}</td>
                 </tr>`;
             }).join('');
+            rowCount = matchedRows.length;
         }
 
         const isZcost = String(cardKey || '').startsWith('zcost_');
+        const isStatus = String(cardKey || '').startsWith('status_');
         const thRate = isZcost ? 'Budget Rate' : 'PO Rate';
         const thVal = isZcost ? 'Budget Value' : 'Net Value';
         if ($('pcwCardModalTableHead')) {
@@ -785,6 +784,9 @@
             `;
         }
 
+        panel.classList.remove('is-po', 'is-zcost', 'is-status');
+        panel.classList.add(isZcost ? 'is-zcost' : (isStatus ? 'is-status' : 'is-po'));
+
         $('pcwCardModalIcon').textContent = icon;
         $('pcwCardModalSubtitle').textContent = subtitle;
         $('pcwCardModalTitle').textContent = title;
@@ -793,7 +795,10 @@
         $('pcwCardModalFormula').textContent = formula;
         $('pcwCardModalSteps').innerHTML = stepsHtml || '<p style="color:#64748b; margin:0;">Standard aggregation across active records.</p>';
         $('pcwCardModalTableBody').innerHTML = rowsHtml || '<tr><td colspan="6" style="text-align:center; color:#94a3b8; padding:20px;">No rows found for this metric.</td></tr>';
-        $('pcwCardModalTableCount').textContent = `Showing ${tableTitle}`;
+        $('pcwCardModalTableCount').textContent = `${rowCount} row${rowCount === 1 ? '' : 's'}`;
+        if ($('pcwCardModalTableTitle')) {
+            $('pcwCardModalTableTitle').textContent = tableTitle;
+        }
 
         const filterBtn = $('pcwCardModalFilterBtn');
         if (filterBtn) {
@@ -809,8 +814,12 @@
             }
         }
 
-        modal.hidden = false;
-        backdrop.hidden = false;
+        shell.hidden = false;
+        shell.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('pcw-card-offcanvas-open');
+        requestAnimationFrame(() => {
+            shell.classList.add('is-open');
+        });
     }
 
     function showSpinner(on) {
@@ -863,19 +872,33 @@
         if (btn) btn.disabled = !canPass;
     }
 
+    function isFooterRow(r) {
+        const kind = String(r?.row_kind || '');
+        return kind === 'footer' || kind === 'charge' || kind === 'tax';
+    }
+
     function isMatchedRow(r) {
-        if (!r) return false;
+        if (!r || isFooterRow(r)) return false;
+        if (r.manual_match || r.matched_line_key || r.cost_item || r.maktx) {
+            const budget = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost);
+            return budget !== null && budget > 0;
+        }
         if (r.needs_manual_match === true) return false;
-        if (r.manual_match) return true;
-        const hasMatch = !!(r.maktx || r.cost_description || r.cost_item || r.item || r.matched_line_key);
-        if (!hasMatch) return false;
         const budget = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost);
-        if (budget === null || budget <= 0) return false;
+        const actual = nVal(r.actual_cost ?? r.po_unit_cost);
+        if (budget === null || budget <= 0 || actual === null) return false;
         const st = String(r.status || '').toUpperCase();
         if (st === 'EXCEPTION' && /no matching|no linked|cannot load|no budget/i.test(String(r.validation_result || ''))) {
             return false;
         }
+        // TEMPFIN budget/actual present but no explicit zCOST ITEM yet — still countable
         return true;
+    }
+
+    function needsZcostItemPick(r) {
+        if (!r || isFooterRow(r)) return false;
+        if (r._editingMatch) return true;
+        return !(r.manual_match || r.matched_line_key || r.cost_item || r.maktx);
     }
 
     function summarizeRows(list) {
@@ -901,6 +924,7 @@
         let zcostExpected = 0;
 
         (list || []).forEach((r) => {
+            if (isFooterRow(r)) return;
             const st = String(r.status || '').toUpperCase();
             if (st === 'PASS') passed += 1;
             else if (st === 'NEEDS_REVIEW') needsReview += 1;
@@ -1069,6 +1093,9 @@
         else if (st === 'NEEDS_REVIEW') {
             cls = 'is-review';
             label = 'NEEDS REVIEW';
+        } else if (st === 'FOOTER') {
+            cls = 'is-footer';
+            label = '—';
         }
         return `<span class="pcw-pill ${cls}">${esc(label)}</span>`;
     }
@@ -1100,11 +1127,40 @@
     }
 
     function needsManualMatch(r) {
-        return !isMatchedRow(r);
+        if (!r || isFooterRow(r)) return false;
+        return needsZcostItemPick(r) || !isMatchedRow(r);
     }
 
     function needsDropdown(r) {
         return needsManualMatch(r);
+    }
+
+    function zcostSelectHtml(r, index) {
+        const cands = candidateLinesForRow(r || {});
+        const selectedKey = String(r.matched_line_key || '');
+        const options = [`<option value="">Select zCOST ITEM…</option>`].concat(
+            cands.slice(0, 80).map((line) => {
+                const globalIdx = (costLines || []).indexOf(line);
+                const key = lineKey(line, globalIdx >= 0 ? globalIdx : 0);
+                const rate = nVal(line.rate) ?? nVal(line.purp);
+                const label = [
+                    line.item || line.material || '—',
+                    line.maktx || line.description || '',
+                    line.section || '',
+                    rate !== null ? `₹${fmtStep(rate, 2)}` : '',
+                ].filter(Boolean).join(' · ');
+                const sel = key === selectedKey ? ' selected' : '';
+                return `<option value="${esc(key)}"${sel}>${esc(label)}</option>`;
+            })
+        );
+        const emptyHint = !costLines.length
+            ? ' title="No zCOST candidates loaded for this PO"'
+            : (!cands.length ? ' title="No zCOST lines for this material type"' : '');
+        return `<div class="pcw-zcost-dd-wrap"${emptyHint}>
+            <select class="pcw-zcost-select" data-idx="${index}" aria-label="Match zCOST line for row ${index + 1}">
+                ${options.join('')}
+            </select>
+        </div>`;
     }
 
     function lineKey(line, i) {
@@ -1203,6 +1259,8 @@
         if (!key) {
             targetRow.cost_item = '';
             targetRow.item = '';
+            targetRow.costing_item_no = '';
+            targetRow.costing_quotation_no = '';
             targetRow.maktx = '';
             targetRow.manual_match = false;
             targetRow.needs_manual_match = true;
@@ -1318,8 +1376,12 @@
             result = 'PASS — manually matched to zCOST line';
         }
 
-        r.cost_item = String(line.item || '');
+        r.cost_item = String(line.item || line.costing_item_no || '');
         r.item = r.cost_item;
+        r.costing_item_no = String(line.costing_item_no || line.item || '');
+        r.costing_quotation_no = String(
+            line.costing_quotation_no || line.quotation_no || line.parent_quotation_no || ''
+        );
         r.maktx = String(line.maktx || line.description || '');
         r.cost_description = r.maktx;
         r.cost_section = String(line.section || '');
@@ -1347,7 +1409,7 @@
         r.manual_match = true;
         r.needs_manual_match = false;
         r._editingMatch = false;
-        r.matched_quotation = String(line.quotation_no || '');
+        r.matched_quotation = String(line.quotation_no || line.costing_quotation_no || '');
         r.matched_line_no = String(line.line_no || '');
         return r;
     }
@@ -1378,53 +1440,12 @@
     }
 
     function syncSelectionUi() {
-        const selected = rows.filter((r) => !!r.selected);
-        const countEl = $('pcwSelectedCount');
-        const matchBtn = $('pcwMatchSelectedBtn');
-        if (countEl) {
-            countEl.hidden = selected.length === 0;
-            countEl.textContent = `${selected.length} selected`;
+        const validateBtn = $('pcwOpenValidateBtn');
+        if (validateBtn) {
+            validateBtn.disabled = !(headerPo() && rows.some((r) => !isFooterRow(r)));
         }
-        if (matchBtn) {
-            const canMatch = selected.some((r) => needsManualMatch(r)) && costLines.length > 0;
-            matchBtn.disabled = !canMatch;
-        }
-        const all = $('pcwCheckAll');
-        if (all) {
-            const matchable = rows.filter((r) => needsManualMatch(r));
-            all.checked = matchable.length > 0 && matchable.every((r) => !!r.selected);
-            all.indeterminate = selected.length > 0 && !all.checked;
-        }
-
-        let selectSameBtn = $('pcwSelectSameBtn');
-        if (selected.length === 1) {
-            const selRow = selected[0];
-            const selIdx = rows.indexOf(selRow);
-            const matches = findSameValueRows(selRow, selIdx);
-            const targetMatches = matches.exactMatMatches.length ? matches.exactMatMatches : matches.groupMatches;
-            if (targetMatches.length > 0) {
-                if (!selectSameBtn) {
-                    selectSameBtn = document.createElement('button');
-                    selectSameBtn.type = 'button';
-                    selectSameBtn.id = 'pcwSelectSameBtn';
-                    selectSameBtn.className = 'rpt-tb-btn pcw-select-same-btn';
-                    countEl?.parentNode?.insertBefore(selectSameBtn, countEl.nextSibling);
-                    selectSameBtn.addEventListener('click', () => {
-                        const curMatches = findSameValueRows(rows.find(r => r.selected), rows.findIndex(r => r.selected));
-                        const mList = curMatches.exactMatMatches.length ? curMatches.exactMatMatches : curMatches.groupMatches;
-                        mList.forEach((m) => { m.row.selected = true; });
-                        renderTable();
-                    });
-                }
-                const labelGroup = selRow.material || selRow.matgroup || 'same';
-                selectSameBtn.innerHTML = `<span class="material-icons-round" style="font-size:14px;">done_all</span> Select All ${targetMatches.length + 1} (${esc(labelGroup)})`;
-                selectSameBtn.style.display = 'inline-flex';
-            } else if (selectSameBtn) {
-                selectSameBtn.style.display = 'none';
-            }
-        } else if (selectSameBtn) {
-            selectSameBtn.style.display = 'none';
-        }
+        const selectSameBtn = $('pcwSelectSameBtn');
+        if (selectSameBtn) selectSameBtn.style.display = 'none';
     }
 
     function openMatchPicker(index) {
@@ -1542,8 +1563,6 @@
 
     function cellValue(key, r, index) {
         switch (key) {
-            case 'check':
-                return r.selected ? '1' : '0';
             case 'sno':
                 return String(index + 1);
             case 'status':
@@ -1563,60 +1582,53 @@
             case 'matgroup':
                 return r.matgroup || r.material_group || '';
             case 'so_qty':
-                return r.so_qty;
+                return r.so_qty ?? r.prwise_so_qty ?? r.SaleOrderQuantity;
             case 'prwise_so_qty':
-                return r.prwise_so_qty;
+                return r.prwise_so_qty ?? r.so_qty ?? r.SaleOrderQuantity;
             case 'consumption':
-                return r.consumption;
+                return r.consumption ?? r.budgeted_cons ?? r.gross ?? r.net;
             case 'reqqty':
-                return r.reqqty;
+                return r.reqqty ?? r.ReqBOMQuantity;
             case 'tot_poqty':
-                return r.tot_poqty;
+                return r.tot_poqty ?? r.order_qty ?? r.po_qty;
             case 'so_wise_poqty':
-                return r.so_wise_poqty;
+                return r.so_wise_poqty ?? r.tot_poqty ?? r.order_qty ?? r.po_qty;
             case 'so_wise_po_val':
-                return r.so_wise_po_val;
+                return r.so_wise_po_val ?? r.totvalue ?? r.net_value;
             case 'ouom':
                 return r.ouom || r.unit || '';
             case 'porate':
-                return r.porate;
+                return r.porate ?? r.po_unit_cost ?? r.net_price;
             case 'totvalue':
                 return r.totvalue ?? r.net_value;
             case 'mat_desc':
                 return r.mat_desc || r.material_desc || '';
             case 'po_currency':
-                return r.po_currency || r.currency || '';
-            case 'cost_item':
-                return r.cost_item || r.item || '';
+                return r.po_currency || r.currency || 'INR';
+            case 'costing_quotation_no':
+                return r.costing_quotation_no || r.costing_quotation || r.matched_quotation || r.quotation || '';
+            case 'costing_item_no':
+                return r.costing_item_no || r.cost_item || r.item || r.posnr || '';
             case 'maktx':
                 return r.maktx || r.cost_description || '';
             case 'budgeted_cons':
-                return r.budgeted_cons;
+                return r.budgeted_cons ?? r.consumption ?? r.gross ?? r.net;
             case 'budget_inr':
-                return r.budget_inr;
+                return r.budget_inr ?? r.cost_total_inr ?? r.total_inr;
             case 'budget_currency':
-                return r.budget_currency || '';
+                return r.budget_currency || r.curunit || 'INR';
             case 'budget_conv_rt':
-                return r.budget_conv_rt;
+                return r.budget_conv_rt ?? r.convr ?? r.conv ?? 1;
             case 'budget_cost_per_gmt':
-                return r.budget_cost_per_gmt ?? r.expected_unit_cost;
+                return r.budget_cost_per_gmt ?? r.expected_unit_cost ?? r.rate;
             case 'conv':
-                return r.conv;
+                return r.conv ?? r.convr ?? 1;
             case 'buom':
-                return r.buom || '';
+                return r.buom || r.ouom || r.unit || '';
             case 'actual_cost':
                 return r.actual_cost ?? r.po_unit_cost;
-            case 'cost_matrix': {
-                const b = r.budget_cost_per_gmt ?? r.expected_unit_cost;
-                const a = r.actual_cost ?? r.po_unit_cost;
-                return b !== null && b !== undefined && a !== null && a !== undefined
-                    ? `B ${b} / A ${a}`
-                    : '';
-            }
             case 'variance_pct':
                 return r.variance_pct;
-            case 'validation_result':
-                return r.validation_result || '';
             default:
                 return r[key] ?? '';
         }
@@ -1671,37 +1683,36 @@
         const classes = [];
         if (NUM_COLS.has(key) || key === 'sno') classes.push('num');
         if (key === 'sno') classes.push('sno');
-        if (key === 'check') classes.push('pcw-check');
         classes.push(`pcw-col-${group}`);
         if (HIGHLIGHT_COLS.has(key)) classes.push('pcw-hl-cost');
         if (EXPLAIN_COLS.has(key)) classes.push('is-explainable');
         const cls = classes.length ? ` class="${classes.join(' ')}"` : '';
         let inner = '—';
         switch (key) {
-            case 'check': {
-                const unmatched = needsManualMatch(r);
-                const checked = r.selected ? ' checked' : '';
-                inner = `<div class="pcw-select-cell">
-                    <input type="checkbox" class="pcw-check-input pcw-row-check" data-idx="${index}"${checked} title="${unmatched ? 'Select unmatched row' : 'Select row'}" aria-label="Select row ${index + 1}">
-                    ${unmatched
-                        ? `<button type="button" class="pcw-match-btn" data-idx="${index}" title="Manually match this PO item to a zCOST line">
-                            <span class="material-icons-round">link</span>
-                            Match
-                        </button>`
-                        : (r.manual_match
-                            ? `<span class="pcw-match-tag" title="Manually matched">Manual</span>`
-                            : '')}
-                </div>`;
-                break;
-            }
-            case 'sno':
-                inner = esc(index + 1);
-                break;
             case 'status':
-                inner = statusPill(r.status);
+                if (isFooterRow(r)) {
+                    inner = '';
+                } else {
+                    const unmatched = needsManualMatch(r);
+                    inner = `<div class="pcw-status-cell">
+                        ${statusPill(r.status)}
+                        ${unmatched
+                            ? `<button type="button" class="pcw-match-btn" data-idx="${index}" title="Manually match this PO item to a zCOST line">
+                                <span class="material-icons-round">link</span>
+                                Match
+                            </button>`
+                            : (r.manual_match
+                                ? `<span class="pcw-match-tag" title="Manually matched">Manual</span>`
+                                : '')}
+                    </div>`;
+                }
                 break;
             case 'pono':
-                inner = `<span class="pcw-mat">${dash(r.pono || r.purchase_order)}</span>`;
+                if (isFooterRow(r)) {
+                    inner = `<strong class="pcw-footer-label">${esc(r.pono || r.matgroup || r.validation_result || '—')}</strong>`;
+                } else {
+                    inner = `<span class="pcw-mat">${dash(r.pono || r.purchase_order)}</span>`;
+                }
                 break;
             case 'material':
                 inner = `<span class="pcw-mat">${dash(r.material)}</span>`;
@@ -1709,13 +1720,26 @@
             case 'mat_desc':
                 inner = `<span class="pcw-compare-po" title="${esc(r.mat_desc || r.material_desc || '')}">${dash(r.mat_desc || r.material_desc)}</span>`;
                 break;
-            case 'cost_item': {
-                const itDisplay = (r.cost_item || r.item || '').trim();
-                inner = `<span class="pcw-compare-po" title="${esc(r.maktx || r.cost_description || '')}">${dash(itDisplay)}</span>`;
+            case 'costing_quotation_no':
+                inner = isFooterRow(r)
+                    ? '—'
+                    : `<span class="pcw-nav-chip" title="CostingQuotationNo">${dash(cellValue(key, r, index))}</span>`;
                 break;
-            }
+            case 'costing_item_no':
+                if (isFooterRow(r)) {
+                    inner = '—';
+                } else if (needsManualMatch(r) || !!r._editingMatch) {
+                    inner = zcostSelectHtml(r, index);
+                } else {
+                    inner = `<span class="pcw-nav-chip" title="CostingItemNo">${dash(cellValue(key, r, index))}</span>`;
+                }
+                break;
             case 'maktx':
-                inner = `<span class="pcw-compare-maktx" title="${esc(r.maktx || r.cost_description || '')}">${dash(r.maktx || r.cost_description)}</span>`;
+                if (isFooterRow(r)) {
+                    inner = '—';
+                } else {
+                    inner = `<span class="pcw-compare-maktx" title="${esc(r.maktx || r.cost_description || '')}">${dash(r.maktx || r.cost_description)}</span>`;
+                }
                 break;
             case 'so_qty':
             case 'prwise_so_qty':
@@ -1743,12 +1767,12 @@
             case 'budget_conv_rt':
             case 'budget_cost_per_gmt':
             case 'conv':
-            case 'actual_cost':
-                inner = wrapExplain(key, index, num(cellValue(key, r, index), 4));
+            case 'actual_cost': {
+                const mismatch = !!r.cost_mismatch && (key === 'budget_cost_per_gmt' || key === 'actual_cost');
+                const shown = wrapExplain(key, index, num(cellValue(key, r, index), 4));
+                inner = mismatch ? `<span class="pcw-cost-mismatch">${shown}</span>` : shown;
                 break;
-            case 'cost_matrix':
-                inner = wrapExplain(key, index, costMatrixHtml(r));
-                break;
+            }
             case 'variance_pct':
                 inner = wrapExplain(key, index, varianceCell(cellValue(key, r, index)));
                 break;
@@ -1870,7 +1894,9 @@
                 const pass = st === 'PASS' ? ' is-pass-row' : '';
                 const fail = st === 'EXCEPTION' ? ' is-fail-row' : '';
                 const sel = row.selected ? ' is-selected' : '';
-                return `<tr class="pcw-row${open}${pass}${fail}${sel}" data-idx="${index}">${COLS.map((k) => renderCell(k, row, index)).join('')}</tr>`;
+                const footer = isFooterRow(row) ? ` is-footer-row is-${String(row.row_kind || 'footer')}` : '';
+                const mismatch = row.cost_mismatch ? ' is-cost-mismatch' : '';
+                return `<tr class="pcw-row${open}${pass}${fail}${sel}${footer}${mismatch}" data-idx="${index}" data-row-kind="${esc(row.row_kind || 'detail')}">${COLS.map((k) => renderCell(k, row, index)).join('')}</tr>`;
             })
             .join('');
         if (noMatch) tbody.appendChild(noMatch);
@@ -1954,19 +1980,6 @@
     }
 
     function onRowSelectChange(e) {
-        const check = e.target.closest('input.pcw-row-check');
-        if (check) {
-            e.stopPropagation();
-            const idx = Number(check.getAttribute('data-idx'));
-            if (Number.isFinite(idx) && rows[idx]) {
-                rows[idx].selected = !!check.checked;
-                const tr = check.closest('tr.pcw-row');
-                tr?.classList.toggle('is-selected', !!check.checked);
-                syncSelectionUi();
-                syncSameValueHighlights();
-            }
-            return;
-        }
         const zcostSel = e.target.closest('select.pcw-zcost-select');
         if (zcostSel) {
             e.stopPropagation();
@@ -1992,6 +2005,320 @@
             return;
         }
         void runValidate({ mode: 'non_validated', customer: selectedCustomer, endUser: selectedEndUser });
+    }
+
+    function openActionOffcanvas(shellId) {
+        const shell = $(shellId);
+        if (!shell) return;
+        shell.hidden = false;
+        shell.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('pcw-action-offcanvas-open');
+        requestAnimationFrame(() => {
+            shell.classList.add('is-open');
+        });
+    }
+
+    function closeActionOffcanvas(shellId) {
+        const shell = $(shellId);
+        if (!shell) return;
+        shell.classList.remove('is-open');
+        shell.setAttribute('aria-hidden', 'true');
+        const stillOpen = ['pcwValidateModal', 'pcwHistoryModal'].some((id) => {
+            const el = $(id);
+            return el && el !== shell && el.classList.contains('is-open');
+        });
+        if (!stillOpen) document.body.classList.remove('pcw-action-offcanvas-open');
+        window.setTimeout(() => {
+            if (!shell.classList.contains('is-open')) shell.hidden = true;
+        }, 280);
+    }
+
+    function closeValidateModal() {
+        closeActionOffcanvas('pcwValidateModal');
+    }
+
+    function openValidateModal() {
+        const selected = rows.filter((r) => !!r.selected && !isFooterRow(r));
+        const detailRows = rows.filter((r) => !isFooterRow(r));
+        const targets = selected.length ? selected : detailRows;
+        const loginUser = String(cfg.currentUser || $('pcwLoginUserName')?.textContent || 'User').trim();
+        if ($('pcwLoginUserName')) $('pcwLoginUserName').textContent = loginUser || 'User';
+        const meta = $('pcwValidateMeta');
+        if (meta) {
+            meta.innerHTML = `
+                <div class="pcw-validate-meta-chip"><span>Purchase Order</span><strong>${esc(headerPo() || '—')}</strong></div>
+                <div class="pcw-validate-meta-chip"><span>Scope</span><strong>Full PO · ${targets.length} lines</strong></div>
+                <div class="pcw-validate-meta-chip"><span>Validated By</span><strong>${esc(loginUser || '—')}</strong></div>`;
+        }
+        const remarks = $('pcwValidateRemarks');
+        if (remarks) remarks.value = '';
+        document.querySelectorAll('input[name="pcwValidateStatus"]').forEach((el, i) => {
+            el.checked = i === 0;
+            el.closest('label')?.classList.toggle('is-active', i === 0);
+        });
+        closeHistoryModal();
+        openActionOffcanvas('pcwValidateModal');
+        $('pcwUserSearch')?.focus();
+    }
+
+    function closeHistoryModal() {
+        closeActionOffcanvas('pcwHistoryModal');
+    }
+
+    async function openHistoryModal() {
+        const po = headerPo();
+        const body = $('pcwHistoryBody');
+        if (!po) {
+            alert('Load a PO first to view history.');
+            return;
+        }
+        const countEl = $('pcwHistoryCount');
+        if (countEl) countEl.textContent = 'Loading…';
+        if (body) body.innerHTML = `<div class="pcw-history-empty">Loading validation history…</div>`;
+        closeValidateModal();
+        openActionOffcanvas('pcwHistoryModal');
+        const endpoint = cfg.validationLogUrl || 'purchase-order/validation-log';
+        try {
+            const res = await fetch(`${endpoint}?po=${encodeURIComponent(po)}&_=${Date.now()}`, {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+                cache: 'no-store',
+            });
+            const json = await res.json();
+            const logs = Array.isArray(json?.data?.logs) ? json.data.logs : [];
+            if (!body) return;
+            // Collapse legacy per-line saves into one PO validation per batch
+            const grouped = [];
+            const seen = new Map();
+            logs.forEach((log) => {
+                const when = String(log.created_at || '').replace('T', ' ').slice(0, 19);
+                const key = [
+                    when,
+                    String(log.created_by || ''),
+                    String(log.assigned_username || ''),
+                    String(log.validation_status || ''),
+                    String(log.description || ''),
+                ].join('|');
+                if (seen.has(key)) {
+                    const g = seen.get(key);
+                    g.item_count += 1;
+                    return;
+                }
+                const entry = { ...log, when, item_count: 1 };
+                seen.set(key, entry);
+                grouped.push(entry);
+            });
+            if (countEl) {
+                countEl.textContent = grouped.length
+                    ? `${grouped.length} validation${grouped.length === 1 ? '' : 's'}`
+                    : '0 validations';
+            }
+            if (!grouped.length) {
+                body.innerHTML = `<div class="pcw-history-empty">No validation history for PO ${esc(po)}.</div>`;
+                return;
+            }
+            body.innerHTML = grouped
+                .map((log) => {
+                    const st = String(log.validation_status || '');
+                    const stLabel = st === 'VALIDATE_PO' ? 'Validate PO' : st === 'NOT_VALIDATE' ? 'Not Validate' : st;
+                    const byUser = String(log.created_by || '').trim() || '—';
+                    const whenFull = String(log.when || '—');
+                    const datePart = whenFull.slice(0, 10);
+                    const timePart = whenFull.length > 10 ? whenFull.slice(11) : '';
+                    const remarks = String(log.description || '').trim();
+                    return `<article class="pcw-history-card" role="listitem">
+                        <div class="pcw-history-when">
+                            <strong>${esc(datePart || '—')}</strong>
+                            <small>${esc(timePart || '')}</small>
+                        </div>
+                        <div class="pcw-history-main">
+                            <div class="pcw-history-people">
+                                <span><span class="material-icons-round">account_circle</span>By <strong>${esc(byUser)}</strong></span>
+                                <span><span class="material-icons-round">person_add</span>Assigned <strong>${esc(log.assigned_username || '—')}</strong></span>
+                            </div>
+                            <p class="pcw-history-remarks${remarks ? '' : ' is-empty'}">${esc(remarks || 'No remarks')}</p>
+                        </div>
+                        <span class="pcw-pill ${st === 'VALIDATE_PO' ? 'is-pass' : 'is-review'}">${esc(stLabel)}</span>
+                    </article>`;
+                })
+                .join('');
+        } catch (err) {
+            if (countEl) countEl.textContent = 'Error';
+            if (body) {
+                body.innerHTML = `<div class="pcw-history-empty">${esc(err.message || 'Failed to load history')}</div>`;
+            }
+        }
+    }
+
+    async function searchUsers(q) {
+        const menu = $('pcwUserMenu');
+        if (!menu) return;
+        const endpoint = cfg.usersUrl || 'purchase-order/users';
+        const params = new URLSearchParams({ q: q || '', limit: '30', _: String(Date.now()) });
+        try {
+            const res = await fetch(`${endpoint}?${params}`, {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+                cache: 'no-store',
+            });
+            const json = await res.json();
+            const users = Array.isArray(json?.data?.users) ? json.data.users : [];
+            if (!users.length) {
+                menu.innerHTML = `<div class="pcw-user-empty">No users found</div>`;
+                menu.hidden = false;
+                return;
+            }
+            menu.innerHTML = users
+                .map(
+                    (u) => `<button type="button" class="pcw-user-option" role="option"
+                        data-id="${esc(u.id)}" data-username="${esc(u.username)}">
+                        <strong>${esc(u.username)}</strong>
+                        <small>${esc([u.department, u.role, u.email].filter(Boolean).join(' · ') || '—')}</small>
+                    </button>`
+                )
+                .join('');
+            menu.hidden = false;
+        } catch (err) {
+            menu.innerHTML = `<div class="pcw-user-empty">Could not load users</div>`;
+            menu.hidden = false;
+        }
+    }
+
+    function pickUser(id, username) {
+        assignedUser = { id: String(id || ''), username: String(username || '') };
+        if ($('pcwUserId')) $('pcwUserId').value = assignedUser.id;
+        if ($('pcwUserName')) $('pcwUserName').value = assignedUser.username;
+        if ($('pcwUserSearch')) $('pcwUserSearch').value = assignedUser.username;
+        if ($('pcwUserMenu')) $('pcwUserMenu').hidden = true;
+        syncSelectionUi();
+    }
+
+    async function saveValidationLog() {
+        const status =
+            document.querySelector('input[name="pcwValidateStatus"]:checked')?.value || 'VALIDATE_PO';
+        const description = String($('pcwValidateRemarks')?.value || '').trim();
+        if (!assignedUser.username) {
+            alert('Select a next-level user to assign.');
+            $('pcwUserSearch')?.focus();
+            return;
+        }
+        const po = headerPo();
+        if (!po) return;
+        const detailRows = rows.filter((r) => !isFooterRow(r));
+        const endpoint = cfg.validationLogUrl || 'purchase-order/validation-log';
+        // One PO-level validation entry (not per line item)
+        const payload = {
+            purchase_order: po,
+            mat_cat: selectedMat(),
+            assigned_user_id: assignedUser.id || null,
+            assigned_username: assignedUser.username,
+            validation_status: status,
+            description,
+            po_item: '',
+            material: '',
+            mat_desc: '',
+            matched_zcost_item: '',
+            matched_maktx: '',
+            row_status: '',
+            item_count: detailRows.length,
+        };
+        const btn = $('pcwValidateSave');
+        if (btn) btn.disabled = true;
+        try {
+            const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify(payload),
+            });
+            const json = await res.json();
+            if (!res.ok || json.success === false) {
+                throw new Error(json.message || json.error || `HTTP ${res.status}`);
+            }
+            detailRows.forEach((r) => {
+                r.assigned_username = assignedUser.username;
+                r.manual_validation_status = status;
+                r.manual_validation_desc = description;
+                if (status === 'VALIDATE_PO' && String(r.status || '').toUpperCase() !== 'EXCEPTION') {
+                    r.validation_result = `Validate PO — assigned to ${assignedUser.username}`;
+                } else if (status === 'NOT_VALIDATE') {
+                    r.status = 'NEEDS_REVIEW';
+                    r.validation_result = `Not Validate — assigned to ${assignedUser.username}`;
+                }
+            });
+            closeValidateModal();
+            fillKpis(summarizeRows(rows));
+            renderTable();
+            const toast = document.createElement('div');
+            toast.className = 'pcw-toast is-ok';
+            toast.textContent = status === 'VALIDATE_PO'
+                ? `Saved: Validate PO → ${assignedUser.username}`
+                : `Saved: Not Validate → ${assignedUser.username}`;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 2800);
+        } catch (err) {
+            const msg = String(err.message || 'Could not save validation log');
+            alert(msg.includes('lastInsertId')
+                ? 'Save failed due to a database driver issue. Please hard-refresh and try again.'
+                : msg);
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    function bindUserValidateUi() {
+        const search = $('pcwUserSearch');
+        search?.addEventListener('input', () => {
+            const q = String(search.value || '').trim();
+            if (assignedUser.username && q !== assignedUser.username) {
+                assignedUser = { id: '', username: '' };
+                if ($('pcwUserId')) $('pcwUserId').value = '';
+                if ($('pcwUserName')) $('pcwUserName').value = '';
+                syncSelectionUi();
+            }
+            clearTimeout(userSearchTimer);
+            userSearchTimer = setTimeout(() => searchUsers(q), 180);
+        });
+        search?.addEventListener('focus', () => {
+            void searchUsers(String(search.value || '').trim());
+        });
+        $('pcwUserMenu')?.addEventListener('click', (e) => {
+            const opt = e.target.closest('.pcw-user-option');
+            if (!opt) return;
+            pickUser(opt.getAttribute('data-id'), opt.getAttribute('data-username'));
+        });
+        document.addEventListener('click', (e) => {
+            if (e.target.closest('#pcwUserAssign')) return;
+            if ($('pcwUserMenu')) $('pcwUserMenu').hidden = true;
+        });
+        $('pcwOpenValidateBtn')?.addEventListener('click', openValidateModal);
+        $('pcwValidateClose')?.addEventListener('click', closeValidateModal);
+        $('pcwValidateCancel')?.addEventListener('click', closeValidateModal);
+        $('pcwValidateBackdrop')?.addEventListener('click', closeValidateModal);
+        $('pcwValidateSave')?.addEventListener('click', () => {
+            void saveValidationLog();
+        });
+        $('pcwHistoryBtn')?.addEventListener('click', () => {
+            void openHistoryModal();
+        });
+        $('pcwHistoryClose')?.addEventListener('click', closeHistoryModal);
+        $('pcwHistoryDone')?.addEventListener('click', closeHistoryModal);
+        $('pcwHistoryBackdrop')?.addEventListener('click', closeHistoryModal);
+        document.querySelectorAll('input[name="pcwValidateStatus"]').forEach((el) => {
+            el.addEventListener('change', () => {
+                document.querySelectorAll('input[name="pcwValidateStatus"]').forEach((r) => {
+                    r.closest('label')?.classList.toggle('is-active', r.checked);
+                });
+            });
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && $('pcwValidateModal') && !$('pcwValidateModal').hidden) {
+                closeValidateModal();
+            }
+            if (e.key === 'Escape' && $('pcwHistoryModal') && !$('pcwHistoryModal').hidden) {
+                closeHistoryModal();
+            }
+        });
     }
 
     function onMatchApply() {
@@ -2095,7 +2422,7 @@
             // Allow drag; single click sorts
             if (e.defaultPrevented) return;
             const key = th.getAttribute('data-col-id');
-            if (!key || key === 'check' || key === 'customer' || key === 'end_user') return;
+            if (!key || key === 'customer' || key === 'end_user') return;
             if (sortKey === key) {
                 sortDir = sortDir === 'asc' ? 'desc' : sortDir === 'desc' ? null : 'asc';
                 if (!sortDir) sortKey = null;
@@ -2113,13 +2440,6 @@
 
     function bind() {
         bindToolbar();
-        $('pcwRevalidateBtn')?.addEventListener('click', () => {
-            if (selectedCustomer) {
-                void runValidate({ mode: 'non_validated', customer: selectedCustomer, endUser: selectedEndUser });
-            } else {
-                void runValidate({ mode: 'validated', forceValidated: true });
-            }
-        });
 
         const controlBar = $('pcwControlBar');
         controlBar?.addEventListener('submit', (e) => {
@@ -2163,19 +2483,6 @@
             });
         });
 
-        $('pcwCheckAll')?.addEventListener('change', (e) => {
-            const on = !!e.target.checked;
-            rows.forEach((r) => {
-                if (needsManualMatch(r)) r.selected = on;
-                else if (!on) r.selected = false;
-            });
-            renderTable();
-        });
-        $('pcwMatchSelectedBtn')?.addEventListener('click', () => {
-            const idx = rows.findIndex((r) => r.selected && needsManualMatch(r));
-            if (idx < 0) return;
-            openMatchPicker(idx);
-        });
         $('pcwMatchClose')?.addEventListener('click', closeMatchPicker);
         $('pcwMatchCancel')?.addEventListener('click', closeMatchPicker);
         $('pcwMatchApply')?.addEventListener('click', onMatchApply);
@@ -2207,17 +2514,6 @@
                 e.stopPropagation();
                 const idx = Number(matchBtn.getAttribute('data-idx'));
                 if (Number.isFinite(idx)) openMatchPicker(idx);
-                return;
-            }
-            const changeBtn = e.target.closest('button.pcw-match-change-btn');
-            if (changeBtn) {
-                e.preventDefault();
-                e.stopPropagation();
-                const idx = Number(changeBtn.getAttribute('data-idx'));
-                if (Number.isFinite(idx) && rows[idx]) {
-                    rows[idx]._editingMatch = true;
-                    renderTable();
-                }
                 return;
             }
             const btn = e.target.closest('button.pcw-formula-cell');
@@ -2275,6 +2571,9 @@
                 lbl.classList.toggle('is-active', lbl.contains(rad));
             });
         });
+
+        bindUserValidateUi();
+
         $('pcwFormulaClose')?.addEventListener('click', closeFormulaPop);
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') closeFormulaPop();

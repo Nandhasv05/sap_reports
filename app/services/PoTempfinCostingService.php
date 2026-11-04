@@ -96,22 +96,21 @@ final class PoTempfinCostingService
             return $this->fail('TEMPFIN/PASSPO failed: ' . $e->getMessage());
         }
 
-        $detailRows = [];
+        // Keep classic PASSPO layout: detail lines + SUB-TOTAL / charges / tax / TOTAL
+        $allRows = [];
         foreach ($rows as $row) {
-            $mg = strtoupper(trim((string) ($row['MATGROUP'] ?? '')));
-            if ($mg === '' || $mg === 'TOTAL' || $mg === 'SUB-TOTAL' || $mg === 'SUBTOTAL') {
-                continue;
-            }
-            if (preg_match('/charges|igst|freight|screen|bank|moq|other\s*charges/i', $mg)) {
-                continue;
-            }
-            $detailRows[] = $this->normalizeRow($row);
+            $allRows[] = $this->normalizeRow($row);
         }
+
+        $detailOnly = array_values(array_filter(
+            $allRows,
+            static fn (array $r): bool => ($r['row_kind'] ?? 'detail') === 'detail'
+        ));
 
         return [
             'success'  => true,
-            'records'  => $detailRows,
-            'summary'  => $this->summarize($detailRows),
+            'records'  => $allRows,
+            'summary'  => $this->summarize($detailOnly),
             'mat_type' => $isFabric ? 'fabric' : 'trims',
             'error'    => null,
         ];
@@ -260,12 +259,72 @@ final class PoTempfinCostingService
             return '';
         };
 
+        $ponoRaw = trim((string) $get($row, 'PONO'));
+        $ponoUpper = strtoupper(preg_replace('/\s+/', ' ', $ponoRaw) ?? '');
+        $matgroupUpper = strtoupper(trim((string) $get($row, 'MATGROUP')));
+        $rowKind = $this->detectRowKind($ponoUpper, $matgroupUpper);
+
+        // Classic TEMPFIN numeric fields (align with PO Costing Validation)
+        $soQty = $this->num($get($row, 'SO_QTY'));
+        $prSoQty = $this->num($get($row, 'PRWISE_SO_QTY'));
+        $consumption = $this->num($get($row, 'CONSUMPTION'));
+        $reqqty = $this->num($get($row, 'REQQTY'));
+        $totPoQty = $this->num($get($row, 'TOT_POQTY'));
+        $porate = $this->num($get($row, 'PORATE'));
+        $budgetedCons = $this->num($get($row, 'BUDGETED_CONS'));
+        $budgetInr = $this->num($get($row, 'BUDGET_INR'));
+        $budgetConv = $this->num($get($row, 'BUDGET_CONV_RT'));
         $budget = $this->num($get($row, 'BUDGET_COST_PER_GMT', 'BUDGET COST PER GMT'));
+        $conv = $this->num($get($row, 'CONV'));
         $actual = $this->num($get($row, 'ACTUAL_COST', 'ACTUAL COST'));
+
+        if ($rowKind === 'detail') {
+            // Same as classic: consumption is per-garment, not PO÷SO ratio
+            $baseSo = $soQty !== null && $soQty > 0 ? $soQty : $prSoQty;
+            if (
+                $consumption !== null
+                && $baseSo !== null
+                && $baseSo > 0
+                && $totPoQty !== null
+                && $totPoQty > 0
+            ) {
+                $ratio = $totPoQty / $baseSo;
+                $isPoSoRatio = abs($consumption - $ratio) <= max(0.08, $ratio * 0.04)
+                    || ($consumption > 1.2 && $reqqty !== null && abs($reqqty - $totPoQty) <= max(2.0, $totPoQty * 0.03));
+                if ($isPoSoRatio) {
+                    $useCons = ($budgetedCons !== null && $budgetedCons > 0) ? $budgetedCons : 1.0;
+                    $consumption = $useCons;
+                    $reqqty = round($baseSo * $useCons, 4);
+                    if ($porate !== null) {
+                        $actual = round($porate * $useCons, 2);
+                    }
+                }
+            }
+
+            // Classic: ACTUAL_COST = PORATE × BUDGETED_CONS when actual missing / zero
+            $useCons = ($budgetedCons !== null && $budgetedCons > 0)
+                ? $budgetedCons
+                : (($consumption !== null && $consumption > 0) ? $consumption : null);
+            if ($porate !== null && $useCons !== null && ($actual === null || $actual == 0.0)) {
+                $actual = round($porate * $useCons, 2);
+            }
+
+            // Classic: BUDGET_COST_PER_GMT ≈ BUDGETED_CONS × BUDGET_INR when GMT blank
+            if ($budget === null && $budgetedCons !== null && $budgetInr !== null) {
+                $budget = round($budgetedCons * $budgetInr, 4);
+            }
+            if ($conv === null && $budgetConv !== null) {
+                $conv = $budgetConv;
+            }
+        }
+
         $status = 'EXCEPTION';
         $result = 'No budget / actual cost';
         $variancePct = null;
-        if ($budget !== null && $actual !== null) {
+        if ($rowKind !== 'detail') {
+            $status = 'FOOTER';
+            $result = $ponoUpper !== '' ? $ponoUpper : ($matgroupUpper !== '' ? $matgroupUpper : 'FOOTER');
+        } elseif ($budget !== null && $actual !== null) {
             if ($budget != 0.0) {
                 $variancePct = round((($actual - $budget) / $budget) * 100, 2);
             } else {
@@ -280,9 +339,13 @@ final class PoTempfinCostingService
             }
         }
 
-        $pono = (string) $get($row, 'PONO');
+        $pono = $ponoRaw;
         $poitem = (string) $get($row, 'POITEM');
         $salord = (string) $get($row, 'SALORDNO');
+        $costMismatch = $rowKind === 'detail'
+            && $budget !== null
+            && $actual !== null
+            && abs((float) $actual - (float) $budget) > 0.0001;
 
         return [
             'pono'                 => $pono,
@@ -292,27 +355,29 @@ final class PoTempfinCostingService
             'style'                => (string) $get($row, 'STYLE'),
             'material'             => (string) $get($row, 'MATERIAL'),
             'matgroup'             => (string) $get($row, 'MATGROUP'),
-            'so_qty'               => $this->num($get($row, 'SO_QTY')),
-            'prwise_so_qty'        => $this->num($get($row, 'PRWISE_SO_QTY')),
-            'consumption'          => $this->num($get($row, 'CONSUMPTION')),
-            'reqqty'               => $this->num($get($row, 'REQQTY')),
-            'tot_poqty'            => $this->num($get($row, 'TOT_POQTY')),
+            'so_qty'               => $soQty,
+            'prwise_so_qty'        => $prSoQty,
+            'consumption'          => $consumption,
+            'reqqty'               => $reqqty,
+            'tot_poqty'            => $totPoQty,
             'so_wise_poqty'        => $this->num($get($row, 'SO_WISE_POQTY')),
             'so_wise_po_val'       => $this->num($get($row, 'SO_WISE_PO_VAL')),
             'ouom'                 => (string) $get($row, 'OUOM'),
-            'porate'               => $this->num($get($row, 'PORATE')),
+            'porate'               => $porate,
             'totvalue'             => $this->num($get($row, 'TOTVALUE')),
             'mat_desc'             => (string) $get($row, 'MAT_DESC', 'mat_desc'),
             'po_currency'          => (string) $get($row, 'PO_CURRENCY'),
-            'budgeted_cons'        => $this->num($get($row, 'BUDGETED_CONS')),
-            'budget_inr'           => $this->num($get($row, 'BUDGET_INR')),
+            'budgeted_cons'        => $budgetedCons,
+            'budget_inr'           => $budgetInr,
             'budget_currency'      => (string) $get($row, 'BUDGET_CURRENCY'),
-            'budget_conv_rt'       => $this->num($get($row, 'BUDGET_CONV_RT')),
+            'budget_conv_rt'       => $budgetConv,
             'budget_cost_per_gmt'  => $budget,
-            'conv'                 => $this->num($get($row, 'CONV')),
+            'conv'                 => $conv,
             'buom'                 => (string) $get($row, 'BUOM'),
             'actual_cost'          => $actual,
             'cost_item'            => '',
+            'costing_quotation_no' => (string) $get($row, 'CostingQuotationNo', 'COSTING_QUOTATION_NO', 'QUOTATIONNO'),
+            'costing_item_no'      => (string) $get($row, 'CostingItemNo', 'COSTING_ITEM_NO', 'ITEM'),
             'maktx'                => '',
             'cost_matrix'          => ($budget !== null || $actual !== null)
                 ? [
@@ -322,6 +387,8 @@ final class PoTempfinCostingService
                 ]
                 : null,
             'variance_pct'         => $variancePct,
+            'row_kind'             => $rowKind,
+            'cost_mismatch'        => $costMismatch,
             // Compatibility with existing workbench KPIs / filters
             'purchase_order'       => $pono,
             'po_item'              => $poitem,
@@ -337,7 +404,30 @@ final class PoTempfinCostingService
             'expected_unit_cost'   => $budget,
             'status'               => $status,
             'validation_result'    => $result,
+            'needs_manual_match'   => $rowKind === 'detail' && ($budget === null || $budget <= 0),
+            'selected'             => false,
         ];
+    }
+
+    private function detectRowKind(string $ponoUpper, string $matgroupUpper): string
+    {
+        $label = $ponoUpper !== '' ? $ponoUpper : $matgroupUpper;
+        if ($label === '') {
+            return 'detail';
+        }
+        if (in_array($label, ['SUB-TOTAL', 'SUB TOTAL', 'SUBTOTAL', 'TOTAL'], true)) {
+            return 'footer';
+        }
+        if (preg_match('/^(IGST|SGST|CGST|GST|TAX)(\s|$)/', $label)) {
+            return 'tax';
+        }
+        if (str_contains($label, 'CHARGES') || preg_match('/freight|moq|screen|bank|other\s*charges/i', $label)) {
+            return 'charge';
+        }
+        if (preg_match('/charges|igst|freight|screen|bank|moq|other\s*charges/i', $matgroupUpper)) {
+            return 'charge';
+        }
+        return 'detail';
     }
 
     /**

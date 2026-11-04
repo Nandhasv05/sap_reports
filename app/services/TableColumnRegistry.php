@@ -114,9 +114,8 @@ final class TableColumnRegistry
             ], [
                 'sell_price', 'making', 'quoted_uom', 'quoted_currency',
             ], ['check']),
+            // PO Data (TEMPFIN) vs zCOST Data comparison workbench
             'purchase_order_costing_workbench_table' => self::define([
-                'check'               => 'Select',
-                'sno'                 => 'S.No',
                 'status'              => 'Status',
                 'pono'                => 'PONO',
                 'poitem'              => 'POITEM',
@@ -137,8 +136,9 @@ final class TableColumnRegistry
                 'totvalue'            => 'TOTVALUE',
                 'mat_desc'            => 'MAT_DESC',
                 'po_currency'         => 'PO_CURRENCY',
-                'cost_item'           => 'ITEM',
-                'maktx'               => 'Material Desc',
+                'costing_quotation_no'=> 'Quotation No',
+                'costing_item_no'     => 'zCOST Item No',
+                'maktx'               => 'MAKTX',
                 'budgeted_cons'       => 'BUDGETED_CONS',
                 'budget_inr'          => 'BUDGET_INR',
                 'budget_currency'     => 'BUDGET_CURRENCY',
@@ -148,10 +148,9 @@ final class TableColumnRegistry
                 'buom'                => 'BUOM',
                 'actual_cost'         => 'ACTUAL_COST',
                 'variance_pct'        => 'Variance %',
-                'validation_result'   => 'Validation Result',
             ], [
                 'prno',
-            ], ['check', 'sno', 'status']),
+            ], ['status']),
             'fabric_utilization_table' => self::define([
                 'sno'                     => 'S.No',
                 'sales_order'             => 'Sales Order',

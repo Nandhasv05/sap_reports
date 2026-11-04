@@ -16,6 +16,21 @@ $logoUrl = sap_reports_logo_url();
 $currentYear = date('Y');
 $uacAllowedAdmins = ['admin', 'saravan', 'saravanan', 'nandhakumar'];
 $canAccessUac = in_array(strtolower(trim((string) $userName)), $uacAllowedAdmins, true);
+
+$canUtil = sap_reports_user_can_access('utilization', $user);
+$canFabric = sap_reports_user_can_access('fabric', $user);
+$canTrims = sap_reports_user_can_access('trims', $user);
+$canProd = sap_reports_user_can_access('production', $user);
+$canProc = sap_reports_user_can_access('procurement', $user);
+$canPo = sap_reports_user_can_access('purchase-order', $user);
+$canSales = sap_reports_user_can_access('sales', $user);
+$canPoCosting = sap_reports_user_can_access('po-costing', $user);
+$canFabricSale = sap_reports_user_can_access('fabric-sale', $user);
+$canAudit = sap_reports_user_can_access('audit-log', $user);
+$canUac = $canAccessUac;
+$canZcost = sap_reports_user_can_access('zcost', $user);
+
+$totalVisibleCards = ($canUtil ? 1 : 0) + ($canFabric ? 1 : 0) + ($canTrims ? 1 : 0) + ($canProd ? 1 : 0) + ($canProc ? 1 : 0) + ($canPo ? 1 : 0) + ($canSales ? 1 : 0) + ($canPoCosting ? 1 : 0) + ($canFabricSale ? 1 : 0) + ($canAudit ? 1 : 0) + ($canUac ? 1 : 0) + ($canZcost ? 1 : 0);
 ?>
 
 <div class="hub-wrapper" id="hubWrapper">
@@ -78,6 +93,7 @@ $canAccessUac = in_array(strtolower(trim((string) $userName)), $uacAllowedAdmins
     <!-- Compact colorful catalog — fixed module order -->
     <main class="hub-main-container">
         <div class="hub-cards-grid" id="reportCardsGrid">
+            <?php if ($canUtil): ?>
             <!-- 1. Utilization -->
             <div class="hub-bento-card is-util animate-card" style="--stagger: 1;" id="openUtilModalBtn" role="button" tabindex="0" aria-haspopup="dialog" data-category="utilization" data-keywords="utilization all materials fabric trims bom po grn issue combined">
                 <div class="hub-bento-ambient-glow"></div>
@@ -103,7 +119,9 @@ $canAccessUac = in_array(strtolower(trim((string) $userName)), $uacAllowedAdmins
                     <span class="hub-bento-arrow"><i class="fas fa-arrow-right"></i></span>
                 </div>
             </div>
+            <?php endif; ?>
 
+            <?php if ($canFabric): ?>
             <!-- 2. Fabric -->
             <a class="hub-bento-card is-fabric animate-card" style="--stagger: 2;" href="<?= e(url('fabric') . '?mode=unit') ?>" data-category="utilization" data-keywords="fabric utilization unit material sales order bom cutting roll issue live">
                 <div class="hub-bento-ambient-glow"></div>
@@ -129,7 +147,9 @@ $canAccessUac = in_array(strtolower(trim((string) $userName)), $uacAllowedAdmins
                     <span class="hub-bento-arrow"><i class="fas fa-arrow-right"></i></span>
                 </div>
             </a>
+            <?php endif; ?>
 
+            <?php if ($canTrims): ?>
             <!-- 3. Trims -->
             <a class="hub-bento-card is-trims animate-card" style="--stagger: 3;" href="<?= e(url('trims') . '?mode=unit') ?>" data-category="utilization" data-keywords="trims utilization unit buttons zippers thread labels consumables accessories">
                 <div class="hub-bento-ambient-glow"></div>
@@ -155,7 +175,9 @@ $canAccessUac = in_array(strtolower(trim((string) $userName)), $uacAllowedAdmins
                     <span class="hub-bento-arrow"><i class="fas fa-arrow-right"></i></span>
                 </div>
             </a>
+            <?php endif; ?>
 
+            <?php if ($canProd): ?>
             <!-- 4. Production -->
             <a class="hub-bento-card is-production animate-card" style="--stagger: 4;" href="<?= e(url('production')) ?>" data-category="operations" data-keywords="production cut sew wash finish packing shipment stage tracking orders operations">
                 <div class="hub-bento-ambient-glow"></div>
@@ -181,7 +203,9 @@ $canAccessUac = in_array(strtolower(trim((string) $userName)), $uacAllowedAdmins
                     <span class="hub-bento-arrow"><i class="fas fa-arrow-right"></i></span>
                 </div>
             </a>
+            <?php endif; ?>
 
+            <?php if ($canProc): ?>
             <!-- 5. Procurement -->
             <a class="hub-bento-card is-procurement animate-card" style="--stagger: 5;" href="<?= e(url('procurement')) ?>" data-category="operations" data-keywords="procurement pr purchase requisition po balance stock component requirement allocation">
                 <div class="hub-bento-ambient-glow"></div>
@@ -207,7 +231,9 @@ $canAccessUac = in_array(strtolower(trim((string) $userName)), $uacAllowedAdmins
                     <span class="hub-bento-arrow"><i class="fas fa-arrow-right"></i></span>
                 </div>
             </a>
+            <?php endif; ?>
 
+            <?php if ($canPo): ?>
             <!-- 6. Purchase -->
             <a class="hub-bento-card is-po animate-card" style="--stagger: 6;" href="<?= e(url('purchase-order')) ?>" data-category="orders" data-keywords="purchase order po vendor supplier item pricing net price grn pending currency orders">
                 <div class="hub-bento-ambient-glow"></div>
@@ -233,7 +259,9 @@ $canAccessUac = in_array(strtolower(trim((string) $userName)), $uacAllowedAdmins
                     <span class="hub-bento-arrow"><i class="fas fa-arrow-right"></i></span>
                 </div>
             </a>
+            <?php endif; ?>
 
+            <?php if ($canSales): ?>
             <!-- 7. Sale Dashboard -->
             <a class="hub-bento-card is-sales animate-card" style="--stagger: 7;" href="<?= e(url('sales')) ?>" data-category="sales" data-keywords="sales dashboard quotations orders sap revenue net value order qty buyers customers pipeline">
                 <div class="hub-bento-ambient-glow"></div>
@@ -259,7 +287,9 @@ $canAccessUac = in_array(strtolower(trim((string) $userName)), $uacAllowedAdmins
                     <span class="hub-bento-arrow"><i class="fas fa-arrow-right"></i></span>
                 </div>
             </a>
+            <?php endif; ?>
 
+            <?php if ($canPoCosting): ?>
             <!-- 8. PO Costing -->
             <a class="hub-bento-card is-po-costing animate-card" style="--stagger: 8;" href="<?= e(url('purchase-order') . '?view=costing') ?>" data-category="orders" data-keywords="po costing validation purchase order cost budget actual supplier plant net value orders">
                 <div class="hub-bento-ambient-glow"></div>
@@ -285,7 +315,9 @@ $canAccessUac = in_array(strtolower(trim((string) $userName)), $uacAllowedAdmins
                     <span class="hub-bento-arrow"><i class="fas fa-arrow-right"></i></span>
                 </div>
             </a>
+            <?php endif; ?>
 
+            <?php if ($canFabricSale): ?>
             <!-- 9. Fabric Sale Order -->
             <a class="hub-bento-card is-fabric-sale animate-card" style="--stagger: 9;" href="<?= e(url('fabric-sale')) ?>" data-category="sales" data-keywords="fabric sale order report sales fabric quotations orders revenue buyers pipeline">
                 <div class="hub-bento-ambient-glow"></div>
@@ -311,7 +343,9 @@ $canAccessUac = in_array(strtolower(trim((string) $userName)), $uacAllowedAdmins
                     <span class="hub-bento-arrow"><i class="fas fa-arrow-right"></i></span>
                 </div>
             </a>
+            <?php endif; ?>
 
+            <?php if ($canAudit): ?>
             <!-- 10. Audit Log -->
             <a class="hub-bento-card is-audit-log animate-card" style="--stagger: 10;" href="<?= e(url('audit-log')) ?>" data-category="admin" data-keywords="audit log security activity trace events history api transactions admin">
                 <div class="hub-bento-ambient-glow"></div>
@@ -337,6 +371,7 @@ $canAccessUac = in_array(strtolower(trim((string) $userName)), $uacAllowedAdmins
                     <span class="hub-bento-arrow"><i class="fas fa-arrow-right"></i></span>
                 </div>
             </a>
+            <?php endif; ?>
 
             <?php if ($canAccessUac): ?>
             <!-- 11. User Access Control (Visible only to admin, saravan, nandhakumar) -->
@@ -366,6 +401,7 @@ $canAccessUac = in_array(strtolower(trim((string) $userName)), $uacAllowedAdmins
             </a>
             <?php endif; ?>
 
+            <?php if ($canZcost): ?>
             <!-- 12. Zcost -->
             <a class="hub-bento-card is-zcost animate-card" style="--stagger: 12;" href="<?= e(url('zcost')) ?>" data-category="costing" data-keywords="zcost costing matrix sheet precosting actual budget variance garment cost z cost">
                 <div class="hub-bento-ambient-glow"></div>
@@ -391,6 +427,24 @@ $canAccessUac = in_array(strtolower(trim((string) $userName)), $uacAllowedAdmins
                     <span class="hub-bento-arrow"><i class="fas fa-arrow-right"></i></span>
                 </div>
             </a>
+            <?php endif; ?>
+        </div>
+
+        <?php if ($totalVisibleCards === 0): ?>
+        <!-- Empty permission state when user has 0 viewable pages -->
+        <div class="hub-empty-state is-no-access" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px 24px; text-align: center; background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(12px); border-radius: 20px; border: 1.5px dashed #cbd5e1; margin: 32px auto; max-width: 600px; box-shadow: 0 10px 30px rgba(0,0,0,0.04);">
+            <div style="width: 68px; height: 68px; border-radius: 50%; background: #fee2e2; color: #ef4444; display: flex; align-items: center; justify-content: center; font-size: 28px; margin-bottom: 16px;">
+                <i class="fas fa-user-lock"></i>
+            </div>
+            <h3 style="font-size: 1.25rem; font-weight: 700; color: #0f172a; margin-bottom: 8px;">No Report Modules Assigned</h3>
+            <p style="color: #64748b; font-size: 0.95rem; line-height: 1.5; margin-bottom: 24px; max-width: 440px;">
+                You currently do not have view permissions for any SAP report modules. Please contact an authorized administrator (<strong>admin, saravan, nandhakumar</strong>) to assign page permissions in User Access Control.
+            </p>
+            <a href="<?= e($homeUrl) ?>" class="hub-btn hub-btn-primary" style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; background: #4f46e5; color: #fff; border-radius: 10px; text-decoration: none; font-weight: 600; font-size: 0.9rem;">
+                <i class="fas fa-home"></i> Back to Portal
+            </a>
+        </div>
+        <?php endif; ?>
         </div>
 
         <!-- Empty search state -->

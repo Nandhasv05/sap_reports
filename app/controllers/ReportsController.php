@@ -895,6 +895,93 @@ class ReportsController extends Controller
     }
 
     /*
+     * Active portal users for PO costing assign / validate dropdown
+     */
+    public function purchaseOrderUsers(): void
+    {
+        require_once base_path('app/services/PoValidationLogService.php');
+        $q = trim((string) ($_GET['q'] ?? $_GET['search'] ?? ''));
+        $limit = (int) ($_GET['limit'] ?? 40);
+        try {
+            $users = (new PoValidationLogService())->searchUsers($q, $limit);
+            $this->jsonResponse(['success' => true, 'data' => ['users' => $users]]);
+        } catch (Throwable $e) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Could not load users: ' . $e->getMessage(),
+                'error'   => $e->getMessage(),
+                'data'    => ['users' => []],
+            ], 502);
+        }
+    }
+
+    /*
+     * Save Validate PO / Not Validate decision into po_validation_log
+     */
+    public function purchaseOrderValidationLogSave(): void
+    {
+        require_once base_path('app/services/PoValidationLogService.php');
+        $raw = file_get_contents('php://input') ?: '';
+        $input = json_decode($raw, true);
+        if (!is_array($input)) {
+            $input = $_POST;
+        }
+        $current = function_exists('portal_user') ? portal_user() : null;
+        $createdBy = (string) ($current['username'] ?? ($_SESSION['username'] ?? 'system'));
+        $input['created_by'] = $createdBy;
+
+        $svc = new PoValidationLogService();
+        // Always one PO-level validation log (ignore legacy per-line rows payload)
+        unset($input['rows']);
+        $input['po_item'] = '';
+        $input['material'] = $input['material'] ?? '';
+        $input['mat_desc'] = $input['mat_desc'] ?? '';
+        $input['matched_zcost_item'] = '';
+        $input['matched_maktx'] = '';
+        $input['row_status'] = '';
+
+        $res = $svc->save($input);
+        if (empty($res['success'])) {
+            $err = (string) ($res['error'] ?? 'Save failed');
+            $this->jsonResponse([
+                'success' => false,
+                'message' => $err,
+                'error'   => $err,
+                'data'    => ['ids' => []],
+            ], 422);
+        }
+
+        $this->jsonResponse([
+            'success' => true,
+            'message' => 'PO validation saved',
+            'data'    => ['ids' => [$res['id']], 'errors' => []],
+        ]);
+    }
+
+    /*
+     * List recent po_validation_log rows for a PO
+     */
+    public function purchaseOrderValidationLog(): void
+    {
+        require_once base_path('app/services/PoValidationLogService.php');
+        $po = preg_replace('/\D/', '', (string) ($_GET['po'] ?? '')) ?? '';
+        if ($po === '') {
+            $this->jsonResponse(['success' => false, 'message' => 'PO is required', 'data' => ['logs' => []]], 422);
+        }
+        try {
+            $logs = (new PoValidationLogService())->listForPo($po);
+            $this->jsonResponse(['success' => true, 'data' => ['logs' => $logs]]);
+        } catch (Throwable $e) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => $e->getMessage(),
+                'error'   => $e->getMessage(),
+                'data'    => ['logs' => []],
+            ], 502);
+        }
+    }
+
+    /*
      * Purchase order header and items as JSON for the report page and the PO drawer (?po=4000006524 or ?list=1)
      */
     public function purchaseOrderData(): void

@@ -10,7 +10,7 @@ require_once base_path('app/services/SapSalesService.php');
 
 /*
  * Sales controller
- */
+*/
 class SalesController extends Controller
 {
     private SalesModel $model;

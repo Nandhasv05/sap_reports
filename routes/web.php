@@ -71,6 +71,15 @@ $router->get('purchase-order/data', [ReportsController::class, 'purchaseOrderDat
 if (method_exists(ReportsController::class, 'purchaseOrderValidate')) {
     $router->get('purchase-order/validate', [ReportsController::class, 'purchaseOrderValidate']);
 }
+if (method_exists(ReportsController::class, 'purchaseOrderUsers')) {
+    $router->get('purchase-order/users', [ReportsController::class, 'purchaseOrderUsers']);
+}
+if (method_exists(ReportsController::class, 'purchaseOrderValidationLog')) {
+    $router->get('purchase-order/validation-log', [ReportsController::class, 'purchaseOrderValidationLog']);
+}
+if (method_exists(ReportsController::class, 'purchaseOrderValidationLogSave')) {
+    $router->post('purchase-order/validation-log', [ReportsController::class, 'purchaseOrderValidationLogSave']);
+}
 $router->get('purchase-order', [ReportsController::class, 'showPurchaseOrder']);
 $router->get('api/user/table-preferences/{tableKey}', [TablePreferencesController::class, 'show']);
 $router->put('api/user/table-preferences/{tableKey}', [TablePreferencesController::class, 'update']);

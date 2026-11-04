@@ -38,11 +38,6 @@ $userRole = !empty($user['role']) ? $user['role'] : 'ADMIN';
         </a>
 
         <div class="studio-nav-divider"></div>
-
-
-
-
-
         <!-- Quick Nav: Reports Catalog (Grid) & Portal Dashboard (Home) -->
         <a href="<?= e(url('/')) ?>" class="studio-home-btn" title="Back to SAP Reports Catalog" aria-label="SAP Reports Catalog" style="margin-right:4px;">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">

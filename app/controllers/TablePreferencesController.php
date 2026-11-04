@@ -10,11 +10,17 @@ class TablePreferencesController extends Controller
 {
     private const MAX_BODY_BYTES = 16384;
 
+   /*
+    * Handle GET request to get table preferences
+    */
     public function show(string $tableKey): void
     {
         $this->handle(fn (int $userId): array => (new TablePreferenceService())->get($userId, $tableKey));
     }
 
+    /*
+    * Handle Update Function 
+    */
     public function update(string $tableKey): void
     {
         $this->handle(function (int $userId) use ($tableKey): array {
@@ -23,6 +29,9 @@ class TablePreferencesController extends Controller
         });
     }
 
+    /*
+    * Handle Destroy Function 
+    */
     public function destroy(string $tableKey): void
     {
         $this->handle(function (int $userId) use ($tableKey): array {
@@ -63,6 +72,9 @@ class TablePreferencesController extends Controller
         }
     }
 
+    /*
+    * Handle Json Body Function 
+    */
     private function jsonBody(): mixed
     {
         if (!str_contains(strtolower((string) ($_SERVER['CONTENT_TYPE'] ?? '')), 'application/json')) {
@@ -79,6 +91,9 @@ class TablePreferencesController extends Controller
         }
     }
 
+    /*
+    * Handle Error Function
+    */
     private function error(TablePreferenceException $e): void
     {
         $this->jsonResponse([

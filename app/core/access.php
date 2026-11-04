@@ -68,19 +68,14 @@ function sap_reports_user_can_access(string $module, ?array $user = null): bool
         ];
     }
 
-    $role = strtolower(trim((string) ($user['role'] ?? '')));
-    $dept = strtolower(trim((string) ($user['department'] ?? '')));
-    $isAdmin = !empty($user['is_admin']) || in_array($role, ['admin', 'it_admin', 'super_admin', 'administrator', 'director', 'management'], true);
-
-    if ($isAdmin) {
-        return true;
-    }
-
     $username = strtolower(trim((string) ($user['username'] ?? '')));
     if (function_exists('portal_normalize_username')) {
         $username = portal_normalize_username((string) ($user['username'] ?? ''));
     }
-    if ($username !== '' && function_exists('portal_sap_reports_usernames') && in_array($username, portal_sap_reports_usernames(), true)) {
+
+    // Super Admins: strictly master administrative users
+    $superAdmins = ['admin', 'saravan', 'saravanan', 'nandhakumar'];
+    if (in_array($username, $superAdmins, true)) {
         return true;
     }
 
@@ -89,84 +84,39 @@ function sap_reports_user_can_access(string $module, ?array $user = null): bool
         $mod = 'purchase-order';
     }
 
+    // User Access Control is strictly for super admins
     if ($mod === 'user-access-control' || $mod === 'useraccesscontrol' || $mod === 'access-control' || $mod === 'user-access') {
-        $uacAdmins = ['admin', 'saravan', 'saravanan', 'nandhakumar'];
-        return in_array($username, $uacAdmins, true);
+        return false;
     }
 
-    // Check granular permission in dbo.tblSapUseracessControl if configured
+    // Check granular permission in dbo.tblSapUseracessControl
     try {
         $userId = (int) ($user['id'] ?? ($user['Id'] ?? ($_SESSION['user_id'] ?? 0)));
-        if ($userId > 0) {
-            require_once base_path('app/core/Database.php');
-            $pdo = Database::connection();
-            $stmt = $pdo->prepare("SELECT can_view FROM [dbo].[tblSapUseracessControl] WHERE user_id = ? AND page_route = ?");
-            $stmt->execute([$userId, $mod]);
-            $val = $stmt->fetchColumn();
-            if ($val !== false && $val !== null) {
-                return (int) $val === 1;
-            }
+        require_once base_path('app/core/Database.php');
+        $pdo = Database::connection();
+        $stmt = $pdo->prepare("
+            SELECT TOP 1 can_view 
+            FROM [dbo].[tblSapUseracessControl] 
+            WHERE (user_id = ? OR (username IS NOT NULL AND LOWER(username) = ?))
+              AND (LOWER(page_route) = ? OR LOWER(REPLACE(page_route, '-', '')) = ? OR LOWER(page_route) LIKE ?)
+            ORDER BY can_view DESC
+        ");
+        $stmt->execute([
+            $userId,
+            $username,
+            $mod,
+            str_replace('-', '', $mod),
+            '%' . $mod . '%'
+        ]);
+        $val = $stmt->fetchColumn();
+        if ($val !== false && $val !== null) {
+            return (int) $val === 1;
         }
     } catch (Throwable $e) {
-        // Fallback to department / role checks
+        error_log('sap_reports_user_can_access error: ' . $e->getMessage());
     }
 
-    if (function_exists('portal_module_granted')) {
-        $portalModuleMap = [
-            'fabric'         => ['SAP Fabric Report', 'SAP Reports', 'Fabric Upload'],
-            'trims'          => ['SAP Trims Report', 'SAP Reports', 'Trims Upload'],
-            'production'     => ['SAP Production Report', 'SAP Reports', 'FG Creation'],
-            'procurement'    => ['SAP Procurement Report', 'SAP Reports'],
-            'purchase-order' => ['SAP Purchase Order Report', 'SAP Reports', 'PO Validation', 'G-Star Purchase Orders'],
-            'po-costing'     => ['PO Costing Validation', 'SAP Reports'],
-            'sales'          => ['Kpis', 'KPIS Dashboard', 'SAP Reports'],
-            'fabric-sale'    => ['Fabric Sale Order', 'SAP Reports', 'SAP Fabric Report'],
-            'utilization'    => ['SAP Utilization Report', 'SAP Reports'],
-            'audit-log'      => ['Audit Log', 'SAP Audit Log'],
-            'zcost'          => ['ZCOST Costing Sheet', 'zCost Sales Cost Sheet', 'SAP Reports'],
-        ];
-
-        if (isset($portalModuleMap[$mod])) {
-            foreach ($portalModuleMap[$mod] as $cand) {
-                if (portal_module_granted($cand, false)) {
-                    return true;
-                }
-            }
-        }
-    }
-
-    switch ($mod) {
-        case 'fabric':
-            return (bool) preg_match('/fabric|cutting|textile|merchandis|sampling|quality|store|plan/i', $role . ' ' . $dept);
-
-        case 'trims':
-            return (bool) preg_match('/trim|accessor|merchandis|procure|purchase|sourcing|store|inventory/i', $role . ' ' . $dept);
-
-        case 'production':
-            return (bool) preg_match('/product|sew|cut|wash|finish|operat|merchandis|line|plan|manufact/i', $role . ' ' . $dept);
-
-        case 'procurement':
-            return (bool) preg_match('/procure|purchase|sourcing|merchandis|store|supply|material/i', $role . ' ' . $dept);
-
-        case 'purchase-order':
-        case 'po-costing':
-            return (bool) preg_match('/purchase|procure|account|finance|commercial|audit|bill|store|cost/i', $role . ' ' . $dept);
-
-        case 'sales':
-        case 'fabric-sale':
-            return (bool) preg_match('/sale|market|merchandis|account|finance|commercial/i', $role . ' ' . $dept);
-
-        case 'zcost':
-            return (bool) preg_match('/cost|sale|merchandis|account|finance|commercial|admin/i', $role . ' ' . $dept);
-
-        case 'audit-log':
-            return $isAdmin || (bool) preg_match('/\b(admin|it|it_admin|audit|director|super_admin)\b/i', $role . ' ' . $dept);
-
-        case 'utilization':
-            return sap_reports_user_can_access('fabric', $user) || sap_reports_user_can_access('trims', $user);
-
-        default:
-            return true;
-    }
+    // Default to false for any user without an explicit can_view=1 grant in tblSapUseracessControl
+    return false;
 }
 ?>

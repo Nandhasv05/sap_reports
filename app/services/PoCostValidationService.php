@@ -150,11 +150,22 @@ class PoCostValidationService
 
             $records = [];
             foreach ($tempfin['records'] as $rec) {
-                $maktx = trim((string) ($rec['maktx'] ?? $rec['cost_description'] ?? ''));
+                $kind = (string) ($rec['row_kind'] ?? 'detail');
+                if (in_array($kind, ['footer', 'charge', 'tax'], true)) {
+                    $rec['needs_manual_match'] = false;
+                    $rec['selected'] = false;
+                    $rec['manual_match'] = false;
+                    $records[] = $rec;
+                    continue;
+                }
+                // Needs zCOST ITEM pick when no linked cost line yet, or budget/actual missing
                 $budget = $rec['budget_cost_per_gmt'] ?? $rec['expected_unit_cost'] ?? null;
+                $actual = $rec['actual_cost'] ?? $rec['po_unit_cost'] ?? null;
+                $hasZcostItem = trim((string) ($rec['cost_item'] ?? $rec['maktx'] ?? $rec['matched_line_key'] ?? '')) !== '';
                 $st = strtoupper((string) ($rec['status'] ?? ''));
-                $needsManual = $maktx === ''
+                $needsManual = !$hasZcostItem
                     || ($budget === null || $budget === '' || (float) $budget <= 0.0)
+                    || ($actual === null || $actual === '')
                     || ($st === 'EXCEPTION' && preg_match('/no matching|no linked|cannot load|no budget/i', (string) ($rec['validation_result'] ?? '')));
                 $rec['needs_manual_match'] = (bool) $needsManual;
                 $rec['selected'] = false;
@@ -704,6 +715,7 @@ class PoCostValidationService
             $itemNo = $this->displayNumber($itemRaw);
             $quoteNo = $this->displayNumber((string) ($row['QuotationNo'] ?? ''));
             $costingQuoteNo = $this->displayNumber((string) ($row['CostingQuotationNo'] ?? ''));
+            $costingItemNo = trim((string) ($row['CostingItemNo'] ?? $row['CostingItem'] ?? ''));
             $isValidatedRow = $costingQuoteNo !== '';
             $soRef = $this->displayNumber((string) ($row['SalesOrderReference'] ?? ''));
             $rowKey = $itemNo . '|' . ($quoteNo !== '' ? $quoteNo : '_');
@@ -760,6 +772,10 @@ class PoCostValidationService
                 $itemText = trim((string) ($row['PurchaseOrderItemText'] ?? ''));
                 $matCategory = SapPurchaseOrderService::classifyMaterial($matType, $matTypeDesc, $matGroup);
 
+                $soQty = $this->sapNumber($row['SaleOrderQuantity'] ?? $row['SO_QTY'] ?? 0);
+                $reqQty = $this->sapNumber($row['ReqBOMQuantity'] ?? $row['REQQTY'] ?? 0);
+                $style = trim((string) ($row['style'] ?? $row['Style'] ?? ''));
+
                 $itemsMap[$rowKey] = [
                     'item'               => $itemNo,
                     'row_key'            => $rowKey,
@@ -790,15 +806,41 @@ class PoCostValidationService
                     'quotations'         => $quoteNo !== '' ? [$quoteNo] : [],
                     'quotation'          => $quoteNo,
                     'costing_quotation'  => $costingQuoteNo,
+                    'costing_quotation_no' => $costingQuoteNo !== '' ? $costingQuoteNo : $quoteNo,
+                    'costing_item_no'    => $costingItemNo,
                     'is_validated_quote' => $isValidatedRow,
+                    'so_qty'             => $soQty,
+                    'prwise_so_qty'      => $soQty,
+                    'reqqty'             => $reqQty,
+                    'style'              => $style,
                 ];
             } else {
+                $soQty = $this->sapNumber($row['SaleOrderQuantity'] ?? $row['SO_QTY'] ?? 0);
+                $reqQty = $this->sapNumber($row['ReqBOMQuantity'] ?? $row['REQQTY'] ?? 0);
+                $style = trim((string) ($row['style'] ?? $row['Style'] ?? ''));
+                if (($itemsMap[$rowKey]['so_qty'] ?? 0) <= 0 && $soQty > 0) {
+                    $itemsMap[$rowKey]['so_qty'] = $soQty;
+                    $itemsMap[$rowKey]['prwise_so_qty'] = $soQty;
+                }
+                if (($itemsMap[$rowKey]['reqqty'] ?? 0) <= 0 && $reqQty > 0) {
+                    $itemsMap[$rowKey]['reqqty'] = $reqQty;
+                }
+                if (($itemsMap[$rowKey]['style'] ?? '') === '' && $style !== '') {
+                    $itemsMap[$rowKey]['style'] = $style;
+                }
                 if ($soRef !== '' && !in_array($soRef, $itemsMap[$rowKey]['sales_orders'], true)) {
                     $itemsMap[$rowKey]['sales_orders'][] = $soRef;
+                }
+                if ($quoteNo !== '' && !in_array($quoteNo, $itemsMap[$rowKey]['quotations'], true)) {
+                    $itemsMap[$rowKey]['quotations'][] = $quoteNo;
                 }
                 if ($isValidatedRow) {
                     $itemsMap[$rowKey]['is_validated_quote'] = true;
                     $itemsMap[$rowKey]['costing_quotation'] = $costingQuoteNo;
+                    $itemsMap[$rowKey]['costing_quotation_no'] = $costingQuoteNo;
+                }
+                if ($costingItemNo !== '' && ($itemsMap[$rowKey]['costing_item_no'] ?? '') === '') {
+                    $itemsMap[$rowKey]['costing_item_no'] = $costingItemNo;
                 }
             }
 
@@ -849,20 +891,22 @@ class PoCostValidationService
                         $curunit = 'INR';
                     }
 
+                    $resolvedItemNo = $itemCode !== '' ? $itemCode : ($posnr !== '' ? ($zline !== '' ? "{$posnr}-{$zline}" : $posnr) : '');
                     $costLines[] = [
                         'section'             => $section,
                         'zsection'            => trim((string) ($line['ZSECTION'] ?? '')),
                         'sales_order'         => $vbeln !== '' ? $vbeln : $soRef,
                         'quotation_no'        => $lineQuote,
                         'parent_quotation_no' => $parentQuote,
-                        'costing_quotation_no'=> $costingQuoteNo,
+                        'costing_quotation_no'=> $costingQuoteNo !== '' ? $costingQuoteNo : $lineQuote,
+                        'costing_item_no'     => $resolvedItemNo,
                         'is_validated'        => $isValidatedRow,
                         'so_item'             => $posnr,
                         'line_no'             => $zline,
-                        'item'                => $itemCode,
+                        'item'                => $resolvedItemNo,
                         'description'         => $maktx,
                         'maktx'               => $maktx,
-                        'material'            => $itemCode,
+                        'material'            => $itemCode !== '' ? $itemCode : $maktx,
                         'wid_siz'             => trim((string) ($line['WID_SIZ'] ?? '')),
                         'net'                 => $this->sapNumber($line['NET'] ?? 0),
                         'waste'               => $this->sapNumber($line['WSTE'] ?? 0),
@@ -888,7 +932,7 @@ class PoCostValidationService
                         'material_type'       => $section,
                         'mat_type_desc'       => $section . ' costing',
                         'material_group'      => $section,
-                        'unit'                => $curunit,
+                        'unit'                => trim((string) ($line['MEINS'] ?? $line['UOM'] ?? $line['UNIT'] ?? '')),
                     ];
                 }
                 if ($quoteNo !== '' && isset($quoteMeta[$quoteNo]) && $lineCount > 0) {
@@ -1208,75 +1252,158 @@ class PoCostValidationService
             $result = 'No linked sales order / quotation — cannot load ZCOST';
         }
 
-        $costItem = (string) ($match['item'] ?? '');
-        $costDesc = (string) ($match['description'] ?? '');
+        $costItem = trim((string) ($match['item'] ?? ''));
+        if ($costItem === '') {
+            $soItem = trim((string) ($match['so_item'] ?? ($match['posnr'] ?? '')));
+            $lineNo = trim((string) ($match['line_no'] ?? ($match['zline'] ?? '')));
+            $costItem = $soItem !== '' ? ($lineNo !== '' ? "{$soItem}-{$lineNo}" : $soItem) : ($lineNo !== '' ? $lineNo : '');
+        }
+        $costDesc = (string) ($match['description'] ?? ($match['maktx'] ?? ''));
         $costSection = (string) ($match['section'] ?? '');
 
+        $soQty = (float) ($item['so_qty'] ?? $item['SaleOrderQuantity'] ?? 0);
+        $reqQty = (float) ($item['reqqty'] ?? $item['ReqBOMQuantity'] ?? 0);
+        $style = (string) ($item['style'] ?? '');
+
+        $gross = isset($match['gross']) && $match['gross'] !== null ? (float) $match['gross'] : null;
+        $net = isset($match['net']) && $match['net'] !== null ? (float) $match['net'] : null;
+        $convr = isset($match['convr']) && $match['convr'] !== null ? (float) $match['convr'] : 1.0;
+        if ($convr <= 0) {
+            $convr = 1.0;
+        }
+
+        $consumption = $net !== null && $net > 0 ? $net : ($gross !== null && $gross > 0 ? $gross : 1.0);
+        $budgetedCons = $consumption;
+
+        $totPoQty = $qty;
+        $poRate = $poUnit;
+        $totValue = (float) ($item['net_value'] ?? ($totPoQty * $poRate));
+
+        if ($reqQty <= 0 && $soQty > 0 && $consumption !== null) {
+            $reqQty = round($soQty * $consumption, 4);
+        }
+        if ($soQty <= 0 && $reqQty > 0 && $consumption !== null && $consumption > 0) {
+            $soQty = round($reqQty / $consumption);
+        }
+
+        $soWisePoQty = $totPoQty;
+        $soWisePoVal = round($poRate * $soWisePoQty * $convr, 2);
+
+        $actualCost = round($poRate * $convr * ($consumption ?? 1.0), 4);
+        $budgetCostPerGmt = $expected;
+        $budgetInr = (float) ($match['total_inr'] ?? ($match['rate'] ?? $expected));
+        $budgetCurrency = (string) ($match['currency'] ?? ($item['currency'] ?? 'INR'));
+        $poCurrency = (string) ($item['currency'] ?? 'INR');
+        $ouom = (string) ($item['unit'] ?? '');
+        $matchUom = trim((string) ($match['unit'] ?? $match['uom'] ?? ''));
+        if (in_array(strtoupper($matchUom), ['INR', 'USD', 'EUR', 'GBP', 'AUD', ''], true)) {
+            $matchUom = '';
+        }
+        $buom = $matchUom !== '' ? $matchUom : (string) ($item['unit'] ?? 'EA');
+
         return [
-            'po_item'            => (string) ($item['item'] ?? ''),
-            'material'           => $material,
-            'description'        => $description,
-            'material_desc'      => $description,
-            'material_type'      => $materialType,
-            'mat_type_desc'      => $matTypeDesc,
-            'sales_order'        => $sos[0] ?? '',
-            'sales_orders'       => $sos,
-            'quotation'          => $itemQuotations[0] ?? '',
-            'quotations'         => $itemQuotations,
-            'po_qty'             => $qty,
-            'order_qty'          => $qty,
-            'unit'               => (string) ($item['unit'] ?? ''),
-            'currency'           => (string) ($item['currency'] ?? 'INR'),
-            'mat_category'       => $matCat,
-            'material_group'     => $materialGroup,
-            'mat_grp_desc'       => $matGrpDesc,
-            'costing_ref'        => $costingRef,
-            'expected_unit_cost' => $expected,
-            'po_unit_cost'       => $poUnit,
-            'difference'         => $diff,
-            'variance_pct'       => $variancePct,
-            'status'             => $status,
-            'validation_result'  => $result,
-            'match_score'        => $score,
-            'match_flags'        => $matchFlags,
-            'purchase_order'     => $this->displayNumber($poNumber),
-            'net_value'          => (float) ($item['net_value'] ?? ($qty * $poUnit)),
-            'quoted_currency'    => $match['currency'] ?? 'INR',
-            'quoted_uom'         => $match['unit'] ?? ($item['unit'] ?? ''),
-            'cost_section'       => $costSection,
-            'cost_nav'           => $this->costNavName($costSection),
-            'cost_item'          => $costItem,
-            'cost_description'   => $costDesc,
-            'maktx'              => $costDesc,
-            'cost_rate'          => $match['rate'] ?? null,
-            'cost_total_inr'     => $match['total_inr'] ?? null,
-            'cost_material'      => (string) ($match['material'] ?? $costItem),
-            'vbeln'              => (string) ($match['sales_order'] ?? $match['quotation_no'] ?? ''),
-            'posnr'              => (string) ($match['so_item'] ?? ''),
-            'zline'              => (string) ($match['line_no'] ?? ''),
-            'wid_siz'            => (string) ($match['wid_siz'] ?? ''),
-            'net'                => $match['net'] ?? null,
-            'waste'              => $match['waste'] ?? null,
-            'gross'              => $match['gross'] ?? null,
-            'curunit'            => (string) ($match['currency'] ?? ''),
-            'rate'               => $match['rate'] ?? null,
-            'total_inr'          => $match['total_inr'] ?? null,
-            'total_fr'           => $match['total_fr'] ?? null,
-            'convr'              => $match['convr'] ?? null,
-            'zsection'           => (string) ($match['zsection'] ?? ''),
-            'item_text'          => (string) ($item['item_text'] ?? ''),
-            'plant'              => (string) ($item['plant'] ?? ''),
-            'po_type'            => (string) ($item['po_type'] ?? ''),
-            'po_type_name'       => (string) ($item['po_type_name'] ?? ''),
-            'po_date'            => (string) ($item['po_date'] ?? ''),
-            'supplier'           => (string) ($item['supplier'] ?? ''),
-            'supplier_full_name' => (string) ($item['supplier_full_name'] ?? ''),
-            'created_by'         => (string) ($item['created_by'] ?? ''),
-            'sell_price'         => $match['sell_price'] ?? null,
-            'making'             => $match['making'] ?? null,
-            'selected'           => false,
-            'manual_match'       => false,
-            'needs_manual_match' => $match === null
+            'pono'                => $this->displayNumber($poNumber),
+            'purchase_order'      => $this->displayNumber($poNumber),
+            'poitem'              => (string) ($item['item'] ?? ''),
+            'po_item'             => (string) ($item['item'] ?? ''),
+            'item'                => (string) ($item['item'] ?? ''),
+            'prno'                => '',
+            'salordno'            => $sos[0] ?? '',
+            'sales_order'         => $sos[0] ?? '',
+            'sales_orders'        => $sos,
+            'style'               => $style,
+            'material'            => $material,
+            'material_desc'       => $description,
+            'mat_desc'            => $description,
+            'description'         => $description,
+            'material_type'       => $materialType,
+            'mat_type_desc'       => $matTypeDesc,
+            'material_group'      => $materialGroup,
+            'matgroup'            => $materialGroup,
+            'mat_grp_desc'        => $matGrpDesc,
+            'mat_category'        => $matCat,
+            'so_qty'              => $soQty,
+            'prwise_so_qty'       => $soQty,
+            'consumption'         => $consumption,
+            'reqqty'              => $reqQty,
+            'tot_poqty'           => $totPoQty,
+            'po_qty'              => $totPoQty,
+            'order_qty'           => $totPoQty,
+            'so_wise_poqty'       => $soWisePoQty,
+            'so_wise_po_val'      => $soWisePoVal,
+            'ouom'                => $ouom,
+            'buom'                => $buom,
+            'unit'                => $ouom,
+            'porate'              => $poRate,
+            'net_price'           => $poRate,
+            'po_unit_cost'        => $poRate,
+            'actual_cost'         => $actualCost,
+            'totvalue'            => $totValue,
+            'net_value'           => $totValue,
+            'po_currency'         => $poCurrency,
+            'currency'            => $poCurrency,
+            'budgeted_cons'       => $budgetedCons,
+            'budget_inr'          => $budgetInr,
+            'cost_total_inr'      => $budgetInr,
+            'budget_currency'     => $budgetCurrency,
+            'budget_conv_rt'      => $convr,
+            'conv'                => $convr,
+            'convr'               => $convr,
+            'budget_cost_per_gmt' => $budgetCostPerGmt,
+            'expected_unit_cost'  => $budgetCostPerGmt,
+            'cost_section'        => $costSection,
+            'cost_nav'            => $this->costNavName($costSection),
+            'cost_item'           => $costItem !== '' ? $costItem : (string) ($match['posnr'] ?? ''),
+            'cost_description'    => $costDesc !== '' ? $costDesc : $description,
+            'maktx'               => $costDesc !== '' ? $costDesc : $description,
+            'quotation'           => $itemQuotations[0] ?? '',
+            'quotations'          => $itemQuotations,
+            'costing_quotation_no'=> (string) (
+                $match['costing_quotation_no']
+                ?? $match['costing_quotation']
+                ?? $item['costing_quotation_no']
+                ?? $item['costing_quotation']
+                ?? ($itemQuotations[0] ?? '')
+            ),
+            'costing_item_no'     => (string) (
+                $match['costing_item_no']
+                ?? $match['item']
+                ?? ($costItem !== '' ? $costItem : ($item['costing_item_no'] ?? ''))
+            ),
+            'costing_ref'         => $costingRef,
+            'difference'          => $diff,
+            'variance_pct'        => $variancePct,
+            'status'              => $status,
+            'validation_result'   => $result,
+            'match_score'         => $score,
+            'match_flags'         => $matchFlags,
+            'quoted_currency'     => $budgetCurrency,
+            'quoted_uom'          => $buom,
+            'vbeln'               => (string) ($match['sales_order'] ?? $match['quotation_no'] ?? ''),
+            'posnr'               => (string) ($match['so_item'] ?? ''),
+            'zline'               => (string) ($match['line_no'] ?? ''),
+            'wid_siz'             => (string) ($match['wid_siz'] ?? ''),
+            'net'                 => $match['net'] ?? null,
+            'waste'               => $match['waste'] ?? null,
+            'gross'               => $match['gross'] ?? null,
+            'curunit'             => $budgetCurrency,
+            'rate'                => $match['rate'] ?? null,
+            'total_inr'           => $match['total_inr'] ?? null,
+            'total_fr'            => $match['total_fr'] ?? null,
+            'zsection'            => (string) ($match['zsection'] ?? ''),
+            'item_text'           => (string) ($item['item_text'] ?? ''),
+            'plant'               => (string) ($item['plant'] ?? ''),
+            'po_type'             => (string) ($item['po_type'] ?? ''),
+            'po_type_name'        => (string) ($item['po_type_name'] ?? ''),
+            'po_date'             => (string) ($item['po_date'] ?? ''),
+            'supplier'            => (string) ($item['supplier'] ?? ''),
+            'supplier_full_name'  => (string) ($item['supplier_full_name'] ?? ''),
+            'created_by'          => (string) ($item['created_by'] ?? ''),
+            'sell_price'          => $match['sell_price'] ?? null,
+            'making'              => $match['making'] ?? null,
+            'selected'            => false,
+            'manual_match'        => false,
+            'needs_manual_match'  => $match === null
                 || $status === 'EXCEPTION' && preg_match('/no matching|no linked|cannot load|no reliable/i', (string) $result),
         ];
     }
