@@ -22,6 +22,19 @@ $userRole = !empty($user['role']) ? $user['role'] : 'ADMIN';
   <link rel="stylesheet" href="<?= e(asset('css/zcost/sap_theme.css')) ?>">
   <link rel="stylesheet" href="<?= e(asset('css/zcost/sap_initial.css')) ?>">
   <link rel="stylesheet" href="<?= e(asset('css/zcost/evolv_landing.css')) ?>">
+  <script>
+    (function () {
+      try {
+        var p = new URLSearchParams(location.search);
+        var v = (p.get('vbeln') || '').trim();
+        if (!v) return;
+        document.documentElement.classList.add('zcost-boot-sheet');
+        if ((p.get('view') || '') === '1' || (p.get('mode') || '') === 'view') {
+          document.documentElement.classList.add('zcost-view-only');
+        }
+      } catch (e) {}
+    })();
+  </script>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>
     <rect width='100' height='100' rx='15' fill='%23003366'/> <text x='50' y='68' fill='white' font-size='55' font-family='Arial' font-weight='bold' text-anchor='middle'>SAP</text></svg>">
 </head>
@@ -1133,7 +1146,7 @@ $userRole = !empty($user['role']) ? $user['role'] : 'ADMIN';
 <script>
   window.ZCOST_API_URL = "<?= e(url('zcost/api')) ?>";
 </script>
-<script src="<?= e(asset('js/zcost/sap_costing.js')) ?>"></script>
+<script src="<?= e(asset('js/zcost/sap_costing.js')) ?>?v=61"></script>
 
 </body>
 </html>

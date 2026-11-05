@@ -39,6 +39,7 @@ return [
     'procurement_service' => '/sap/opu/odata/sap/ZBUSINESS_API_SRV/ProcurementDashboardSet',
     'purchase_order_service' => '/sap/opu/odata/sap/ZI_PURCHASEORDERAPI_HUB_CDS/ZI_PurchaseOrderAPI_HUB',
     'cost_service'           => '/sap/opu/odata/sap/ZCOST_SRV/ZCOSTHSet',
+    'po_pdf_service'         => '/sap/opu/odata/sap/ZCOST_SRV/POPDFSet',
     // Quotation ↔ Sales Order hub (used by PO Costing Step 2)
     'quotation_service'      => '/sap/opu/odata/sap/ZI_QUOTATIONSALESORDER_HUB_CDS/ZI_QuotationSalesOrder_HUB',
     // Quotation & Costing combined CDS view (PO + Items + Quotation + SO + Fabric/Trim/Packing/Special)

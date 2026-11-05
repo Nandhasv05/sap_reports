@@ -80,43 +80,183 @@ function sap_reports_user_can_access(string $module, ?array $user = null): bool
     }
 
     $mod = strtolower(trim($module));
+    $mod = str_replace('_', '-', $mod);
     if ($mod === 'po') {
         $mod = 'purchase-order';
     }
 
-    // User Access Control is strictly for super admins
-    if ($mod === 'user-access-control' || $mod === 'useraccesscontrol' || $mod === 'access-control' || $mod === 'user-access') {
-        return false;
+    if ($mod === 'po-costing') {
+        return sap_reports_user_can($mod, 'view', $user)
+            || sap_reports_user_can($mod, 'approve', $user)
+            || sap_reports_user_can($mod, 'assign', $user)
+            || sap_reports_user_can($mod, 'validate', $user);
+    }
+    if ($mod === 'zcost') {
+        return sap_reports_user_can($mod, 'view', $user)
+            || sap_reports_user_can($mod, 'add', $user)
+            || sap_reports_user_can($mod, 'edit', $user)
+            || sap_reports_user_can($mod, 'copy', $user)
+            || sap_reports_user_can($mod, 'approve', $user);
     }
 
-    // Check granular permission in dbo.tblSapUseracessControl
+    return sap_reports_user_can($module, 'view', $user);
+}
+
+/**
+ * Canonical SAP Reports access table.
+ */
+function sap_reports_access_table(): string
+{
+    return 'sap_report_userAccessControl';
+}
+
+/**
+ * Route aliases stored in sap_report_userAccessControl.page_route vs live app routes.
+ *
+ * @return list<string>
+ */
+function sap_reports_access_route_aliases(string $module): array
+{
+    $mod = strtolower(trim($module));
+    $mod = str_replace('_', '-', $mod);
+    if ($mod === 'po') {
+        $mod = 'purchase-order';
+    }
+
+    $map = [
+        'purchase-order'        => ['purchase-order', 'purchaseorder', 'po'],
+        'po-costing'            => ['po-costing', 'pocosting', 'purchase-order-costing', 'purchase-order?view=costing'],
+        'sales'                 => ['sales', 'sale'],
+        'fabric'                => ['fabric', 'fabric-utilization'],
+        'fabric-sale'           => ['fabric-sale', 'fabricsale'],
+        'production'            => ['production'],
+        'procurement'           => ['procurement'],
+        'trims'                 => ['trims', 'trims-utilization'],
+        'utilization'           => ['utilization', 'overall-utilization'],
+        'audit-log'             => ['audit-log', 'auditlog'],
+        'user-access-control'   => ['user-access-control', 'user-access', 'useraccesscontrol'],
+        'zcost'                 => ['zcost', 'zcost costing sheet', 'zcost-costing-sheet'],
+    ];
+
+    $aliases = $map[$mod] ?? [$mod];
+    $out = [];
+    foreach ($aliases as $alias) {
+        $alias = strtolower(trim((string) $alias));
+        if ($alias !== '' && !in_array($alias, $out, true)) {
+            $out[] = $alias;
+        }
+        $compact = str_replace(['-', ' '], '', $alias);
+        if ($compact !== '' && !in_array($compact, $out, true)) {
+            $out[] = $compact;
+        }
+    }
+    return $out;
+}
+
+/**
+ * Granular right from dbo.sap_report_userAccessControl.
+ */
+function sap_reports_user_can(string $module, string $action = 'view', ?array $user = null): bool
+{
+    $action = strtolower(trim($action));
+    $actionMap = [
+        'pass_po' => 'approve',
+        'update' => 'edit',
+    ];
+    if (isset($actionMap[$action])) {
+        $action = $actionMap[$action];
+    }
+    if (!in_array($action, ['add', 'view', 'edit', 'approve', 'copy', 'assign', 'validate'], true)) {
+        $action = 'view';
+    }
+
+    if ($user === null && function_exists('portal_user')) {
+        $user = portal_user();
+    }
+    if (!$user) {
+        $user = [
+            'username'   => $_SESSION['username'] ?? '',
+            'role'       => $_SESSION['role'] ?? '',
+            'department' => $_SESSION['department'] ?? '',
+            'is_admin'   => $_SESSION['is_admin'] ?? 0,
+            'id'         => $_SESSION['user_id'] ?? 0,
+        ];
+    }
+
+    $username = strtolower(trim((string) ($user['username'] ?? '')));
+    if (function_exists('portal_normalize_username')) {
+        $username = portal_normalize_username((string) ($user['username'] ?? ''));
+    }
+
+    $superAdmins = ['admin', 'saravan', 'saravanan', 'nandhakumar'];
+    if (in_array($username, $superAdmins, true)) {
+        return true;
+    }
+
+    $mod = strtolower(trim($module));
+    if ($mod === 'po') {
+        $mod = 'purchase-order';
+    }
+
+    // Audit Log + User Access Control: only admin / nandhakumar / saravanan (and saravan alias)
+    if (in_array($mod, [
+        'user-access-control', 'useraccesscontrol', 'access-control', 'user-access',
+        'audit-log', 'auditlog',
+    ], true)) {
+        return in_array($username, ['admin', 'nandhakumar', 'saravanan', 'saravan'], true);
+    }
+
+    $col = 'can_' . $action;
+    $aliases = sap_reports_access_route_aliases($mod);
+
     try {
-        $userId = (int) ($user['id'] ?? ($user['Id'] ?? ($_SESSION['user_id'] ?? 0)));
+        $userId = (int) ($user['id'] ?? ($user['Id'] ?? ($user['user_id'] ?? ($_SESSION['user_id'] ?? 0))));
         require_once base_path('app/core/Database.php');
         $pdo = Database::connection();
-        $stmt = $pdo->prepare("
-            SELECT TOP 1 can_view 
-            FROM [dbo].[tblSapUseracessControl] 
-            WHERE (user_id = ? OR (username IS NOT NULL AND LOWER(username) = ?))
-              AND (LOWER(page_route) = ? OR LOWER(REPLACE(page_route, '-', '')) = ? OR LOWER(page_route) LIKE ?)
-            ORDER BY can_view DESC
-        ");
-        $stmt->execute([
-            $userId,
-            $username,
-            $mod,
-            str_replace('-', '', $mod),
-            '%' . $mod . '%'
-        ]);
-        $val = $stmt->fetchColumn();
-        if ($val !== false && $val !== null) {
-            return (int) $val === 1;
+        $table = sap_reports_access_table();
+        if (in_array($action, ['copy', 'assign', 'validate'], true)) {
+            $len = $pdo->query("SELECT COL_LENGTH('dbo.{$table}', '{$col}')")->fetchColumn();
+            if ((int) $len <= 0) {
+                // Fallback: older tblSapUseracessControl without new columns
+                if ($action === 'copy') {
+                    return false;
+                }
+                // assign/validate fall back to can_approve if column missing
+                $col = 'can_approve';
+            }
+        }
+
+        $routeHolders = [];
+        $params = [$userId, $username];
+        foreach ($aliases as $i => $alias) {
+            $routeHolders[] = 'LOWER(LTRIM(RTRIM(ISNULL(page_route, \'\')))) = ?';
+            $params[] = $alias;
+        }
+
+        $tables = [$table, 'tblSapUseracessControl'];
+        foreach ($tables as $tbl) {
+            try {
+                $sql = "
+                    SELECT TOP 1 CAST({$col} AS INT) AS allowed
+                    FROM [dbo].[{$tbl}]
+                    WHERE (user_id = ? OR (username IS NOT NULL AND LOWER(LTRIM(RTRIM(username))) = ?))
+                      AND (" . implode(' OR ', $routeHolders) . ")
+                    ORDER BY CAST({$col} AS INT) DESC
+                ";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute($params);
+                $val = $stmt->fetchColumn();
+                if ($val !== false && $val !== null) {
+                    return (int) $val === 1;
+                }
+            } catch (Throwable $inner) {
+                continue;
+            }
         }
     } catch (Throwable $e) {
-        error_log('sap_reports_user_can_access error: ' . $e->getMessage());
+        error_log('sap_reports_user_can error: ' . $e->getMessage());
     }
 
-    // Default to false for any user without an explicit can_view=1 grant in tblSapUseracessControl
     return false;
 }
 ?>

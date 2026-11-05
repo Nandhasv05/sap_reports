@@ -2,7 +2,7 @@
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 28/10/2026
  * DESCRIPTION : Bulk PO Costing Validation — fetch, validate, drill-down, workbench
- */
+*/
 (function () {
     let cfg = {};
     try { cfg = JSON.parse(document.getElementById('poConfig')?.textContent || '{}'); } catch (e) { cfg = {}; }
@@ -11,13 +11,54 @@
     const spinner = $('rptSpinner');
     const money = (n) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
     const money2 = (n) => (n === null || n === undefined || n === '') ? '—' : Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const qty = (n) => Number(n || 0).toLocaleString('en-IN');
+    const qty = (n) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 3 });
+    const num = (n, dig = 4) => {
+        if (n === null || n === undefined || n === '') return '—';
+        const v = Number(n);
+        if (!Number.isFinite(v)) return '—';
+        return v.toLocaleString('en-IN', { maximumFractionDigits: dig });
+    };
     const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const dash = (v) => (v === '' || v === null || v === undefined ? '—' : esc(v));
     const fmtDate = (iso) => {
         const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
         return m ? `${m[3]}-${m[2]}-${m[1]}` : '—';
     };
+
+    /*
+    * Handle zCOST View URL Functionality
+    */
+    function padPosnr(v) {
+        const digits = String(v ?? '').replace(/\D/g, '');
+        if (!digits) return '000010';
+        return digits.padStart(6, '0').slice(-6);
+    }
+
+    function zcostViewUrl(quote, itemNo) {
+        const raw = String(quote ?? '').trim();
+        const q = (raw.match(/\d+/) || [raw])[0];
+        if (!q) return '';
+        const item = String(itemNo ?? '').trim();
+        const posnr = /^\d+$/.test(item.replace(/^0+/, '') || item) ? padPosnr(item) : '000010';
+        const configured = String(cfg.zcostUrl || cfg.zcostAppUrl || '').trim();
+        const base = configured || new URL('zcost', window.location.href.replace(/\/[^/]*$/, '/')).pathname;
+        try {
+            const u = new URL(base, window.location.origin);
+            u.searchParams.set('vbeln', q);
+            u.searchParams.set('posnr', posnr);
+            u.searchParams.set('view', '1');
+            return u.href;
+        } catch (err) {
+            return `zcost?vbeln=${encodeURIComponent(q)}&posnr=${encodeURIComponent(posnr)}&view=1`;
+        }
+    }
+
+    function quotationLinkHtml(quote, itemNo) {
+        const q = String(quote ?? '').trim();
+        if (!q) return '—';
+        const href = zcostViewUrl(q, itemNo);
+        return `<a class="pcw-quote-link" href="${esc(href)}" data-quote="${esc(q)}" target="_blank" rel="noopener noreferrer" title="Open zCOST Sales Costing Sheet">${esc(q)}</a>`;
+    }
 
     const FABRIC = new Set(['ZFRI', 'ZFRD']);
     const TRIMS = new Set(['ZTRD', 'ZTRI']);
@@ -36,25 +77,49 @@
 
     const COL_DEFS = [
         { key: 'check', label: 'Select', locked: true },
-        { key: 'po', label: 'PO Number' },
+        { key: 'sno', label: 'S.No', locked: true },
+        { key: 'po', label: 'PONO' },
         { key: 'date', label: 'PO Date' },
-        { key: 'vendor_code', label: 'Vendor Code' },
-        { key: 'vendor_name', label: 'Vendor Name' },
         { key: 'material', label: 'Material Type' },
         { key: 'items', label: 'No. of Items' },
-        { key: 'value', label: 'PO Value (₹)' },
+        { key: 'vendor_name', label: 'Vendor Name' },
+        { key: 'vendor_code', label: 'Vendor Code' },
         { key: 'passed', label: 'Passed' },
         { key: 'exceptions', label: 'Exceptions' },
         { key: 'pending', label: 'Pending' },
         { key: 'status', label: 'Validation Status' },
+        { key: 'so_qty', label: 'Total SO Qty' },
+        { key: 'prwise_so_qty', label: 'Total PRWISE_SO_QTY' },
+        { key: 'consumption', label: 'Total Consumption' },
+        { key: 'reqqty', label: 'Total Req Qty' },
+        { key: 'tot_poqty', label: 'Total PO Qty' },
+        { key: 'so_wise_poqty', label: 'Total SO Wise PO Qty' },
+        { key: 'so_wise_po_val', label: 'Total SO Wise PO Val' },
+        { key: 'totvalue', label: 'Total Value' },
+        { key: 'po_currency', label: 'PO Currency' },
+        { key: 'budgeted_cons', label: 'Total BUDGETED_CONS' },
+        { key: 'budget_inr', label: 'Total BUDGET_INR' },
+        { key: 'budget_cost_per_gmt', label: 'Total BUDGET_COST_PER_GMT' },
+        { key: 'conv', label: 'Total CONV' },
+        { key: 'actual_cost', label: 'Total ACTUAL_COST' },
+        { key: 'pdf', label: 'View PDF', locked: true },
         { key: 'last', label: 'Last Validated' },
-        { key: 'validated_by', label: 'Validated By' },
     ];
     let hiddenCols = new Set();
     let pcbTablePrefManager = null;
     let pcbItemTablePrefManager = null;
-    let currentSort = { key: null, dir: null }; // dir: 'asc' | 'desc' | null
-    const NUMERIC_SORT_KEYS = new Set(['items', 'value', 'passed', 'exceptions', 'pending']);
+    let currentSort = { key: null, dir: null };
+    const NUMERIC_SORT_KEYS = new Set([
+        'sno', 'items', 'passed', 'exceptions', 'pending',
+        'so_qty', 'prwise_so_qty', 'consumption', 'reqqty', 'tot_poqty',
+        'so_wise_poqty', 'so_wise_po_val', 'totvalue',
+        'budgeted_cons', 'budget_inr', 'budget_cost_per_gmt', 'conv', 'actual_cost',
+    ]);
+    const MONEY_KEYS = new Set(['so_wise_po_val', 'totvalue', 'budget_inr']);
+    const RATE_KEYS = new Set(['consumption', 'budgeted_cons', 'budget_cost_per_gmt', 'conv', 'actual_cost']);
+    const colFilterState = Object.create(null);
+    let assignedUser = { id: '', username: '' };
+    let validateTargetPos = [];
 
     /*
     * Handle Current User Functionality
@@ -104,9 +169,10 @@
      * Handldew Selceted Material Functionality
      */
     function selectedMat() {
-        const sel = $('pcbMat');
-        if (sel) return sel.value || 'all';
-        return document.querySelector('input[name="pcb_mat"]:checked')?.value || 'all';
+        const radio = document.querySelector('input[name="pcb_mat"]:checked');
+        const val = radio?.value || $('pcbMat')?.value || 'all';
+        if ($('pcbMat') && $('pcbMat').value !== val) $('pcbMat').value = val;
+        return val || 'all';
     }
 
     function workbenchUrl(po) {
@@ -115,6 +181,12 @@
         u.searchParams.set('po', po);
         const mat = selectedMat();
         if (mat !== 'all') u.searchParams.set('mat_cat', mat);
+        return u.pathname + u.search;
+    }
+
+    function pdfUrl(po) {
+        const u = new URL(cfg.pdfUrl || 'purchase-order/pdf', window.location.origin);
+        u.searchParams.set('po', po);
         return u.pathname + u.search;
     }
 
@@ -186,6 +258,7 @@
             pending = Number(rec.items_count || 0) || 1;
             validationStatus = 'PENDING';
         }
+        const totals = totalsFromRecords(cached?.records) || rec._totals || emptyTotals();
         return {
             ...rec,
             _checked: !!rec._checked,
@@ -197,7 +270,183 @@
             _validation_status: validationStatus,
             _last_validated: lastValidated,
             _validated_by: validatedBy,
+            _totals: totals,
+            so_qty: totals.so_qty,
+            prwise_so_qty: totals.prwise_so_qty,
+            consumption: totals.consumption,
+            reqqty: totals.reqqty,
+            tot_poqty: totals.tot_poqty,
+            so_wise_poqty: totals.so_wise_poqty,
+            so_wise_po_val: totals.so_wise_po_val,
+            totvalue: totals.totvalue,
+            po_currency: totals.po_currency || rec.currency || rec.po_currency || 'INR',
+            budgeted_cons: totals.budgeted_cons,
+            budget_inr: totals.budget_inr,
+            budget_cost_per_gmt: totals.budget_cost_per_gmt,
+            conv: totals.conv,
+            actual_cost: totals.actual_cost,
+            _po_items: totals.po_items,
+            _po_materials: totals.po_materials,
+            _z_items: totals.z_items,
+            _z_materials: totals.z_materials,
+            _z_so_qty: totals.z_so_qty,
+            _z_net_value: totals.z_net_value,
         };
+    }
+
+    function emptyTotals() {
+        return {
+            so_qty: 0, prwise_so_qty: 0, consumption: 0, reqqty: 0, tot_poqty: 0,
+            so_wise_poqty: 0, so_wise_po_val: 0, totvalue: 0, po_currency: 'INR',
+            budgeted_cons: 0, budget_inr: 0, budget_cost_per_gmt: 0, conv: 0, actual_cost: 0,
+            po_items: 0, po_materials: 0,
+            z_items: 0, z_materials: 0, z_so_qty: 0, z_net_value: 0,
+        };
+    }
+
+    function nNum(v) {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : 0;
+    }
+
+    function isFooterLine(r) {
+        const kind = String(r?.row_kind || '').toLowerCase();
+        return kind === 'footer' || kind === 'subtotal' || kind === 'total';
+    }
+
+    function isMatchedLine(r) {
+        if (!r || isFooterLine(r)) return false;
+        const budget = nNum(r.budget_cost_per_gmt ?? r.expected_unit_cost ?? r.budget_inr);
+        if (r.manual_match || r.matched_line_key || r.cost_item || r.maktx || r.costing_item_no) {
+            return budget > 0;
+        }
+        if (r.needs_manual_match === true) return false;
+        const actual = nNum(r.actual_cost ?? r.po_unit_cost);
+        if (budget <= 0 || !actual) return false;
+        const st = String(r.status || '').toUpperCase();
+        if (st === 'EXCEPTION' && /no matching|no linked|cannot load|no budget/i.test(String(r.validation_result || ''))) {
+            return false;
+        }
+        return true;
+    }
+
+    function totalsFromRecords(records) {
+        if (!Array.isArray(records) || !records.length) return emptyTotals();
+        const t = emptyTotals();
+        const seenItems = new Set();
+        const poMats = new Set();
+        const zItems = new Set();
+        const zMats = new Set();
+        const seenZItem = new Set();
+        let convSum = 0;
+        let convN = 0;
+        records.forEach((r) => {
+            if (isFooterLine(r)) return;
+            const soQty = nNum(r.so_qty ?? r.prwise_so_qty);
+            const orderQty = nNum(r.tot_poqty ?? r.order_qty ?? r.po_qty);
+            const costQty = soQty > 0 ? soQty : (orderQty > 0 ? orderQty : 1);
+            const budget = nNum(r.budget_cost_per_gmt ?? r.expected_unit_cost);
+            const actual = nNum(r.actual_cost ?? r.po_unit_cost);
+            const budgetInr = nNum(r.budget_inr ?? r.cost_total_inr);
+
+            t.so_qty += soQty;
+            t.prwise_so_qty += nNum(r.prwise_so_qty ?? r.so_qty);
+            t.consumption += nNum(r.consumption);
+            t.reqqty += nNum(r.reqqty);
+            t.so_wise_poqty += nNum(r.so_wise_poqty);
+            t.so_wise_po_val += nNum(r.so_wise_po_val);
+            t.budgeted_cons += nNum(r.budgeted_cons);
+            t.budget_cost_per_gmt += budget;
+            t.actual_cost += actual * costQty;
+            t.budget_inr += budgetInr > 0 ? budgetInr : (budget * costQty);
+            const cv = nNum(r.conv ?? r.convr ?? r.budget_conv_rt);
+            if (cv) { convSum += cv; convN += 1; }
+
+            const item = String(r.poitem || r.po_item || '').trim();
+            const mat = String(r.material || '').trim();
+            if (item) seenItems.add(item);
+            if (mat) poMats.add(mat);
+
+            if (item) {
+                if (!t._seenValue) t._seenValue = new Set();
+                if (!t._seenValue.has(item)) {
+                    t._seenValue.add(item);
+                    t.tot_poqty += orderQty;
+                    t.totvalue += nNum(r.totvalue ?? r.net_value);
+                }
+            } else {
+                t.tot_poqty += orderQty;
+                t.totvalue += nNum(r.totvalue ?? r.net_value);
+            }
+
+            if (isMatchedLine(r)) {
+                if (item) zItems.add(item);
+                if (mat) zMats.add(mat);
+                if (soQty > 0) t.z_so_qty += soQty;
+                else if (item && !seenZItem.has(item)) {
+                    seenZItem.add(item);
+                    t.z_so_qty += orderQty;
+                } else if (!item) {
+                    t.z_so_qty += orderQty;
+                }
+                t.z_net_value += (budget > 0 ? budget : budgetInr) * (budget > 0 ? costQty : 1);
+            }
+
+            if (!t.po_currency) t.po_currency = String(r.po_currency || r.currency || 'INR');
+        });
+        t.conv = convN ? convSum / convN : 0;
+        t.po_items = seenItems.size;
+        t.po_materials = poMats.size;
+        t.z_items = zItems.size;
+        t.z_materials = zMats.size;
+        delete t._seenValue;
+        if (!t.po_currency) t.po_currency = 'INR';
+        return t;
+    }
+
+    function formatCol(key, r, rowIndex) {
+        switch (key) {
+            case 'check':
+                return `<input type="checkbox" class="pcb-row-check" data-po="${esc(r.purchase_order)}" ${r._checked ? 'checked' : ''}>`;
+            case 'sno':
+                return String(rowIndex);
+            case 'po':
+                return `<button type="button" class="pcb-po-link" data-po="${esc(r.purchase_order)}">${esc(r.purchase_order)}</button>`;
+            case 'date':
+                return fmtDate(r.date);
+            case 'material':
+                return `<span class="pcb-mat-chip">${dash(r._mat_label)}</span>`;
+            case 'items':
+                return qty(r.items_count);
+            case 'vendor_name':
+                return dash(r.supplier_full_name);
+            case 'vendor_code':
+                return dash(r.supplier);
+            case 'passed':
+                return qty(r._passed);
+            case 'exceptions':
+                return qty(r._exceptions);
+            case 'pending':
+                return qty(r._pending);
+            case 'status':
+                return statusBadge(r._validation_status);
+            case 'po_currency':
+                return dash(r.po_currency || 'INR');
+            case 'pdf':
+                return `<button type="button" class="pcb-pdf-btn" data-po="${esc(r.purchase_order)}" title="View PO PDF">
+                    <span class="material-icons-round">picture_as_pdf</span>
+                    View PDF
+                </button>`;
+            case 'last':
+                return dash(r._last_validated);
+            default: {
+                const v = r[key];
+                if (MONEY_KEYS.has(key)) return money2(v);
+                if (RATE_KEYS.has(key)) return num(v, 4);
+                if (NUMERIC_SORT_KEYS.has(key)) return qty(v);
+                return dash(v);
+            }
+        }
     }
 
     function pctLabel(n, total) {
@@ -209,9 +458,14 @@
 
     function colFilterMap() {
         const map = {};
-        document.querySelectorAll('.pcb-col-filter').forEach((inp) => {
+        Object.keys(colFilterState).forEach((key) => {
+            const val = String(colFilterState[key] || '').trim();
+            if (val) map[key] = val;
+        });
+        if (Object.keys(map).length) return map;
+        document.querySelectorAll('#pcbFilterRow .pcb-col-filter').forEach((inp) => {
             const key = inp.getAttribute('data-key');
-            const val = String(inp.value || '').trim().toLowerCase();
+            const val = String(inp.value || '').trim();
             if (key && val) map[key] = val;
         });
         return map;
@@ -220,22 +474,24 @@
     function rowField(r, key) {
         switch (key) {
             case 'po': return String(r.purchase_order || '');
-            case 'date': return fmtDate(r.date);
+            case 'date': return [fmtDate(r.date), r.date].join(' ');
             case 'vendor_code': return String(r.supplier || '');
             case 'vendor_name': return String(r.supplier_full_name || '');
             case 'material': return String(r._mat_label || '');
-            case 'items': return [r.items_count, qty(r.items_count)].filter((v) => v !== '' && v != null).join(' ');
-            case 'value': return [r.total_value, money(r.total_value), money2(r.total_value)].join(' ');
+            case 'items': return [r.items_count, qty(r.items_count)].join(' ');
             case 'passed': return [r._passed, qty(r._passed)].join(' ');
             case 'exceptions': return [r._exceptions, qty(r._exceptions)].join(' ');
             case 'pending': return [r._pending, qty(r._pending)].join(' ');
             case 'status': {
                 const s = String(r._validation_status || '');
-                return s + (s === 'EXCEPTION' ? ' fail failed' : '') + (s === 'PASSED' ? ' pass ok' : '');
+                return s + (s === 'EXCEPTION' ? ' fail failed exception' : '') + (s === 'PASSED' ? ' pass ok' : '') + (s === 'PENDING' ? ' pending' : '');
             }
             case 'last': return String(r._last_validated || '');
-            case 'validated_by': return String(r._validated_by || '');
-            default: return '';
+            case 'po_currency': return String(r.po_currency || 'INR');
+            default: {
+                const v = r[key];
+                return [v, qty(v), money2(v), num(v, 4)].join(' ');
+            }
         }
     }
 
@@ -252,7 +508,7 @@
         }
         const clearAll = $('pcbClearAllFilters');
         if (clearAll) clearAll.style.display = (q || activeCols) ? '' : 'none';
-        document.querySelectorAll('.pcb-col-filter').forEach((inp) => {
+        document.querySelectorAll('#pcbFilterRow .pcb-col-filter').forEach((inp) => {
             inp.classList.toggle('has-val', !!String(inp.value || '').trim());
         });
         const count = $('pcbCount');
@@ -270,10 +526,10 @@
                 if (!hay.includes(q)) return false;
             }
             for (const [key, val] of Object.entries(cols)) {
-                const hay = rowField(r, key);
-                const n = String(val || '').toLowerCase().replace(/,/g, '');
-                const h = String(hay || '').toLowerCase();
-                if (!(h.includes(String(val || '').toLowerCase()) || h.replace(/,/g, '').includes(n))) return false;
+                const needle = String(val || '').toLowerCase().replace(/,/g, '').trim();
+                if (!needle) continue;
+                const hay = String(rowField(r, key) || '').toLowerCase();
+                if (!(hay.includes(String(val).toLowerCase()) || hay.replace(/,/g, '').includes(needle))) return false;
             }
             return true;
         });
@@ -293,14 +549,13 @@
             case 'vendor_name': return String(r.supplier_full_name || '');
             case 'material': return String(r._mat_label || '');
             case 'items': return Number(r.items_count || 0);
-            case 'value': return Number(r.total_value || 0);
             case 'passed': return Number(r._passed || 0);
             case 'exceptions': return Number(r._exceptions || 0);
             case 'pending': return Number(r._pending || 0);
             case 'status': return String(r._validation_status || '');
             case 'last': return String(r._last_validated || '');
-            case 'validated_by': return String(r._validated_by || '');
-            default: return '';
+            case 'po_currency': return String(r.po_currency || '');
+            default: return NUMERIC_SORT_KEYS.has(key) ? Number(r[key] || 0) : String(r[key] || '');
         }
     }
 
@@ -395,12 +650,18 @@
                 ).join('\n');
             }
             if (toggleBtn) toggleBtn.classList.toggle('is-active', !!(hidden && hidden.length > 0));
+            if (tableId === 'pcbItemTable' && typeof syncItemGroupHeaders === 'function') {
+                syncItemGroupHeaders();
+            }
         }
 
         function applyOrder(order) {
             appliedOrder = [...order];
             const rows = Array.from(table.querySelectorAll('thead tr, tbody tr')).filter(
-                (tr) => !tr.classList.contains('pcb-empty') && !tr.classList.contains('pcw-empty')
+                (tr) =>
+                    !tr.classList.contains('pcb-empty') &&
+                    !tr.classList.contains('pcw-empty') &&
+                    !tr.classList.contains('pcw-group-row')
             );
             rows.forEach((tr) => {
                 const byId = {};
@@ -591,7 +852,8 @@
             });
         }
 
-        const theadFirstRow = table.querySelector('thead tr:first-child');
+        const theadFirstRow = table.querySelector('thead tr.pcb-item-header-row, thead tr.pcb-header-row, thead tr.rpt-header-row')
+            || table.querySelector('thead tr:not(.pcw-group-row)');
         if (theadFirstRow) {
             Array.from(theadFirstRow.children).forEach((th) => {
                 const key = th.getAttribute(colAttr) || th.getAttribute('data-icol') || th.getAttribute('data-col-key');
@@ -739,6 +1001,38 @@
         if ($('pcbCount')) $('pcbCount').textContent = filtered.length
             ? `Showing ${showing} of ${filtered.length} purchase orders`
             : 'No purchase orders';
+
+        let poItems = 0;
+        let poMats = 0;
+        let poSoQty = 0;
+        let poValue = 0;
+        let zItems = 0;
+        let zMats = 0;
+        let zSoQty = 0;
+        let zValue = 0;
+        filtered.forEach((r) => {
+            const hasLines = Number(r._po_items || 0) > 0;
+            poItems += hasLines ? Number(r._po_items) : Number(r.items_count || 0);
+            poMats += Number(r._po_materials || 0);
+            poSoQty += Number(r.tot_poqty || r.so_qty || 0);
+            poValue += Number(r.totvalue || r.total_value || 0);
+            zItems += Number(r._z_items || 0);
+            zMats += Number(r._z_materials || 0);
+            zSoQty += Number(r._z_so_qty || 0);
+            zValue += Number(r._z_net_value || r.budget_inr || 0);
+        });
+        const setCmp = (id, text) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = text;
+        };
+        setCmp('pcbCmpPoItems', qty(poItems));
+        setCmp('pcbCmpPoMaterials', qty(poMats));
+        setCmp('pcbCmpPoQty', qty(poSoQty));
+        setCmp('pcbCmpPoValue', money(poValue || value));
+        setCmp('pcbCmpZcItems', qty(zItems));
+        setCmp('pcbCmpZcMaterials', qty(zMats));
+        setCmp('pcbCmpZcQty', qty(zSoQty));
+        setCmp('pcbCmpZcValue', money(zValue));
     }
 
     function pageRows() {
@@ -752,31 +1046,24 @@
         if (!tbody) return;
         const rows = pageRows();
         if (!rows.length) {
-            tbody.innerHTML = '<tr class="pcb-empty"><td colspan="15">No purchase orders match the filters.</td></tr>';
+            tbody.innerHTML = `<tr class="pcb-empty"><td colspan="${COL_DEFS.length}">No purchase orders match the filters.</td></tr>`;
             if (cards) cards.innerHTML = '<div class="pcb-card-empty">No purchase orders match the filters.</div>';
             $('pcbPager') && ($('pcbPager').hidden = true);
             fillKpis();
             return;
         }
 
-        tbody.innerHTML = rows.map((r) => {
+        const startIdx = (page - 1) * pageSize;
+        tbody.innerHTML = rows.map((r, i) => {
             const active = activePo === r.purchase_order ? ' is-active' : '';
-            return `<tr class="pcb-row${active}" data-po="${esc(r.purchase_order)}">
-                <td class="pcb-check" data-col-key="check"><input type="checkbox" class="pcb-row-check" data-po="${esc(r.purchase_order)}" ${r._checked ? 'checked' : ''}></td>
-                <td class="pcb-sticky-po" data-col-key="po"><button type="button" class="pcb-po-link" data-po="${esc(r.purchase_order)}">${esc(r.purchase_order)}</button></td>
-                <td data-col-key="date">${fmtDate(r.date)}</td>
-                <td data-col-key="vendor_code">${dash(r.supplier)}</td>
-                <td class="pcb-vendor" data-col-key="vendor_name" title="${esc(r.supplier_full_name)}">${dash(r.supplier_full_name)}</td>
-                <td data-col-key="material"><span class="pcb-mat-chip">${dash(r._mat_label)}</span></td>
-                <td class="num" data-col-key="items">${qty(r.items_count)}</td>
-                <td class="num" data-col-key="value">${money(r.total_value)}</td>
-                <td class="num" data-col-key="passed">${qty(r._passed)}</td>
-                <td class="num" data-col-key="exceptions">${qty(r._exceptions)}</td>
-                <td class="num" data-col-key="pending">${qty(r._pending)}</td>
-                <td data-col-key="status">${statusBadge(r._validation_status)}</td>
-                <td data-col-key="last">${dash(r._last_validated)}</td>
-                <td data-col-key="validated_by">${dash(r._validated_by)}</td>
-            </tr>`;
+            const sno = startIdx + i + 1;
+            return `<tr class="pcb-row${active}" data-po="${esc(r.purchase_order)}">${
+                COL_DEFS.map((c) => {
+                    const numCls = NUMERIC_SORT_KEYS.has(c.key) ? ' num' : '';
+                    const extra = c.key === 'check' ? ' pcb-check' : (c.key === 'po' ? ' pcb-sticky-po' : (c.key === 'vendor_name' ? ' pcb-vendor' : ''));
+                    return `<td class="${(numCls + extra).trim()}" data-col-key="${esc(c.key)}">${formatCol(c.key, r, sno)}</td>`;
+                }).join('')
+            }</tr>`;
         }).join('');
 
         if (cards) {
@@ -803,6 +1090,12 @@
                         <span>${dash(r._last_validated)}</span>
                         <span title="Validated by">${dash(r._validated_by)}</span>
                     </div>
+                    <div class="pcb-card-actions">
+                        <button type="button" class="pcb-pdf-btn" data-po="${esc(r.purchase_order)}">
+                            <span class="material-icons-round">picture_as_pdf</span>
+                            View PDF
+                        </button>
+                    </div>
                 </article>`;
             }).join('');
         }
@@ -813,11 +1106,6 @@
             if ($('pcbPageInfo')) $('pcbPageInfo').textContent = `Page ${page} of ${pages}`;
             if ($('pcbPrev')) $('pcbPrev').disabled = page <= 1;
             if ($('pcbNext')) $('pcbNext').disabled = page >= pages;
-        }
-        if ($('pcbSelectAll')) {
-            const pageChecked = rows.length && rows.every((r) => r._checked);
-            $('pcbSelectAll').checked = pageChecked;
-            $('pcbSelectAll').indeterminate = !pageChecked && rows.some((r) => r._checked);
         }
         applyColumnVisibility();
         updateSortUi();
@@ -970,6 +1258,7 @@
             activePo = null;
             closeOffcanvas();
             applyFilter();
+            enqueueSelectedValidation(allRows.map((r) => String(r.purchase_order || '')).filter(Boolean));
             const u = new URL(cfg.pageUrl || 'purchase-order', window.location.origin);
             u.searchParams.set('view', 'costing');
             u.searchParams.set('range', range);
@@ -978,7 +1267,7 @@
             if (supplier) u.searchParams.set('supplier', supplier);
             if (mat !== 'all') u.searchParams.set('mat_cat', mat);
             window.history.replaceState({}, '', u.pathname + u.search);
-            toast(`Loaded ${records.length.toLocaleString('en-IN')} purchase orders. Select rows to validate.`, 'ok');
+            toast(`Loaded ${records.length.toLocaleString('en-IN')} purchase orders.`, 'ok');
         } catch (err) {
             stopRuntimeValidation();
             allRows = [];
@@ -1133,8 +1422,8 @@
         let done = 0;
         let fail = 0;
         const startedWith = validateQueue.length;
-        setRuntimeStatus(true, `Validating selected 0/${startedWith}`);
-        setProgress(true, 0, startedWith, 'Validating selected POs…');
+        setRuntimeStatus(true, `Loading PO vs zCOST 0/${startedWith}`);
+        setProgress(true, 0, startedWith, 'Loading PO vs zCOST totals…');
 
         const workers = Array.from({ length: Math.min(RUNTIME_CONCURRENCY, Math.max(1, validateQueue.length)) }, async () => {
             while (token === runtimeToken) {
@@ -1156,7 +1445,7 @@
                 const remaining = validateQueue.length;
                 const total = done + remaining;
                 setProgress(true, done, total, `Validated ${done}/${total}${fail ? ` · ${fail} failed` : ''}`);
-                setRuntimeStatus(true, `Validating selected ${done}/${total}`);
+                setRuntimeStatus(true, `Loading PO vs zCOST ${done}/${total}`);
                 if (done % 2 === 0 || remaining === 0 || pageRows().some((r) => r.purchase_order === po)) {
                     fillKpis();
                     renderTable();
@@ -1182,8 +1471,8 @@
         setRuntimeStatus(false);
         toast(
             fail
-                ? `Selected validation finished · ${done - fail} ok · ${fail} failed`
-                : `Selected validation complete · ${done} PO(s)`,
+                ? `Loaded totals for ${done - fail} PO(s) · ${fail} failed`
+                : `PO vs zCOST totals loaded for ${done} PO(s)`,
             fail ? 'info' : 'ok'
         );
     }
@@ -1237,39 +1526,231 @@
     let activeItemRows = [];
     let filteredItemRows = [];
     const DEFAULT_HIDDEN_ITEM_COLS = [
-        'mat_category', 'unit', 'currency', 'net_value', 'cost_section', 'cost_item',
-        'cost_description', 'difference', 'sell_price', 'making', 'quoted_uom', 'quoted_currency'
+        'prno',
+        'prwise_so_qty',
+        'consumption',
+        'mat_desc',
+        'budgeted_cons',
+        'budget_inr',
+        'budget_currency',
+        'budget_conv_rt',
+        'conv',
+        'variance_pct',
     ];
     let hiddenItemCols = new Set(DEFAULT_HIDDEN_ITEM_COLS);
     /** @type {Record<string, string>} live column-filter values (source of truth) */
     const itemColFilterState = Object.create(null);
 
     const ITEM_COL_DEFS = [
-        { key: 'check', label: 'Select', locked: true },
-        { key: 'status', label: 'Status' },
-        { key: 'po_item', label: 'PO Item' },
-        { key: 'material', label: 'Material Code' },
-        { key: 'description', label: 'Material Description' },
-        { key: 'mat_category', label: 'Material Type' },
-        { key: 'sales_order', label: 'Sales Order' },
-        { key: 'po_qty', label: 'PO Qty' },
-        { key: 'unit', label: 'UOM' },
-        { key: 'currency', label: 'Currency' },
-        { key: 'net_value', label: 'Net Value' },
-        { key: 'costing_ref', label: 'Costing Ref' },
-        { key: 'cost_section', label: 'Cost Section' },
-        { key: 'cost_item', label: 'Cost Item' },
-        { key: 'cost_description', label: 'ZCOST Description' },
-        { key: 'expected_unit_cost', label: 'Expected Unit Cost' },
-        { key: 'po_unit_cost', label: 'PO Unit Cost' },
-        { key: 'difference', label: 'Difference' },
+        { key: 'status', label: 'Status', locked: true },
+        { key: 'pono', label: 'PONO' },
+        { key: 'poitem', label: 'POITEM' },
+        { key: 'prno', label: 'PRNO' },
+        { key: 'salordno', label: 'SALORDNO' },
+        { key: 'style', label: 'STYLE' },
+        { key: 'material', label: 'MATERIAL' },
+        { key: 'matgroup', label: 'MATGROUP' },
+        { key: 'so_qty', label: 'SO_QTY' },
+        { key: 'prwise_so_qty', label: 'PRWISE_SO_QTY' },
+        { key: 'consumption', label: 'CONSUMPTION' },
+        { key: 'reqqty', label: 'REQQTY' },
+        { key: 'tot_poqty', label: 'TOT_POQTY' },
+        { key: 'so_wise_poqty', label: 'SO_WISE_POQTY' },
+        { key: 'so_wise_po_val', label: 'SO_WISE_PO_VAL' },
+        { key: 'ouom', label: 'OUOM' },
+        { key: 'porate', label: 'PORATE' },
+        { key: 'totvalue', label: 'TOTVALUE' },
+        { key: 'mat_desc', label: 'MAT_DESC' },
+        { key: 'po_currency', label: 'PO_CURRENCY' },
+        { key: 'costing_quotation_no', label: 'Quotation No' },
+        { key: 'costing_item_no', label: 'zCOST Item' },
+        { key: 'maktx', label: 'MAKTX' },
+        { key: 'budgeted_cons', label: 'BUDGETED_CONS' },
+        { key: 'budget_inr', label: 'BUDGET_INR' },
+        { key: 'budget_currency', label: 'BUDGET_CURRENCY' },
+        { key: 'budget_conv_rt', label: 'BUDGET_CONV_RT' },
+        { key: 'budget_cost_per_gmt', label: 'BUDGET_COST_PER_GMT' },
+        { key: 'conv', label: 'CONV' },
+        { key: 'buom', label: 'BUOM' },
+        { key: 'actual_cost', label: 'ACTUAL_COST' },
         { key: 'variance_pct', label: 'Variance %' },
-        { key: 'sell_price', label: 'Sell Price' },
-        { key: 'making', label: 'Making' },
-        { key: 'quoted_uom', label: 'Quoted UOM' },
-        { key: 'quoted_currency', label: 'Quoted Currency' },
-        { key: 'validation_result', label: 'Validation Result' },
     ];
+    const ITEM_NUM_COLS = new Set([
+        'poitem', 'so_qty', 'prwise_so_qty', 'consumption', 'reqqty', 'tot_poqty',
+        'so_wise_poqty', 'so_wise_po_val', 'porate', 'totvalue', 'budgeted_cons', 'budget_inr',
+        'budget_conv_rt', 'budget_cost_per_gmt', 'conv', 'actual_cost', 'variance_pct',
+    ]);
+    const ITEM_ZCOST_COLS = new Set([
+        'costing_quotation_no', 'costing_item_no', 'maktx',
+        'budgeted_cons', 'budget_inr', 'budget_currency', 'budget_conv_rt', 'budget_cost_per_gmt',
+        'conv', 'buom', 'actual_cost', 'variance_pct',
+    ]);
+    const ITEM_HIGHLIGHT_COLS = new Set(['budget_cost_per_gmt', 'actual_cost']);
+    const itemColGroup = (key) => (ITEM_ZCOST_COLS.has(key) ? 'zcost' : 'po');
+
+    function itemCellValue(key, r) {
+        switch (key) {
+            case 'status':
+                return r.status || '';
+            case 'pono':
+                return r.pono || r.purchase_order || activePo || '';
+            case 'poitem':
+                return r.poitem || r.po_item || '';
+            case 'prno':
+                return r.prno || '';
+            case 'salordno':
+                return r.salordno || r.sales_order || '';
+            case 'style':
+                return r.style || '';
+            case 'material':
+                return r.material || '';
+            case 'matgroup':
+                return r.matgroup || r.material_group || r.cost_item || '';
+            case 'so_qty': {
+                const so = Number(r.so_qty);
+                if (Number.isFinite(so) && so > 0) return so;
+                const pr = Number(r.prwise_so_qty);
+                return Number.isFinite(pr) && pr > 0 ? pr : (r.so_qty ?? r.prwise_so_qty);
+            }
+            case 'prwise_so_qty': {
+                const pr = Number(r.prwise_so_qty);
+                if (Number.isFinite(pr) && pr > 0) return pr;
+                const so = Number(r.so_qty);
+                return Number.isFinite(so) && so > 0 ? so : (r.prwise_so_qty ?? r.so_qty);
+            }
+            case 'consumption': {
+                // Prefer TEMPFIN CONSUMPTION / BUDGETED_CONS — never invent REQQTY÷SO
+                const cons = Number(r.consumption);
+                if (Number.isFinite(cons) && cons > 0) return cons;
+                const bc = Number(r.budgeted_cons);
+                if (Number.isFinite(bc) && bc > 0) return bc;
+                return null;
+            }
+            case 'reqqty':
+                return r.reqqty;
+            case 'tot_poqty':
+                return r.tot_poqty ?? r.order_qty ?? r.po_qty;
+            case 'so_wise_poqty':
+                return r.so_wise_poqty ?? r.tot_poqty ?? r.order_qty ?? r.po_qty;
+            case 'so_wise_po_val':
+                return r.so_wise_po_val ?? r.totvalue ?? r.net_value;
+            case 'ouom':
+                return r.ouom || r.unit || '';
+            case 'porate':
+                return r.porate ?? r.po_unit_cost ?? r.net_price;
+            case 'totvalue':
+                return r.totvalue ?? r.net_value;
+            case 'mat_desc':
+                return r.mat_desc || r.material_desc || r.description || '';
+            case 'po_currency':
+                return r.po_currency || r.currency || 'INR';
+            case 'costing_quotation_no':
+                return r.costing_quotation_no || r.costing_quotation || r.matched_quotation || r.quotation || '';
+            case 'costing_item_no': {
+                // zCOST ITEM only — empty API ITEM must show empty (not POSNR-ZLINE)
+                if (Object.prototype.hasOwnProperty.call(r, 'zcost_item')) {
+                    return String(r.zcost_item || '');
+                }
+                const raw = String(r.cost_item || r.costing_item_no || '').trim();
+                if (/^\d+-\d+$/.test(raw)) return '';
+                return raw;
+            }
+            case 'maktx':
+                return r.maktx || r.cost_description || '';
+            case 'budgeted_cons':
+                return r.budgeted_cons ?? r.consumption ?? r.gross ?? r.net;
+            case 'budget_inr':
+                return r.budget_inr ?? r.cost_total_inr ?? r.total_inr;
+            case 'budget_currency':
+                return r.budget_currency || r.curunit || 'INR';
+            case 'budget_conv_rt':
+                return r.budget_conv_rt ?? r.convr ?? r.conv ?? 1;
+            case 'budget_cost_per_gmt':
+                return r.budget_cost_per_gmt ?? r.expected_unit_cost ?? r.rate;
+            case 'conv':
+                return r.conv ?? r.convr ?? 1;
+            case 'buom':
+                return r.buom || r.ouom || r.unit || '';
+            case 'actual_cost':
+                return r.actual_cost ?? r.po_unit_cost;
+            case 'variance_pct':
+                return r.variance_pct;
+            default:
+                return r[key] ?? '';
+        }
+    }
+
+    function renderItemCell(key, r) {
+        const group = itemColGroup(key);
+        const classes = [];
+        if (ITEM_NUM_COLS.has(key)) classes.push('num');
+        classes.push(`pcw-col-${group}`);
+        if (ITEM_HIGHLIGHT_COLS.has(key)) classes.push('pcw-hl-cost');
+        const cls = classes.length ? ` class="${classes.join(' ')}"` : '';
+        let inner = '—';
+        switch (key) {
+            case 'status':
+                inner = resultPill(r.status);
+                break;
+            case 'pono':
+                inner = `<span class="pcw-mat">${dash(itemCellValue(key, r))}</span>`;
+                break;
+            case 'material':
+                inner = `<span class="pcw-mat">${dash(r.material)}</span>`;
+                break;
+            case 'mat_desc':
+                inner = `<span class="pcw-compare-po" title="${esc(itemCellValue(key, r))}">${dash(itemCellValue(key, r))}</span>`;
+                break;
+            case 'costing_quotation_no':
+                inner = quotationLinkHtml(
+                    itemCellValue(key, r),
+                    itemCellValue('costing_item_no', r)
+                );
+                break;
+            case 'costing_item_no':
+                inner = `<span class="pcw-nav-chip" title="zCOST ITEM">${dash(itemCellValue(key, r))}</span>`;
+                break;
+            case 'maktx':
+                inner = `<span class="pcw-compare-maktx" title="${esc(itemCellValue(key, r))}">${dash(itemCellValue(key, r))}</span>`;
+                break;
+            case 'so_qty':
+            case 'prwise_so_qty':
+            case 'reqqty':
+            case 'tot_poqty':
+            case 'so_wise_poqty':
+                inner = qty(itemCellValue(key, r));
+                break;
+            case 'so_wise_po_val':
+            case 'totvalue':
+            case 'budget_inr':
+                inner = money2(itemCellValue(key, r));
+                break;
+            case 'ouom':
+            case 'buom':
+            case 'po_currency':
+            case 'budget_currency':
+                inner = dash(itemCellValue(key, r));
+                break;
+            case 'consumption':
+            case 'porate':
+            case 'budgeted_cons':
+            case 'budget_conv_rt':
+            case 'budget_cost_per_gmt':
+            case 'conv':
+            case 'actual_cost': {
+                const mismatch = !!r.cost_mismatch && (key === 'budget_cost_per_gmt' || key === 'actual_cost');
+                const shown = num(itemCellValue(key, r), 4);
+                inner = mismatch ? `<span class="pcw-cost-mismatch">${shown}</span>` : shown;
+                break;
+            }
+            case 'variance_pct':
+                inner = varianceCell(itemCellValue(key, r));
+                break;
+            default:
+                inner = dash(itemCellValue(key, r));
+        }
+        return `<td${cls} data-col-key="${esc(key)}" data-col-group="${esc(group)}">${inner}</td>`;
+    }
 
     function dlRow(label, value, extraClass) {
         return `<div class="pcw-kv"><dt>${esc(label)}</dt><dd class="${extraClass || ''}">${value}</dd></div>`;
@@ -1367,6 +1848,11 @@
                 out.push(raw, raw === 'PASS' ? 'passed ok' : '', raw === 'EXCEPTION' ? 'fail failed exception' : '');
                 break;
             case 'po_qty':
+            case 'so_qty':
+            case 'prwise_so_qty':
+            case 'reqqty':
+            case 'tot_poqty':
+            case 'so_wise_poqty':
                 out.push(qty(v), String(Number(v || 0)));
                 break;
             case 'net_value':
@@ -1375,7 +1861,19 @@
             case 'difference':
             case 'sell_price':
             case 'making':
+            case 'so_wise_po_val':
+            case 'totvalue':
+            case 'budget_inr':
                 out.push(money(v), money2(v), String(Number(v || 0)));
+                break;
+            case 'consumption':
+            case 'porate':
+            case 'budgeted_cons':
+            case 'budget_conv_rt':
+            case 'budget_cost_per_gmt':
+            case 'conv':
+            case 'actual_cost':
+                out.push(num(v, 4), String(Number(v || 0)));
                 break;
             case 'variance_pct':
                 if (v !== null && v !== undefined && v !== '') {
@@ -1389,18 +1887,15 @@
         return out.filter((x) => x !== '');
     }
 
-    function itemMatchesCol(r, key, val) {
-        return itemFieldCandidates(r, key).some((c) => textMatches(c, val));
+    function itemSearchHay(r) {
+        return ITEM_COL_DEFS.map((c) => itemCellValue(c.key, r)).join(' ');
     }
 
-    function itemSearchHay(r) {
-        return [
-            r.status, r.po_item, r.material, r.description, r.mat_category,
-            r.material_group, r.sales_order, r.costing_ref, r.cost_section, r.cost_item,
-            r.cost_description, r.validation_result, r.unit, r.currency,
-            qty(r.po_qty), money2(r.net_value), money2(r.expected_unit_cost),
-            money2(r.po_unit_cost), money2(r.difference), r.variance_pct,
-        ].join(' ');
+    function itemMatchesCol(r, key, val) {
+        const candidates = itemFieldCandidates(r, key);
+        const mapped = itemCellValue(key, r);
+        if (mapped !== null && mapped !== undefined && mapped !== '') candidates.push(String(mapped));
+        return candidates.some((c) => textMatches(c, val));
     }
 
     function updateItemFilterUi() {
@@ -1585,6 +2080,7 @@
     function applyItemColumnVisibility() {
         if (pcbItemTablePrefManager) {
             pcbItemTablePrefManager.refresh();
+            syncItemGroupHeaders();
             return;
         }
         const table = $('pcbItemTable');
@@ -1606,6 +2102,41 @@
                 tds[i].style.display = (key && hiddenItemCols.has(key)) ? 'none' : '';
             });
         });
+        syncItemGroupHeaders();
+    }
+
+    function syncItemGroupHeaders() {
+        const table = $('pcbItemTable');
+        const groupRow = table?.querySelector('tr.pcw-group-row');
+        const headerRow = table?.querySelector('tr.pcb-item-header-row');
+        if (!groupRow || !headerRow) return;
+        const visible = Array.from(headerRow.children).filter((th) => {
+            if (!(th instanceof HTMLElement)) return false;
+            return window.getComputedStyle(th).display !== 'none';
+        });
+        const runs = [];
+        visible.forEach((th) => {
+            const g = th.getAttribute('data-col-group') || itemColGroup(th.getAttribute('data-col-key') || '');
+            const last = runs[runs.length - 1];
+            if (last && last.group === g) last.span += 1;
+            else runs.push({ group: g, span: 1 });
+        });
+        if (!runs.length) {
+            groupRow.innerHTML = '';
+            return;
+        }
+        groupRow.innerHTML = runs.map((run) => {
+            const isPo = run.group !== 'zcost';
+            const label = isPo ? 'PO Data' : 'zCOST Data';
+            const icon = isPo ? 'receipt_long' : 'calculate';
+            const cls = isPo ? 'is-po' : 'is-zcost';
+            return `<th class="pcw-group-th ${cls}" data-group="${esc(run.group)}" colspan="${run.span}">
+                <span class="pcw-group-label">
+                    <span class="material-icons-round">${icon}</span>
+                    ${label}
+                </span>
+            </th>`;
+        }).join('');
     }
 
     function buildItemColumnMenu() {
@@ -1680,7 +2211,7 @@
             $('pcbItemCount').classList.toggle('is-filtered', !!(itemSearchQuery() || Object.keys(itemColFilterMap()).length));
         }
         if (!items.length) {
-            body.innerHTML = `<tr class="pcw-empty"><td colspan="24">${
+            body.innerHTML = `<tr class="pcw-empty"><td colspan="${ITEM_COL_DEFS.length}">${
                 activeItemRows.length ? 'No items match the filters.' : (runtimeRunning ? 'Validation in progress…' : 'Not validated yet. Select this PO to validate.')
             }</td></tr>`;
             hideItemDetail();
@@ -1691,33 +2222,17 @@
         body.innerHTML = items.map((r) => {
             const idx = r._srcIdx != null ? r._srcIdx : activeItemRows.indexOf(r);
             const active = idx === activeItemIdx ? ' is-active' : '';
-            const matGroup = r.cost_item || r.material_group || '';
-            return `<tr class="pcw-row${active}" data-idx="${idx}">
-                <td class="pcw-check" data-col-key="check"><input type="checkbox" class="pcb-item-check" data-idx="${idx}" ${r._checked ? 'checked' : ''}></td>
-                <td data-col-key="status">${resultPill(r.status)}</td>
-                <td data-col-key="po_item">${dash(r.po_item)}</td>
-                <td class="pcw-mat" data-col-key="material" title="${esc(r.material)}">${dash(r.material)}</td>
-                <td data-col-key="description" title="${esc(r.description)}">${dash(r.description)}</td>
-                <td data-col-key="mat_category">${dash(r.mat_category)}</td>
-                <td data-col-key="sales_order" title="${esc((r.quotations || []).join(', ') || r.quotation || '')}">${dash(r.sales_order)}${r.quotation ? `<div class="pcw-sub">Q ${esc(r.quotation)}</div>` : ''}</td>
-                <td class="num" data-col-key="po_qty">${qty(r.po_qty)}</td>
-                <td data-col-key="unit">${dash(r.unit)}</td>
-                <td data-col-key="currency">${dash(r.currency)}</td>
-                <td class="num" data-col-key="net_value">${money2(r.net_value)}</td>
-                <td data-col-key="costing_ref" title="${esc(r.costing_ref)}">${dash(r.costing_ref)}</td>
-                <td data-col-key="cost_section">${dash(r.cost_section)}</td>
-                <td data-col-key="cost_item" title="${esc(matGroup)}">${dash(matGroup)}</td>
-                <td data-col-key="cost_description" title="${esc(r.cost_description)}">${dash(r.cost_description)}</td>
-                <td class="num" data-col-key="expected_unit_cost">${money2(r.expected_unit_cost)}</td>
-                <td class="num" data-col-key="po_unit_cost">${money2(r.po_unit_cost)}</td>
-                <td class="num" data-col-key="difference">${money2(r.difference)}</td>
-                <td class="num" data-col-key="variance_pct">${varianceCell(r.variance_pct)}</td>
-                <td class="num" data-col-key="sell_price">${money2(r.sell_price)}</td>
-                <td class="num" data-col-key="making">${money2(r.making)}</td>
-                <td data-col-key="quoted_uom">${dash(r.quoted_uom)}</td>
-                <td data-col-key="quoted_currency">${dash(r.quoted_currency)}</td>
-                <td data-col-key="validation_result">${dash(r.validation_result)}</td>
-            </tr>`;
+            const st = String(r.status || '').toUpperCase();
+            const unmatched = !!r.needs_manual_match
+                || (!r.costing_quotation_no && !r.costing_quotation && !r.matched_quotation && !r.maktx && !r.cost_item);
+            const pass = !unmatched && st === 'PASS' ? ' is-pass-row' : '';
+            const review = !unmatched && st === 'NEEDS_REVIEW' ? ' is-review-row' : '';
+            const fail = !unmatched && (st === 'EXCEPTION' || st === 'FAIL') ? ' is-fail-row' : '';
+            const unmatchedCls = unmatched ? ' is-unmatched-row' : '';
+            const mismatch = r.cost_mismatch && !unmatched && st !== 'PASS' ? ' is-cost-mismatch' : '';
+            return `<tr class="pcw-row${active}${pass}${review}${fail}${unmatchedCls}${mismatch}" data-idx="${idx}">${
+                ITEM_COL_DEFS.map((c) => renderItemCell(c.key, r)).join('')
+            }</tr>`;
         }).join('');
 
         if ($('pcbItemSelectAll')) {
@@ -1735,22 +2250,10 @@
             toast('Nothing to export.', 'error');
             return;
         }
-        const headers = [
-            'Status', 'PO Item', 'Material Code', 'Material Description', 'Material Type',
-            'Sales Order', 'PO Qty', 'UOM', 'Currency', 'Net Value', 'Costing Ref',
-            'Cost Section', 'Cost Item', 'ZCOST Description', 'Expected Unit Cost',
-            'PO Unit Cost', 'Difference', 'Variance %', 'Sell Price', 'Making',
-            'Quoted UOM', 'Quoted Currency', 'Validation Result',
-        ];
+        const headers = ITEM_COL_DEFS.map((c) => c.label);
         const lines = [headers.join(',')];
         rows.forEach((r) => {
-            lines.push([
-                r.status, r.po_item, r.material, r.description, r.mat_category,
-                r.sales_order, r.po_qty, r.unit, r.currency, r.net_value, r.costing_ref,
-                r.cost_section, r.cost_item, r.cost_description, r.expected_unit_cost,
-                r.po_unit_cost, r.difference, r.variance_pct, r.sell_price, r.making,
-                r.quoted_uom, r.quoted_currency, r.validation_result,
-            ].map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','));
+            lines.push(ITEM_COL_DEFS.map((c) => `"${String(itemCellValue(c.key, r) ?? '').replace(/"/g, '""')}"`).join(','));
         });
         const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
         const a = document.createElement('a');
@@ -1956,7 +2459,251 @@
 
     function openDrill(po) {
         if (!po) return;
-        window.open(workbenchUrl(po), '_blank');
+        window.location.href = workbenchUrl(po);
+    }
+
+    function selectedPos() {
+        const po = allRows.find((r) => !!r._checked);
+        return po && po.purchase_order ? [String(po.purchase_order)] : [];
+    }
+
+    function openActionOffcanvas(shellId) {
+        const shell = $(shellId);
+        if (!shell) return;
+        shell.hidden = false;
+        shell.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('pcw-action-offcanvas-open');
+        requestAnimationFrame(() => shell.classList.add('is-open'));
+    }
+
+    function closeActionOffcanvas(shellId) {
+        const shell = $(shellId);
+        if (!shell) return;
+        shell.classList.remove('is-open');
+        shell.setAttribute('aria-hidden', 'true');
+        const stillOpen = ['pcwValidateModal', 'pcwHistoryModal'].some((id) => {
+            const el = $(id);
+            return el && el !== shell && el.classList.contains('is-open');
+        });
+        if (!stillOpen) document.body.classList.remove('pcw-action-offcanvas-open');
+        window.setTimeout(() => {
+            if (!shell.classList.contains('is-open')) shell.hidden = true;
+        }, 280);
+    }
+
+    function closeValidateModal() {
+        closeActionOffcanvas('pcwValidateModal');
+    }
+
+    function closeHistoryModal() {
+        closeActionOffcanvas('pcwHistoryModal');
+    }
+
+    function openValidateModal() {
+        const selected = selectedPos();
+        if (!selected.length) {
+            toast('Select one PO row to assign & validate.', 'error');
+            return;
+        }
+        validateTargetPos = selected.slice(0, 1);
+        const loginUser = String(cfg.currentUser || $('pcwLoginUserName')?.textContent || 'User').trim();
+        if ($('pcwLoginUserName')) $('pcwLoginUserName').textContent = loginUser || 'User';
+        const meta = $('pcwValidateMeta');
+        if (meta) {
+            meta.innerHTML = `
+                <div class="pcw-validate-meta-chip"><span>Purchase Order</span><strong>${esc(validateTargetPos[0] || '—')}</strong></div>
+                <div class="pcw-validate-meta-chip"><span>Scope</span><strong>Single PO</strong></div>
+                <div class="pcw-validate-meta-chip"><span>Validated By</span><strong>${esc(loginUser || '—')}</strong></div>`;
+        }
+        if ($('pcwValidateRemarks')) $('pcwValidateRemarks').value = '';
+        document.querySelectorAll('input[name="pcwValidateStatus"]').forEach((el, i) => {
+            el.checked = i === 0;
+            el.closest('label')?.classList.toggle('is-active', i === 0);
+        });
+        closeHistoryModal();
+        openActionOffcanvas('pcwValidateModal');
+        $('pcwUserSearch')?.focus();
+    }
+
+    async function openHistoryModal() {
+        const selected = selectedPos();
+        const po = selected[0] || activePo || '';
+        if (!po) {
+            toast('Select one PO row to view validation history.', 'error');
+            return;
+        }
+        const body = $('pcwHistoryBody');
+        const countEl = $('pcwHistoryCount');
+        if (countEl) countEl.textContent = 'Loading…';
+        if (body) body.innerHTML = `<div class="pcw-history-empty">Loading validation history…</div>`;
+        if ($('pcwHistoryDesc')) {
+            $('pcwHistoryDesc').textContent = `Validation history for PO ${po}.`;
+        }
+        closeValidateModal();
+        openActionOffcanvas('pcwHistoryModal');
+        const endpoint = cfg.validationLogUrl || 'purchase-order/validation-log';
+        try {
+            const res = await fetch(`${endpoint}?po=${encodeURIComponent(po)}&_=${Date.now()}`, {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+                cache: 'no-store',
+            });
+            const json = await res.json();
+            const logs = Array.isArray(json?.data?.logs) ? json.data.logs : [];
+            const grouped = [];
+            const seen = new Map();
+            logs.forEach((log) => {
+                const when = String(log.created_at || '').replace('T', ' ').slice(0, 19);
+                const key = [when, log.created_by, log.assigned_username, log.validation_status, log.description].join('|');
+                if (seen.has(key)) {
+                    seen.get(key).item_count += 1;
+                    return;
+                }
+                const entry = { ...log, when, item_count: 1 };
+                seen.set(key, entry);
+                grouped.push(entry);
+            });
+            if (countEl) {
+                countEl.textContent = grouped.length
+                    ? `${grouped.length} validation${grouped.length === 1 ? '' : 's'}`
+                    : '0 validations';
+            }
+            if (!body) return;
+            if (!grouped.length) {
+                body.innerHTML = `<div class="pcw-history-empty">No validation history for PO ${esc(po)}.</div>`;
+                return;
+            }
+            body.innerHTML = grouped.map((log) => {
+                const st = String(log.validation_status || '');
+                const stLabel = st === 'VALIDATE_PO' ? 'Validate PO' : st === 'NOT_VALIDATE' ? 'Not Validate' : st;
+                const whenFull = String(log.when || '—');
+                const remarks = String(log.description || '').trim();
+                return `<article class="pcw-history-card" role="listitem">
+                    <div class="pcw-history-when">
+                        <strong>${esc(whenFull.slice(0, 10) || '—')}</strong>
+                        <small>${esc(whenFull.length > 10 ? whenFull.slice(11) : '')}</small>
+                    </div>
+                    <div class="pcw-history-main">
+                        <div class="pcw-history-people">
+                            <span><span class="material-icons-round">account_circle</span>By <strong>${esc(log.created_by || '—')}</strong></span>
+                            <span><span class="material-icons-round">person_add</span>Assigned <strong>${esc(log.assigned_username || '—')}</strong></span>
+                        </div>
+                        <p class="pcw-history-remarks${remarks ? '' : ' is-empty'}">${esc(remarks || 'No remarks')}</p>
+                    </div>
+                    <span class="pcw-pill ${st === 'VALIDATE_PO' ? 'is-pass' : 'is-review'}">${esc(stLabel)}</span>
+                </article>`;
+            }).join('');
+        } catch (err) {
+            if (countEl) countEl.textContent = 'Error';
+            if (body) body.innerHTML = `<div class="pcw-history-empty">${esc(err.message || 'Failed to load history')}</div>`;
+        }
+    }
+
+    async function searchUsers(q) {
+        const menu = $('pcwUserMenu');
+        if (!menu) return;
+        const endpoint = cfg.usersUrl || 'purchase-order/users';
+        const params = new URLSearchParams({ q: q || '', limit: '30', _: String(Date.now()) });
+        try {
+            const res = await fetch(`${endpoint}?${params}`, {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+                cache: 'no-store',
+            });
+            const json = await res.json();
+            const users = Array.isArray(json?.data?.users) ? json.data.users : [];
+            if (!users.length) {
+                menu.innerHTML = `<div class="pcw-user-empty">No users found</div>`;
+                menu.hidden = false;
+                return;
+            }
+            menu.innerHTML = users.map((u) => `<button type="button" class="pcw-user-option" role="option"
+                data-id="${esc(u.id)}" data-username="${esc(u.username)}">
+                <strong>${esc(u.username)}</strong>
+                <small>${esc([u.department, u.role, u.email].filter(Boolean).join(' · ') || '—')}</small>
+            </button>`).join('');
+            menu.hidden = false;
+        } catch (err) {
+            menu.innerHTML = `<div class="pcw-user-empty">Could not load users</div>`;
+            menu.hidden = false;
+        }
+    }
+
+    function pickUser(id, username) {
+        assignedUser = { id: String(id || ''), username: String(username || '') };
+        if ($('pcwUserId')) $('pcwUserId').value = assignedUser.id;
+        if ($('pcwUserName')) $('pcwUserName').value = assignedUser.username;
+        if ($('pcwUserSearch')) $('pcwUserSearch').value = assignedUser.username;
+        if ($('pcwUserMenu')) $('pcwUserMenu').hidden = true;
+    }
+
+    async function saveValidationLog() {
+        const status = document.querySelector('input[name="pcwValidateStatus"]:checked')?.value || 'VALIDATE_PO';
+        const description = String($('pcwValidateRemarks')?.value || '').trim();
+        if (!assignedUser.username) {
+            toast('Select a next-level user to assign.', 'error');
+            $('pcwUserSearch')?.focus();
+            return;
+        }
+        const targets = (validateTargetPos.length ? validateTargetPos : selectedPos()).slice(0, 1);
+        if (!targets.length) {
+            toast('Select one PO row.', 'error');
+            return;
+        }
+        const endpoint = cfg.validationLogUrl || 'purchase-order/validation-log';
+        const btn = $('pcwValidateSave');
+        if (btn) btn.disabled = true;
+        let ok = 0;
+        let fail = 0;
+        try {
+            for (const po of targets) {
+                const payload = {
+                    purchase_order: po,
+                    mat_cat: selectedMat(),
+                    assigned_user_id: assignedUser.id || null,
+                    assigned_username: assignedUser.username,
+                    validation_status: status,
+                    description,
+                    po_item: '',
+                    material: '',
+                    mat_desc: '',
+                    matched_zcost_item: '',
+                    matched_maktx: '',
+                    row_status: '',
+                };
+                const res = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(payload),
+                });
+                const json = await res.json();
+                if (!res.ok || json.success === false) {
+                    fail += 1;
+                    continue;
+                }
+                ok += 1;
+                const row = allRows.find((r) => String(r.purchase_order) === String(po));
+                if (row) {
+                    row._validated_by = String(cfg.currentUser || $('pcwLoginUserName')?.textContent || 'User').trim();
+                    row._last_validated = new Date().toISOString().slice(0, 19).replace('T', ' ');
+                    if (status === 'VALIDATE_PO') row._validation_status = 'PASSED';
+                    else if (status === 'NOT_VALIDATE') row._validation_status = 'NEEDS_REVIEW';
+                }
+            }
+            closeValidateModal();
+            renderTable();
+            toast(
+                fail
+                    ? `Saved ${ok} PO validation(s), ${fail} failed.`
+                    : `Saved validation for ${ok} PO${ok === 1 ? '' : 's'} → ${assignedUser.username}`,
+                fail ? 'error' : 'ok'
+            );
+        } catch (err) {
+            toast(err.message || 'Could not save validation log', 'error');
+        } finally {
+            if (btn) btn.disabled = false;
+        }
     }
 
     function exportCsv() {
@@ -1964,14 +2711,13 @@
             toast('Nothing to export.', 'error');
             return;
         }
-        const headers = ['PO Number','PO Date','Vendor','Vendor Name','Material Type','Items','PO Value','Passed','Exceptions','Pending','Validation Status','Last Validated','Validated By'];
+        const headers = COL_DEFS.filter((c) => c.key !== 'check' && c.key !== 'pdf').map((c) => c.label);
         const lines = [headers.join(',')];
-        filtered.forEach((r) => {
-            lines.push([
-                r.purchase_order, r.date, r.supplier, r.supplier_full_name, r._mat_label,
-                r.items_count, r.total_value, r._passed, r._exceptions, r._pending,
-                r._validation_status, r._last_validated, r._validated_by,
-            ].map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','));
+        filtered.forEach((r, i) => {
+            lines.push(COL_DEFS.filter((c) => c.key !== 'check' && c.key !== 'pdf').map((c) => {
+                const raw = c.key === 'sno' ? i + 1 : (c.key === 'po' ? r.purchase_order : (c.key === 'status' ? r._validation_status : rowField(r, c.key)));
+                return `"${String(raw ?? '').replace(/"/g, '""')}"`;
+            }).join(','));
         });
         const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
         const a = document.createElement('a');
@@ -1983,9 +2729,10 @@
     }
 
     function setChecked(po, on) {
-        const row = allRows.find((r) => r.purchase_order === po);
-        if (row) row._checked = on;
-        if (on && po) enqueueSelectedValidation([po]);
+        allRows.forEach((r) => {
+            r._checked = on && String(r.purchase_order || '') === String(po || '');
+        });
+        if (on && po) activePo = po;
     }
 
     function bind() {
@@ -2030,7 +2777,12 @@
             if (e.key === 'Enter') { e.preventDefault(); applyCustomDatesAndLoad(); }
         });
 
-        $('pcbMat')?.addEventListener('change', () => void fetchPos());
+        document.querySelectorAll('input[name="pcb_mat"]').forEach((el) => {
+            el.addEventListener('change', () => {
+                selectedMat();
+                void fetchPos();
+            });
+        });
         $('pcbSupplier')?.addEventListener('change', () => void fetchPos());
         $('pcbPoSearchBtn')?.addEventListener('click', () => searchPoHeader());
         $('pcbPoSearch')?.addEventListener('keydown', (e) => {
@@ -2046,9 +2798,13 @@
             if ($('pcbSupplier')) $('pcbSupplier').value = '';
             if ($('pcbValStatus')) $('pcbValStatus').value = 'all';
             if ($('pcbMat')) $('pcbMat').value = 'all';
+            document.querySelectorAll('input[name="pcb_mat"]').forEach((el) => {
+                el.checked = el.value === 'all';
+            });
             if ($('pcbPoSearch')) $('pcbPoSearch').value = '';
             if ($('pcbQuickSearch')) $('pcbQuickSearch').value = '';
-            document.querySelectorAll('.pcb-col-filter').forEach((inp) => { inp.value = ''; });
+            document.querySelectorAll('#pcbFilterRow .pcb-col-filter').forEach((inp) => { inp.value = ''; });
+            Object.keys(colFilterState).forEach((k) => { delete colFilterState[k]; });
             stopRuntimeValidation();
             void fetchPos();
         });
@@ -2057,26 +2813,34 @@
             if ($('pcbQuickSearch')) $('pcbQuickSearch').value = '';
             applyFilter();
         });
-        $('pcbValStatus')?.addEventListener('change', () => applyFilter());
-        document.querySelectorAll('.pcb-col-filter').forEach((inp) => {
-            inp.addEventListener('input', () => applyFilter());
-        });
+        document.addEventListener('input', (e) => {
+            const inp = e.target && e.target.closest ? e.target.closest('#pcbFilterRow .pcb-col-filter') : null;
+            if (!inp) return;
+            const key = inp.getAttribute('data-key');
+            if (!key) return;
+            const val = String(inp.value || '').trim();
+            if (val) colFilterState[key] = val;
+            else delete colFilterState[key];
+            applyFilter();
+        }, true);
         $('pcbColFilterReset')?.addEventListener('click', () => {
-            document.querySelectorAll('.pcb-col-filter').forEach((inp) => { inp.value = ''; });
+            document.querySelectorAll('#pcbFilterRow .pcb-col-filter').forEach((inp) => { inp.value = ''; });
+            Object.keys(colFilterState).forEach((k) => { delete colFilterState[k]; });
             applyFilter();
         });
         $('pcbClearAllFilters')?.addEventListener('click', () => {
             if ($('pcbQuickSearch')) $('pcbQuickSearch').value = '';
-            document.querySelectorAll('.pcb-col-filter').forEach((inp) => { inp.value = ''; });
+            document.querySelectorAll('#pcbFilterRow .pcb-col-filter').forEach((inp) => { inp.value = ''; });
+            Object.keys(colFilterState).forEach((k) => { delete colFilterState[k]; });
             applyFilter();
         });
         $('pcbToggleColFilters')?.addEventListener('click', () => {
             const row = $('pcbFilterRow');
             const btn = $('pcbToggleColFilters');
             if (!row) return;
-            const show = row.style.display === 'none';
-            row.style.display = show ? '' : 'none';
-            btn?.classList.toggle('is-active', show);
+            const hidden = window.getComputedStyle(row).display === 'none';
+            row.style.display = hidden ? 'table-row' : 'none';
+            btn?.classList.toggle('is-active', hidden);
         });
         $('pcbToggleStickyScroll')?.addEventListener('click', () => {
             const wrap = $('pcbTableWrap');
@@ -2105,33 +2869,25 @@
             const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
             if (page < pages) { page++; renderTable(); }
         });
-        $('pcbSelectAll')?.addEventListener('change', (e) => {
-            const on = !!e.target.checked;
-            const pagePos = pageRows().map((r) => r.purchase_order);
-            const set = new Set(pagePos);
-            allRows.forEach((r) => { if (set.has(r.purchase_order)) r._checked = on; });
-            renderTable();
-            if (on) enqueueSelectedValidation(pagePos);
-        });
-
         const onListClick = (e) => {
+            const pdfBtn = e.target.closest('button.pcb-pdf-btn');
+            if (pdfBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const po = pdfBtn.getAttribute('data-po');
+                if (po) window.open(pdfUrl(po), '_blank', 'noopener');
+                return;
+            }
             const checkCell = e.target.closest('.pcb-check');
             const check = e.target.closest('.pcb-row-check, .pcb-card-check');
             if (check || checkCell) {
                 const input = (check && check.matches('input')) ? check : (checkCell || check).querySelector('input');
-                if (input && e.target !== input) {
-                    input.checked = !input.checked;
+                if (input) {
+                    if (e.target !== input) input.checked = !input.checked;
                     setChecked(input.getAttribute('data-po'), input.checked);
-                } else if (input) {
-                    setChecked(input.getAttribute('data-po'), input.checked);
+                    renderTable();
                 }
                 e.stopPropagation();
-                if ($('pcbSelectAll')) {
-                    const rows = pageRows();
-                    const pageChecked = rows.length && rows.every((r) => r._checked);
-                    $('pcbSelectAll').checked = pageChecked;
-                    $('pcbSelectAll').indeterminate = !pageChecked && rows.some((r) => r._checked);
-                }
                 return;
             }
             const row = e.target.closest('tr.pcb-row, article.pcb-card, button.pcb-po-link');
@@ -2139,11 +2895,61 @@
             const po = row.getAttribute('data-po');
             if (po) {
                 e.preventDefault();
-                window.open(workbenchUrl(po), '_blank');
+                openDrill(po);
             }
         };
         $('pcbTableBody')?.addEventListener('click', onListClick);
         $('pcbCards')?.addEventListener('click', onListClick);
+
+        $('pcbOpenValidateBtn')?.addEventListener('click', () => {
+            if (cfg.canValidate === false) return;
+            openValidateModal();
+        });
+        if ($('pcbOpenValidateBtn') && cfg.canValidate === false) {
+            $('pcbOpenValidateBtn').hidden = true;
+        }
+        $('pcbHistoryBtn')?.addEventListener('click', () => { void openHistoryModal(); });
+        $('pcwValidateClose')?.addEventListener('click', closeValidateModal);
+        $('pcwValidateCancel')?.addEventListener('click', closeValidateModal);
+        $('pcwValidateBackdrop')?.addEventListener('click', closeValidateModal);
+        $('pcwValidateSave')?.addEventListener('click', () => { void saveValidationLog(); });
+        $('pcwHistoryClose')?.addEventListener('click', closeHistoryModal);
+        $('pcwHistoryDone')?.addEventListener('click', closeHistoryModal);
+        $('pcwHistoryBackdrop')?.addEventListener('click', closeHistoryModal);
+        document.querySelectorAll('input[name="pcwValidateStatus"]').forEach((el) => {
+            el.addEventListener('change', () => {
+                document.querySelectorAll('input[name="pcwValidateStatus"]').forEach((r) => {
+                    r.closest('label')?.classList.toggle('is-active', r.checked);
+                });
+            });
+        });
+        const userSearch = $('pcwUserSearch');
+        userSearch?.addEventListener('input', () => {
+            const q = String(userSearch.value || '').trim();
+            if (assignedUser.username && q !== assignedUser.username) {
+                assignedUser = { id: '', username: '' };
+                if ($('pcwUserId')) $('pcwUserId').value = '';
+                if ($('pcwUserName')) $('pcwUserName').value = '';
+            }
+            void searchUsers(q);
+        });
+        userSearch?.addEventListener('focus', () => {
+            void searchUsers(String(userSearch.value || '').trim());
+        });
+        $('pcwUserMenu')?.addEventListener('click', (e) => {
+            const opt = e.target.closest('.pcw-user-option');
+            if (!opt) return;
+            pickUser(opt.getAttribute('data-id'), opt.getAttribute('data-username'));
+        });
+        document.addEventListener('click', (e) => {
+            if (e.target.closest('#pcwUserAssign')) return;
+            if ($('pcwUserMenu')) $('pcwUserMenu').hidden = true;
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            if ($('pcwValidateModal') && !$('pcwValidateModal').hidden) closeValidateModal();
+            if ($('pcwHistoryModal') && !$('pcwHistoryModal').hidden) closeHistoryModal();
+        });
 
         $('pcbOffcanvasClose')?.addEventListener('click', closeOffcanvas);
         $('pcbOffcanvasBackdrop')?.addEventListener('click', closeOffcanvas);
@@ -2179,6 +2985,9 @@
             clearItemFilters();
             runItemFilters();
         });
+        // Default: clean item table — filters open only on button click
+        if ($('pcbItemFilterRow')) $('pcbItemFilterRow').style.display = 'none';
+        $('pcbItemToggleFilters')?.classList.remove('is-active');
         $('pcbItemToggleFilters')?.addEventListener('click', () => {
             const row = $('pcbItemFilterRow');
             const btn = $('pcbItemToggleFilters');
@@ -2197,6 +3006,7 @@
             statusId: 'pcbItemColSaveStatus',
             colAttr: 'data-col-key',
         });
+        syncItemGroupHeaders();
         $('pcbItemExcelBtn')?.addEventListener('click', exportItemCsv);
         $('pcbItemSelectAll')?.addEventListener('change', (e) => {
             const on = !!e.target.checked;
@@ -2205,6 +3015,14 @@
         });
         $('pcbItemDetailClose')?.addEventListener('click', () => hideItemDetail());
         $('pcbItemBody')?.addEventListener('click', (e) => {
+            const quoteHit = e.target.closest('a.pcw-quote-link, td[data-col-id="costing_quotation_no"]');
+            if (quoteHit) {
+                e.preventDefault();
+                e.stopPropagation();
+                const href = quoteHit.getAttribute('href') || zcostViewUrl(quoteHit.getAttribute('data-quote') || '');
+                if (href) window.open(href, '_blank', 'noopener,noreferrer');
+                return;
+            }
             const check = e.target.closest('.pcb-item-check');
             if (check) {
                 const idx = Number(check.getAttribute('data-idx'));

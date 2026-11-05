@@ -6,7 +6,7 @@ function _zcostApiUrl(query) {
   return `${base}${sep}${q}`;
 }
 
-﻿/**
+/**
  * SAP ZCOST Sales Costing Sheet Application
  * Authentic SAP GUI ALV Grid Experience & Real-Time Calculation Engine
 */
@@ -47,6 +47,7 @@ function isSheetApproved() {
  * @returns {boolean} True if the sheet can be edited, false otherwise.
  */
 function canEditSheet() {
+  if (typeof portalUser !== 'undefined' && zcostHas('edit') === false) return false;
   return !!costData && !isSheetApproved() && isEditMode;
 }
 
@@ -98,14 +99,23 @@ function applyUiLockState() {
   }
 
   const btnCopy = document.getElementById('btn-copy-costing');
+  const allowCopy = zcostHas('copy') !== false;
+  const allowEdit = zcostHas('edit') !== false;
   if (btnCopy) {
-    btnCopy.disabled = !costData;
-    btnCopy.title = !costData ? 'Load or search a quotation first to copy costing.' : 'Copy Costing lines & rates from or to another Quotation';
+    btnCopy.hidden = !allowCopy;
+    btnCopy.disabled = !allowCopy || !costData;
+    btnCopy.title = !allowCopy
+      ? 'Copy Costing is not granted for this user.'
+      : (!costData ? 'Load or search a quotation first to copy costing.' : 'Copy Costing lines & rates from or to another Quotation');
+  }
+
+  if (btnChange) {
+    btnChange.disabled = approved || !costData || !allowEdit;
   }
 
   if (btnSave) {
-    btnSave.disabled = approved || !costData;
-    btnSave.title = approved ? 'Approved sheet is view only.' : '';
+    btnSave.disabled = approved || !costData || !allowEdit;
+    btnSave.title = !allowEdit ? 'Update Costing is not granted for this user.' : (approved ? 'Approved sheet is view only.' : '');
   }
 
   if (btnApprove) {
@@ -386,8 +396,8 @@ let pendingNotFoundQuotation = null;
  * @returns {Promise<boolean>} True if the cost sheet was fetched successfully, false otherwise.
  */
 async function fetchCostSheet(vbeln, posnr) {
-  currentVbeln = vbeln || currentVbeln;
-  currentPosnr = posnr || currentPosnr;
+  currentVbeln = String(vbeln || currentVbeln || '').trim();
+  currentPosnr = String(posnr || currentPosnr || '000010').trim();
 
   updateStatus(`Reading Quotation ${currentVbeln} / Item ${currentPosnr}...`, 'info');
   showLoader('Loading costing sheet');
@@ -412,6 +422,12 @@ async function fetchCostSheet(vbeln, posnr) {
       showToast(json.is_new ? `Created new quotation master for ${costData.Vbeln}` : `Loaded ${costData.Vbeln} - ${srcText}`);
       return true;
     } else if (json.not_found) {
+      if (isZcostViewOnly()) {
+        hideInitialScreen();
+        updateStatus(`Quotation ${currentVbeln} (Item ${currentPosnr}) not found.`, 'warn');
+        showToast('Quotation not found', true);
+        return false;
+      }
       // Prompt user with Yes / No dialog: "Do you want to create new quotation master?"
       pendingNotFoundQuotation = { vbeln: currentVbeln, posnr: currentPosnr };
       showNotFoundModal(currentVbeln, currentPosnr);
@@ -750,6 +766,7 @@ function renderAll() {
 
 // Render Window Header & Controls
 function renderHeader() {
+  if (!costData) return;
   const isApproved = (costData.Approve === 'X' || costData.Approve === 'x');
   const titleText = isApproved ? 'Sales Costing Sheet : APPROVED' : 'Sales Costing Sheet : NOT APPROVED';
 
@@ -787,7 +804,7 @@ function renderHeader() {
 
   // Header input values
   const vbelnInput = document.getElementById('hdr-vbeln');
-  if (vbelnInput) vbelnInput.value = costData.Vbeln || currentVbeln;
+  if (vbelnInput) vbelnInput.value = String(costData.Vbeln || currentVbeln || '').trim();
 
   const navSearch = document.getElementById('nav-search-input');
   if (navSearch && (costData.Vbeln || currentVbeln)) navSearch.value = costData.Vbeln || currentVbeln;
@@ -2117,6 +2134,35 @@ const APPROVE_USERNAMES = [
 ];
 let portalUser = { logged_in: false, is_admin: false, can_approve: false };
 
+function zcostHas(flag) {
+  if (portalUser?.is_admin === true) return true;
+  if (portalUser?.permissions && typeof portalUser.permissions[flag] === 'boolean') {
+    return portalUser.permissions[flag];
+  }
+  const key = 'can_' + flag;
+  if (typeof portalUser?.[key] === 'boolean') {
+    return portalUser[key];
+  }
+  return null;
+}
+
+function applyZcostActionCards() {
+  const map = {
+    'btn-init-new': 'add',
+    'btn-init-copy': 'copy',
+    'btn-init-change': 'edit',
+    'btn-init-approve': 'approve',
+  };
+  Object.keys(map).forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const ok = zcostHas(map[id]) !== false;
+    el.hidden = !ok;
+    el.disabled = !ok;
+    el.style.display = ok ? '' : 'none';
+  });
+}
+
 function canApproveSheet() {
   if (portalUser?.can_approve === true || portalUser?.is_admin === true) {
     return true;
@@ -2193,7 +2239,10 @@ function applyPortalSession(user) {
   });
 
   // Re-apply Approve button visibility after session loads
-  renderHeader();
+  if (typeof renderHeader === 'function') {
+    try { renderHeader(); } catch (e) {}
+  }
+  applyZcostActionCards();
   applyUiLockState();
 }
 
@@ -2339,7 +2388,14 @@ async function loadAuditLog() {
  * ============================================================================
  */
 
+function isZcostViewOnly() {
+  return document.documentElement.classList.contains('zcost-view-only');
+}
+
 function showInitialScreen() {
+  if (isZcostViewOnly() || document.documentElement.classList.contains('zcost-boot-sheet')) {
+    return;
+  }
   const initScreen = document.getElementById('sap-initial-screen');
   const mainWin = document.getElementById('sap-window');
   const landing = document.getElementById('evolv-landing-page');
@@ -2391,6 +2447,13 @@ function handleInitQuickSearch(vbeln) {
 let currentActionMode = 'new'; // 'new' | 'change' | 'approve'
 
 function openActionModal(mode) {
+  const need = { new: 'add', copy: 'copy', change: 'edit', approve: 'approve' };
+  if (zcostHas(need[mode] || '') === false) {
+    if (typeof showToast === 'function') {
+      showToast('You do not have permission for this costing action.', 'error');
+    }
+    return;
+  }
   if (mode === 'copy') {
     openCopyCostingModal();
     return;
@@ -2767,17 +2830,33 @@ async function handleActionDialogSubmit() {
  * @returns {void}
  */
 window.addEventListener('DOMContentLoaded', async () => {
-  await syncPortalSession();
-
   const urlParams = new URLSearchParams(window.location.search);
-  const vbeln = urlParams.get('vbeln');
+  const vbeln = (urlParams.get('vbeln') || '').trim();
   const posnr = urlParams.get('posnr') || '000010';
+  const viewOnly = urlParams.get('view') === '1' || urlParams.get('mode') === 'view';
+
+  if (viewOnly) {
+    isEditMode = false;
+    document.documentElement.classList.add('zcost-view-only');
+  }
 
   if (vbeln) {
+    document.documentElement.classList.add('zcost-boot-sheet');
     hideInitialScreen();
-    fetchCostSheet(vbeln, posnr);
+    const sheetLoad = fetchCostSheet(vbeln, posnr);
+    try { await syncPortalSession(); } catch (e) {}
+    await sheetLoad;
+    hideInitialScreen();
+    if (viewOnly) {
+      isEditMode = false;
+      applyUiLockState();
+    }
+    const navSearch = document.getElementById('nav-search-input');
+    if (navSearch) navSearch.value = vbeln;
+    const vbelnInput = document.getElementById('hdr-vbeln');
+    if (vbelnInput && !String(vbelnInput.value || '').trim()) vbelnInput.value = vbeln;
   } else {
-    // VERY FIRST: Show the SAP Initial Screen with Create/Copy & Change/Approve!
+    try { await syncPortalSession(); } catch (e) {}
     showInitialScreen();
   }
 });

@@ -3577,7 +3577,7 @@ body.po-modal-open { overflow: hidden; }
 }
 
 @media (max-width: 1360px) {
-    .is-purchase-order.is-po-list .rpt-name { display: none; }
+    .is-purchase-order.is-po-list:not(.is-costing-bulk) .rpt-name { display: none; }
 }
 @media (max-width: 1180px) {
     .is-purchase-order.is-po-list .rpt-bar {
@@ -7666,7 +7666,10 @@ td[data-hover-type]:hover {
 }
 
 /* --- PO Costing Validation Workbench --- */
-.is-costing-workbench .rpt-main { gap: 16px; }
+.is-costing-workbench .rpt-main {
+    gap: 8px;
+    padding: 8px 14px 0;
+}
 .is-costing-workbench .rpt-bar.is-pcw-top {
     position: sticky;
     top: 0;
@@ -7850,7 +7853,7 @@ td[data-hover-type]:hover {
         overflow-x: auto;
     }
 }
-.pcw { display: grid; gap: 16px; }
+.pcw { display: grid; gap: 8px; }
 .pcw-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
 .pcw-crumb { margin: 0; color: #64748b; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
 .pcw-title { margin: 4px 0 0; font-size: 1.55rem; font-weight: 800; color: #0f172a; letter-spacing: -.02em; }
@@ -7957,25 +7960,25 @@ td[data-hover-type]:hover {
 .pcw-status-kpis {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 12px;
-    margin: 0 0 14px;
+    gap: 8px;
+    margin: 0;
 }
 .pcw-compare {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-    gap: 14px;
+    gap: 8px;
     align-items: stretch;
-    margin: 0 0 16px;
+    margin: 0;
 }
 .pcw-compare-panel {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 6px;
     min-width: 0;
-    padding: 14px;
-    border-radius: 18px;
+    padding: 8px 10px;
+    border-radius: 12px;
     border: 1.5px solid #e2e8f0;
-    box-shadow: 0 10px 28px rgba(15, 23, 42, .05);
+    box-shadow: 0 4px 14px rgba(15, 23, 42, .04);
     background: #fff;
 }
 .pcw-compare-panel.is-po {
@@ -7989,15 +7992,16 @@ td[data-hover-type]:hover {
 .pcw-compare-head {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     color: #3730a3;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 800;
     letter-spacing: .07em;
     text-transform: uppercase;
+    line-height: 1.2;
 }
 .pcw-compare-panel.is-zcost .pcw-compare-head { color: #9a3412; }
-.pcw-compare-head .material-icons-round { font-size: 18px; }
+.pcw-compare-head .material-icons-round { font-size: 16px; }
 .pcw-compare-vs {
     display: flex;
     align-items: center;
@@ -8007,32 +8011,32 @@ td[data-hover-type]:hover {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 44px;
-    height: 44px;
+    width: 34px;
+    height: 34px;
     border-radius: 999px;
     background: #0f172a;
     color: #fff;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 800;
     letter-spacing: .08em;
-    box-shadow: 0 10px 22px rgba(15, 23, 42, .24);
+    box-shadow: 0 6px 14px rgba(15, 23, 42, .2);
 }
 .pcw-compare-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 8px;
+    gap: 6px;
     align-items: stretch;
 }
 .pcw-compare-card {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     min-width: 0;
-    padding: 8px 10px;
-    border-radius: 12px;
+    padding: 6px 8px;
+    border-radius: 10px;
     background: rgba(255, 255, 255, 0.95);
     border: 1px solid #e2e8f0;
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
     transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
     cursor: pointer;
     user-select: none;
@@ -8053,12 +8057,12 @@ td[data-hover-type]:hover {
     border-color: #ffedd5;
 }
 .pcw-card-ico {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
     display: grid;
     place-items: center;
-    font-size: 17px;
+    font-size: 15px;
     flex-shrink: 0;
 }
 .pcw-card-ico.is-items {
@@ -8105,10 +8109,10 @@ td[data-hover-type]:hover {
 }
 .pcw-card-val b {
     font-family: Outfit, sans-serif;
-    font-size: clamp(0.95rem, 1.1vw, 1.18rem);
+    font-size: clamp(0.85rem, 1vw, 1.05rem);
     font-weight: 800;
     color: #0f172a;
-    line-height: 1.15;
+    line-height: 1.1;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
     overflow: hidden;
@@ -8248,8 +8252,8 @@ td[data-hover-type]:hover {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
 }
-.pcw-kpi { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 16px; background: #fff; border: 1px solid #e2e8f0; box-shadow: 0 8px 20px rgba(15,23,42,.03); }
-.pcw-kpi .material-icons-round { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: #eef2ff; color: #4338ca; }
+.pcw-kpi { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 12px; background: #fff; border: 1px solid #e2e8f0; box-shadow: 0 2px 8px rgba(15,23,42,.03); }
+.pcw-kpi .material-icons-round { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; background: #eef2ff; color: #4338ca; font-size: 18px; }
 .pcw-kpi.is-pass .material-icons-round { background: #dcfce7; color: #15803d; }
 .pcw-kpi.is-fail .material-icons-round { background: #fee2e2; color: #b91c1c; }
 .pcw-kpi.is-review .material-icons-round { background: #fef3c7; color: #b45309; }
@@ -8309,7 +8313,29 @@ td[data-hover-type]:hover {
 .pcw-vs { color: #94a3b8; font-weight: 600; margin: 0 4px; }
 .pcw-table-unified { min-width: 1600px; }
 .pcw-dd { min-width: 150px; vertical-align: middle; }
-.pcw-rpt-toolbar { margin-top: 4px; }
+.pcw-rpt-toolbar { margin-top: 0; }
+.is-costing-workbench .pcw-status-kpis .pcb-kpi {
+    gap: 8px;
+    padding: 8px 12px;
+    min-height: 0;
+    border-radius: 10px;
+}
+.is-costing-workbench .pcw-status-kpis .pcb-kpi-icon {
+    width: 30px;
+    height: 30px;
+    font-size: 16px;
+}
+.is-costing-workbench .pcw-status-kpis .pcb-kpi b {
+    font-size: 16px;
+}
+.is-costing-workbench .rpt-table-toolbar {
+    padding: 6px 10px;
+    gap: 8px;
+    top: 48px;
+}
+.is-costing-workbench .rpt-table-wrap {
+    margin-top: 0;
+}
 .pcw-unified-table { min-width: 2200px; }
 .pcw-unified-table thead tr.pcw-group-row th {
     position: sticky;
@@ -8323,10 +8349,12 @@ td[data-hover-type]:hover {
     font-size: 12px;
     font-weight: 800;
 }
-.pcw-unified-table thead tr.rpt-header-row th {
+.pcw-unified-table thead tr.rpt-header-row th,
+.pcw-unified-table thead tr.pcb-item-header-row th {
     top: var(--pcw-group-h, 40px);
 }
-.pcw-unified-table thead tr.rpt-filter-row th {
+.pcw-unified-table thead tr.rpt-filter-row th,
+.pcw-unified-table thead tr.pcb-item-filter-row th {
     top: calc(var(--pcw-group-h, 40px) + var(--rpt-header-h, 37px));
 }
 .pcw-group-th.is-po {
@@ -8379,12 +8407,6 @@ td[data-hover-type]:hover {
 }
 .pcw-unified-table td.pcw-col-zcost {
     background-image: linear-gradient(90deg, rgba(255, 237, 213, .35), transparent 18px);
-}
-.pcw-unified-table .pcw-row.is-pass-row td.pcw-col-zcost {
-    background-image: linear-gradient(90deg, rgba(209, 250, 229, .55), transparent 18px);
-}
-.pcw-unified-table .pcw-row.is-fail-row td.pcw-col-zcost {
-    background-image: linear-gradient(90deg, rgba(255, 237, 213, .7), transparent 18px);
 }
 .pcw-unified-table .pcw-row-select {
     width: 100%;
@@ -8657,6 +8679,24 @@ td[data-hover-type]:hover {
     color: #3730a3;
     font-size: 11px;
     font-weight: 800;
+}
+.pcw-quote-link {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: #fff7ed;
+    color: #c2410c;
+    font-size: 11px;
+    font-weight: 800;
+    text-decoration: none;
+    border: 1px solid #fdba74;
+    cursor: pointer;
+}
+.pcw-quote-link:hover {
+    background: #ffedd5;
+    color: #9a3412;
+    text-decoration: underline;
 }
 .pcw-nav-chip.is-matched {
     background: #dcfce7;
@@ -9747,13 +9787,35 @@ body.pcw-card-offcanvas-open { overflow: hidden; }
     min-width: 3.5rem;
     text-align: right;
 }
+/* budget_cost_per_gmt / actual_cost: status-driven highlight */
 .pcw-unified-table td.pcw-hl-cost {
-    background: #dcfce7 !important;
     font-weight: 700;
-    color: #166534;
 }
 .pcw-unified-table .pcw-row.is-pass-row td.pcw-hl-cost {
-    background: #bbf7d0 !important;
+    background: #bbf7d0 !important; /* PASS — green */
+    color: #166534;
+}
+.pcw-unified-table .pcw-row.is-review-row td.pcw-hl-cost {
+    background: #fef08a !important; /* NEEDS REVIEW — yellow */
+    color: #854d0e;
+}
+.pcw-unified-table .pcw-row.is-unmatched-row td.pcw-hl-cost,
+.pcw-unified-table .pcw-row.is-fail-row td.pcw-hl-cost {
+    background: #fecaca !important; /* NOT MATCHED / NOT VALIDATED — light danger */
+    color: #991b1b;
+}
+.pcw-status-reason-btn {
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+.pcw-status-reason-btn:hover .pcw-pill {
+    outline: 2px solid rgba(79, 70, 229, 0.35);
+    outline-offset: 1px;
+}
+.pcw-status-cell .pcw-status-reason-btn {
+    cursor: pointer;
 }
 .pcw-unified-table td.is-explainable {
     cursor: pointer;
@@ -9932,30 +9994,127 @@ body.pcw-card-offcanvas-open { overflow: hidden; }
     line-height: 1.4;
     white-space: pre-line;
 }
-.pcw-unified-table .pcw-row.is-pass-row td {
-    background: #ecfdf5;
-}
-.pcw-unified-table .pcw-row.is-pass-row:hover td {
-    background: #d1fae5;
-}
-.pcw-unified-table .pcw-row.is-fail-row td {
-    background: #fff7ed;
-}
-.pcw-unified-table .pcw-row.is-fail-row:hover td {
-    background: #ffedd5;
-}
-.pcw-unified-table .pcw-row.is-pass-row.is-open td,
-.pcw-unified-table .pcw-row.is-fail-row.is-open td {
-    background: inherit;
-}
-.pcw-unified-table .pcw-row.is-pass-row.is-open td { background: #ecfdf5; }
-.pcw-unified-table .pcw-row.is-fail-row.is-open td { background: #fff7ed; }
+/* Row status colors removed — only budget_cost_per_gmt / actual_cost (.pcw-hl-cost) keep status tint */
 .pcw .rpt-tb-btn-primary {
     background: #4f46e5;
     color: #fff;
     border-color: #4f46e5;
 }
 .pcw .rpt-tb-btn-primary:hover { background: #4338ca; }
+
+/* Workbench PDF toolbar + viewer */
+.pcw .pcw-pdf-btn {
+    border-color: #fecaca;
+    background: #fef2f2;
+    color: #b91c1c;
+}
+.pcw .pcw-pdf-btn:hover {
+    background: #fee2e2;
+    border-color: #fca5a5;
+}
+.pcw .pcw-pdf-btn-open {
+    border-color: #c7d2fe;
+    background: #eef2ff;
+    color: #3730a3;
+}
+.pcw .pcw-pdf-btn-open:hover {
+    background: #e0e7ff;
+    border-color: #a5b4fc;
+}
+body.pcw-pdf-open { overflow: hidden; }
+.pcw-pdf-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1400;
+    background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(3px);
+}
+.pcw-pdf-modal {
+    position: fixed;
+    z-index: 1401;
+    top: 4vh;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(1100px, 96vw);
+    height: min(92vh, 920px);
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 24px 64px rgba(15, 23, 42, 0.28);
+    overflow: hidden;
+}
+.pcw-pdf-modal[hidden],
+.pcw-pdf-backdrop[hidden] { display: none !important; }
+.pcw-pdf-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid #e2e8f0;
+    background: #fff7f7;
+}
+.pcw-pdf-head-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+.pcw-pdf-head-left .material-icons-round {
+    color: #b91c1c;
+    font-size: 28px;
+}
+.pcw-pdf-head-left strong {
+    display: block;
+    font-size: 15px;
+    color: #0f172a;
+}
+.pcw-pdf-head-left p {
+    margin: 2px 0 0;
+    font-size: 12px;
+    color: #64748b;
+}
+.pcw-pdf-head-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.pcw-pdf-close {
+    width: 36px;
+    height: 36px;
+    border: 0;
+    border-radius: 999px;
+    background: #f1f5f9;
+    color: #64748b;
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+}
+.pcw-pdf-close:hover {
+    background: #e2e8f0;
+    color: #0f172a;
+}
+.pcw-pdf-body {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    background: #f8fafc;
+}
+.pcw-pdf-loading {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: #64748b;
+    font-weight: 600;
+}
+.pcw-pdf-frame {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: #fff;
+}
 .is-costing-workbench .rpt-table-wrap.is-scroll-body {
     max-height: calc(100vh - 280px);
 }
@@ -10002,11 +10161,47 @@ body.pcw-card-offcanvas-open { overflow: hidden; }
     padding: 16px 18px 24px;
     background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 120px, #f8fafc 100%);
 }
-.is-costing-bulk .rpt-name {
-    max-width: 200px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+.is-purchase-order.is-po-list.is-costing-bulk .rpt-name,
+.is-costing-bulk .rpt-name.pcb-bar-title {
+    display: flex;
+    align-items: center;
+    max-width: none;
+    overflow: visible;
     white-space: nowrap;
+}
+.is-costing-bulk .pcb-bar-title strong {
+    font-size: 17px;
+    font-weight: 800;
+    color: #0f172a;
+    letter-spacing: -0.02em;
+}
+.is-costing-bulk .pcb-compare .pcw-compare-card {
+    cursor: default;
+}
+.is-costing-bulk .pcb-compare .pcw-compare-card:hover {
+    transform: none;
+}
+.is-costing-bulk .pcb-compare .pcw-compare-grid {
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
+}
+.is-costing-bulk .pcb-compare .pcw-card-content,
+.is-costing-bulk .pcb-compare .pcw-card-val,
+.is-costing-bulk .pcb-compare .pcw-card-val b {
+    overflow: visible;
+    text-overflow: unset;
+    white-space: nowrap;
+}
+.is-costing-bulk .pcb-compare .pcw-card-content small {
+    overflow: visible;
+    text-overflow: unset;
+    white-space: normal;
+    font-size: 11px;
+}
+.is-costing-bulk .pcb-table {
+    min-width: 2800px;
+}
+#pcbFilterRow {
+    display: table-row;
 }
 .is-costing-bulk .rpt-alert { margin: 0; }
 .is-costing-bulk .pcb-header-filters {
@@ -10023,6 +10218,46 @@ body.pcw-card-offcanvas-open { overflow: hidden; }
     min-width: 0;
 }
 .is-costing-bulk .pcb-header-filters .rpt-field-range { flex: 0 1 140px; max-width: 160px; }
+.is-costing-bulk .pcb-mat-seg {
+    display: inline-flex;
+    align-items: center;
+    height: 36px;
+    padding: 3px;
+    border-radius: 999px;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    flex: 0 0 auto;
+}
+.is-costing-bulk .pcb-mat-opt {
+    display: inline-flex;
+    margin: 0;
+    cursor: pointer;
+}
+.is-costing-bulk .pcb-mat-opt input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+.is-costing-bulk .pcb-mat-opt span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 64px;
+    height: 28px;
+    padding: 0 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: .02em;
+    color: #64748b;
+}
+.is-costing-bulk .pcb-mat-opt input:checked + span {
+    background: #fff;
+    color: #312e81;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, .12);
+}
+.is-costing-bulk .pcb-mat-opt input[value="fabric"]:checked + span { color: #1d4ed8; }
+.is-costing-bulk .pcb-mat-opt input[value="trims"]:checked + span { color: #c2410c; }
 .is-costing-bulk .pcb-header-filters .rpt-field-mat-cat { flex: 0 1 140px; max-width: 160px; }
 .is-costing-bulk .pcb-header-filters .rpt-field-supplier { flex: 0 1 160px; max-width: 190px; }
 .is-costing-bulk .pcb-header-filters .rpt-field-status { flex: 0 1 130px; max-width: 150px; }
@@ -10726,6 +10961,43 @@ body.pcw-card-offcanvas-open { overflow: hidden; }
     cursor: pointer;
 }
 .pcb-po-link:hover { text-decoration: underline; }
+.pcb-validate-btn,
+.pcb-pdf-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid #c7d2fe;
+    border-radius: 8px;
+    background: #eef2ff;
+    color: #3730a3;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.pcb-validate-btn .material-icons-round,
+.pcb-pdf-btn .material-icons-round { font-size: 15px; }
+.pcb-validate-btn:hover {
+    background: #e0e7ff;
+    border-color: #a5b4fc;
+}
+.pcb-pdf-btn {
+    border-color: #fecaca;
+    background: #fef2f2;
+    color: #b91c1c;
+}
+.pcb-pdf-btn:hover {
+    background: #fee2e2;
+    border-color: #fca5a5;
+}
+.pcb-card-actions {
+    margin-top: 10px;
+    display: flex;
+    justify-content: flex-end;
+}
 
 /* 90% offcanvas for PO costing details */
 body.pcb-offcanvas-open { overflow: hidden; }
@@ -10752,7 +11024,7 @@ body.pcb-offcanvas-open { overflow: hidden; }
 .pcb-offcanvas-panel {
     position: relative;
     width: 100%;
-    max-width: 1540px;
+    max-width: min(1760px, calc(100vw - 32px));
     height: calc(100vh - 48px);
     max-height: calc(100vh - 48px);
     display: flex;
@@ -11469,11 +11741,11 @@ body.pcb-offcanvas-open { overflow: hidden; }
     }
 }
 @media (max-width: 720px) {
-    .is-costing-bulk .rpt-name { display: none; }
-    .is-costing-bulk .pcb-header-filters .rpt-field-range,
-    .is-costing-bulk .pcb-header-filters .rpt-field-mat-cat,
-    .is-costing-bulk .pcb-header-filters .rpt-field-supplier,
-    .is-costing-bulk .pcb-header-filters .rpt-field-status {
+    .is-costing-bulk .rpt-name.pcb-bar-title {
+        display: flex;
+        width: 100%;
+    }
+    .is-costing-bulk .pcb-header-filters .rpt-field-range {
         flex: 1 1 calc(50% - 8px);
         max-width: none;
     }
@@ -12592,5 +12864,76 @@ html, body {
     .hub-bento-desc {
         font-size: 12.5px !important;
     }
+}
+
+/* ==========================================================================
+   PO Costing Validation — full-page lookup (Fabric Sale Order pattern)
+   ========================================================================== */
+.rpt-app.is-po-costing {
+    --rpt: #4f46e5;
+    --rpt-soft: rgba(79, 70, 229, 0.14);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: #f5f3ff;
+}
+.rpt-app.is-po-costing .lookup {
+    flex: 1;
+    background:
+        radial-gradient(1200px 500px at 50% -10%, rgba(79, 70, 229, 0.16), transparent 60%),
+        radial-gradient(800px 400px at 90% 80%, rgba(14, 165, 233, 0.08), transparent 50%),
+        #f5f3ff;
+}
+.rpt-app.is-po-costing .lookup-card {
+    border-color: #e0e7ff;
+}
+.rpt-app.is-po-costing .lookup-kicker { color: var(--rpt); }
+.rpt-app.is-po-costing .lookup-submit {
+    background: var(--rpt);
+    border-color: var(--rpt);
+}
+.rpt-app.is-po-costing .lookup-submit:hover {
+    background: #4338ca;
+    border-color: #4338ca;
+}
+.rpt-app.is-po-costing .lookup-so select {
+    border: 0;
+    background: transparent;
+    width: 100%;
+    padding: 14px 0;
+    font-size: 16px;
+    color: #0f172a;
+    appearance: none;
+    cursor: pointer;
+}
+.rpt-app.is-po-costing .lookup-so select:focus { outline: none; }
+.rpt-app.is-po-costing .lookup-range {
+    position: relative;
+}
+.rpt-app.is-po-costing .lookup-range::after {
+    content: 'expand_more';
+    font-family: 'Material Icons Round', Material Icons, sans-serif;
+    position: absolute;
+    right: 12px;
+    color: #94a3b8;
+    pointer-events: none;
+}
+.rpt-app.is-po-costing .poc-lookup-custom {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 10px;
+}
+.rpt-app.is-po-costing .poc-lookup-custom[hidden] { display: none !important; }
+.rpt-app.is-po-costing .date-error {
+    margin: 10px 0 0;
+    color: #b91c1c;
+    font-size: 13px;
+    font-weight: 600;
+}
+.rpt-app.is-po-costing .date-error[hidden] { display: none !important; }
+.rpt-app.is-po-costing > .hub-footer { margin-top: auto; }
+@media (max-width: 560px) {
+    .rpt-app.is-po-costing .poc-lookup-custom { grid-template-columns: 1fr; }
 }
 

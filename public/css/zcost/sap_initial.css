@@ -25,6 +25,20 @@
   display: none !important;
 }
 
+html.zcost-boot-sheet .sap-initial-screen {
+  display: none !important;
+}
+html.zcost-boot-sheet #sap-window {
+  display: flex !important;
+}
+html.zcost-view-only .studio-initial-screen-btn,
+html.zcost-view-only #btn-approve,
+html.zcost-view-only #btn-change,
+html.zcost-view-only #btn-save-primary,
+html.zcost-view-only #btn-copy-costing {
+  display: none !important;
+}
+
 /* ==========================================================================
    Initial Navbar
    ========================================================================== */

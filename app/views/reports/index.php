@@ -290,8 +290,8 @@ $totalVisibleCards = ($canUtil ? 1 : 0) + ($canFabric ? 1 : 0) + ($canTrims ? 1 
             <?php endif; ?>
 
             <?php if ($canPoCosting): ?>
-            <!-- 8. PO Costing -->
-            <a class="hub-bento-card is-po-costing animate-card" style="--stagger: 8;" href="<?= e(url('purchase-order') . '?view=costing') ?>" data-category="orders" data-keywords="po costing validation purchase order cost budget actual supplier plant net value orders">
+            <!-- 8. PO Costing Validation — full-page lookup -->
+            <a class="hub-bento-card is-po-costing animate-card" style="--stagger: 8;" href="<?= e(url('po-costing')) ?>" data-category="orders" data-keywords="bulk po validation costing purchase order cost budget actual supplier plant net value orders workbench">
                 <div class="hub-bento-ambient-glow"></div>
                 <div class="hub-bento-shine"></div>
                 <div class="hub-bento-head">
@@ -302,12 +302,12 @@ $totalVisibleCards = ($canUtil ? 1 : 0) + ($canFabric ? 1 : 0) + ($canTrims ? 1 
                     </div>
                 </div>
                 <div class="hub-bento-body">
-                    <h2 class="hub-bento-title">PO Costing Validation</h2>
-                    <p class="hub-bento-desc">Validate PO cost vs budget and actuals by supplier, plant, and net value.</p>
+                    <h2 class="hub-bento-title">PO Validation</h2>
+                    <p class="hub-bento-desc">Validate POs vs zCOST, assign next users, and open the PO vs zCOST workbench.</p>
                     <div class="hub-bento-chips">
-                        <span class="hub-bento-chip"><i class="fas fa-scale-balanced"></i> Cost vs Budget</span>
-                        <span class="hub-bento-chip"><i class="fas fa-building"></i> Supplier Plant</span>
-                        <span class="hub-bento-chip"><i class="fas fa-layer-group"></i> Net Value</span>
+                        <span class="hub-bento-chip"><i class="fas fa-list-check"></i> Bulk List</span>
+                        <span class="hub-bento-chip"><i class="fas fa-scale-balanced"></i> PO vs zCOST</span>
+                        <span class="hub-bento-chip"><i class="fas fa-user-check"></i> Assign &amp; Validate</span>
                     </div>
                 </div>
                 <div class="hub-bento-footer">
@@ -1897,21 +1897,24 @@ document.addEventListener('DOMContentLoaded', function () {
     var openBtn = document.getElementById('openUtilModalBtn');
     var closeBtn = document.getElementById('closeUtilModalBtn');
 
-    function openModal() {
-        if (!modal) return;
-        modal.style.display = 'flex';
-        modal.classList.add('is-open');
+    function openBackdrop(el) {
+        if (!el) return;
+        el.style.display = 'flex';
+        el.classList.add('is-open');
         document.body.classList.add('hub-modal-open');
     }
 
-    function closeModal() {
-        if (!modal) return;
-        modal.style.display = 'none';
-        modal.classList.remove('is-open');
+    function closeBackdrop(el) {
+        if (!el) return;
+        el.style.display = 'none';
+        el.classList.remove('is-open');
         if (!document.querySelector('.hub-modal-backdrop.is-open')) {
             document.body.classList.remove('hub-modal-open');
         }
     }
+
+    function openModal() { openBackdrop(modal); }
+    function closeModal() { closeBackdrop(modal); }
 
     if (openBtn) {
         openBtn.addEventListener('click', openModal);
@@ -1939,9 +1942,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     if (modal) {
         modal.addEventListener('click', function (e) {
-            if (e.target === modal) {
-                closeModal();
-            }
+            if (e.target === modal) closeModal();
         });
     }
 

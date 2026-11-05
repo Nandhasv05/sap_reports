@@ -17,7 +17,7 @@ $catalogHome = url('/');
 $pageUrl = url('purchase-order');
 $isCostingView = !empty($isCostingView);
 $pageHeading = $isCostingView
-    ? ($isList ? 'PO Costing Validation' : ('PO Costing Workbench · ' . e($purchaseOrder)))
+    ? ($isList ? 'PO Validation' : ('PO Costing Workbench · ' . e($purchaseOrder)))
     : ($isList ? 'Purchase Order Report' : ('PO ' . e($purchaseOrder)));
 $isCostingBulk = $isCostingView && $isList;
 $plant = (string) ($plant ?? '');
@@ -137,6 +137,10 @@ $listCards = $isCostingView
                     <button type="button" class="pcw-cb-btn is-pass" id="pcwPassPoBtn" disabled title="Pass PO">PASS PO</button>
                     <div class="pcw-cb-status" id="pcwPassStatus">STATUS : <?= $purchaseOrder !== '' ? 'NOT PASSED' : 'PENDING' ?></div>
                 </form>
+            <?php elseif ($isCostingBulk): ?>
+                <div class="rpt-name pcb-bar-title">
+                    <strong><?= e($pageHeading) ?></strong>
+                </div>
             <?php else: ?>
                 <div class="rpt-name"><?= $pageHeading ?></div>
             <?php endif; ?>
@@ -157,6 +161,21 @@ $listCards = $isCostingView
             ?>
             <form class="rpt-search prod-filters po-filters pcb-header-filters" id="pcbFilterForm" autocomplete="off" novalidate>
                 <input type="hidden" name="view" value="costing">
+                <div class="pcb-mat-seg" role="radiogroup" aria-label="Material type">
+                    <label class="pcb-mat-opt">
+                        <input type="radio" name="pcb_mat" value="all"<?= !in_array($bulkMatHeader, ['fabric', 'trims'], true) ? ' checked' : '' ?>>
+                        <span>All</span>
+                    </label>
+                    <label class="pcb-mat-opt">
+                        <input type="radio" name="pcb_mat" value="fabric"<?= $bulkMatHeader === 'fabric' ? ' checked' : '' ?>>
+                        <span>Fabric</span>
+                    </label>
+                    <label class="pcb-mat-opt">
+                        <input type="radio" name="pcb_mat" value="trims"<?= $bulkMatHeader === 'trims' ? ' checked' : '' ?>>
+                        <span>Trims</span>
+                    </label>
+                </div>
+                <input type="hidden" id="pcbMat" name="mat_cat" value="<?= e(in_array($bulkMatHeader, ['fabric', 'trims'], true) ? $bulkMatHeader : 'all') ?>">
                 <label class="rpt-field rpt-field-range" title="PO creation date range">
                     <span class="material-icons-round">date_range</span>
                     <select id="pcbRange" name="range" aria-label="PO date range">
@@ -167,32 +186,6 @@ $listCards = $isCostingView
                 </label>
                 <input type="hidden" id="pcbFrom" name="from" value="<?= e($range['from'] ?? '') ?>">
                 <input type="hidden" id="pcbTo" name="to" value="<?= e($range['to'] ?? '') ?>">
-                <label class="rpt-field rpt-field-mat-cat" title="Material type">
-                    <span class="material-icons-round">category</span>
-                    <select id="pcbMat" name="mat_cat" aria-label="Material type">
-                        <option value="all"<?= !in_array($bulkMatHeader, ['fabric', 'trims'], true) ? ' selected' : '' ?>>All Materials</option>
-                        <option value="fabric"<?= $bulkMatHeader === 'fabric' ? ' selected' : '' ?>>Fabric</option>
-                        <option value="trims"<?= $bulkMatHeader === 'trims' ? ' selected' : '' ?>>Trims</option>
-                    </select>
-                </label>
-                <label class="rpt-field rpt-field-supplier" title="Vendor">
-                    <span class="material-icons-round">storefront</span>
-                    <select id="pcbSupplier" name="supplier" aria-label="Vendor">
-                        <option value="">All Vendors</option>
-                        <?php foreach ($suppliers as $code): ?>
-                            <option value="<?= e($code) ?>"<?= $supplier === $code ? ' selected' : '' ?>>Supplier <?= e($code) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </label>
-                <label class="rpt-field rpt-field-status" title="Validation status">
-                    <span class="material-icons-round">verified</span>
-                    <select id="pcbValStatus" aria-label="Validation status">
-                        <option value="all">All Status</option>
-                        <option value="PASSED">Passed</option>
-                        <option value="EXCEPTION">Exception</option>
-                        <option value="PENDING">Pending</option>
-                    </select>
-                </label>
                 <label class="rpt-field po-direct-search pcb-header-search" title="Search PO number (Press Enter to search)">
                     <span class="material-icons-round">search</span>
                     <input type="search" id="pcbPoSearch" value="" placeholder="Search PO #" inputmode="numeric" maxlength="10" autocomplete="off" aria-label="Search purchase order number">
@@ -692,6 +685,9 @@ $pcbCurrentUser = trim((string) (
     'presetDates'        => $presetDates,
     'dataUrl'            => url('purchase-order/data'),
     'validateUrl'        => url('purchase-order/validate'),
+    'pdfUrl'             => url('purchase-order/pdf'),
+    'zcostUrl'           => url('zcost'),
+    'zcostAppUrl'        => url('zcost'),
     'usersUrl'           => url('purchase-order/users'),
     'validationLogUrl'   => url('purchase-order/validation-log'),
     'pageUrl'            => $pageUrl,
@@ -701,6 +697,9 @@ $pcbCurrentUser = trim((string) (
     'isCostingBulk'      => $isCostingBulk,
     'columns'            => $columns,
     'currentUser'        => $pcbCurrentUser,
+    'canPassPo'          => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'approve') : true,
+    'canAssign'          => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'assign') : true,
+    'canValidate'        => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'validate') : true,
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
 <script src="<?= e(asset('js/loader.js')) ?>"></script>
 <?php if ($isCostingWorkbench): ?>
@@ -716,12 +715,23 @@ $pcbCurrentUser = trim((string) (
     $bulkTableKey = 'purchase_order_costing_bulk_table';
     $bulkTableDef = TableColumnRegistry::get($bulkTableKey);
 ?>
+<?php
+    $itemTableKey = 'purchase_order_costing_items_table';
+    $itemTableDef = TableColumnRegistry::get($itemTableKey);
+?>
 <script type="application/json" id="pcbTablePrefs"><?= json_encode([
     'tableKey'      => $bulkTableKey,
     'apiUrl'        => url('api/user/table-preferences/' . $bulkTableKey),
     'userId'        => (string) ($_SESSION['user_id'] ?? ''),
     'columns'       => $bulkTableDef['columns'] ?? [],
     'defaultHidden' => $bulkTableDef['defaultHidden'] ?? [],
+], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
+<script type="application/json" id="pcbItemTablePrefs"><?= json_encode([
+    'tableKey'      => $itemTableKey,
+    'apiUrl'        => url('api/user/table-preferences/' . $itemTableKey),
+    'userId'        => (string) ($_SESSION['user_id'] ?? ''),
+    'columns'       => $itemTableDef['columns'] ?? [],
+    'defaultHidden' => $itemTableDef['defaultHidden'] ?? [],
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
 <script src="<?= e(asset('js/table-columns.js')) ?>"></script>
 <script src="<?= e(asset('js/po-costing-bulk.js')) ?>"></script>

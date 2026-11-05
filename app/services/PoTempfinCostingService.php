@@ -277,75 +277,126 @@ final class PoTempfinCostingService
         $budget = $this->num($get($row, 'BUDGET_COST_PER_GMT', 'BUDGET COST PER GMT'));
         $conv = $this->num($get($row, 'CONV'));
         $actual = $this->num($get($row, 'ACTUAL_COST', 'ACTUAL COST'));
+        $ouom = strtoupper(trim((string) $get($row, 'OUOM')));
+        $buom = strtoupper(trim((string) $get($row, 'BUOM')));
+        $matDesc = strtoupper(trim((string) $get($row, 'MAT_DESC', 'mat_desc')));
+        $poCurrency = strtoupper(trim((string) $get($row, 'PO_CURRENCY')) ?: 'INR');
+        $tempfinActual = $actual;
+        $tempfinBudget = $budget;
 
         if ($rowKind === 'detail') {
-            // Same as classic: consumption is per-garment, not PO÷SO ratio
+            // SO_QTY often blank in TEMPFIN while PRWISE_SO_QTY is filled (e.g. PO 1000028025)
+            if (($soQty === null || $soQty <= 0) && $prSoQty !== null && $prSoQty > 0) {
+                $soQty = $prSoQty;
+            }
+
+            // Match classic portal: costing_fix_trims_consumption_not_po_ratio()
+            // CONSUMPTION is per garment — never PO qty ÷ SO qty (that inflates ACTUAL).
             $baseSo = $soQty !== null && $soQty > 0 ? $soQty : $prSoQty;
-            if (
-                $consumption !== null
-                && $baseSo !== null
-                && $baseSo > 0
-                && $totPoQty !== null
-                && $totPoQty > 0
-            ) {
-                $ratio = $totPoQty / $baseSo;
-                $isPoSoRatio = abs($consumption - $ratio) <= max(0.08, $ratio * 0.04)
-                    || ($consumption > 1.2 && $reqqty !== null && abs($reqqty - $totPoQty) <= max(2.0, $totPoQty * 0.03));
-                if ($isPoSoRatio) {
-                    $useCons = ($budgetedCons !== null && $budgetedCons > 0) ? $budgetedCons : 1.0;
-                    $consumption = $useCons;
-                    $reqqty = round($baseSo * $useCons, 4);
-                    if ($porate !== null) {
-                        $actual = round($porate * $useCons, 2);
+            $poSoRatio = ($totPoQty !== null && $totPoQty > 0 && $baseSo !== null && $baseSo > 0)
+                ? ($totPoQty / $baseSo)
+                : null;
+            $looksLikePoSo = $consumption !== null && $poSoRatio !== null
+                && abs($consumption - $poSoRatio) <= max(0.08, abs($poSoRatio) * 0.04);
+            $looksLikePoReq = $consumption !== null && $consumption > 1.2
+                && $reqqty !== null && $totPoQty !== null
+                && abs($reqqty - $totPoQty) <= max(2.0, abs($totPoQty) * 0.03);
+
+            $fixedBadCons = false;
+            if ($consumption === null || $consumption <= 0 || $looksLikePoSo || $looksLikePoReq) {
+                if ($budgetedCons !== null && $budgetedCons > 0) {
+                    $consumption = $budgetedCons;
+                } elseif ($consumption === null || $consumption <= 0 || $looksLikePoSo || $looksLikePoReq) {
+                    $consumption = 1.0;
+                }
+                $fixedBadCons = true;
+            }
+
+            if ($conv === null && $budgetConv !== null) {
+                $conv = $budgetConv;
+            }
+            if ($conv === null || $conv <= 0) {
+                $conv = 1.0;
+            }
+
+            // Classic portal: trust PASSPO ACTUAL_COST / BUDGET_COST_PER_GMT as returned.
+            // Only recompute when blank, or when we just fixed a bad PO÷SO consumption
+            // (classic then sets ACTUAL = PORATE × cons, with button GRO / FX rules).
+            $consForActual = ($consumption !== null && $consumption > 0)
+                ? $consumption
+                : (($budgetedCons !== null && $budgetedCons > 0) ? $budgetedCons : 1.0);
+            $classicActual = $this->computeClassicActualCost(
+                $porate,
+                $conv,
+                $consForActual,
+                $budgetConv,
+                $matgroupUpper,
+                $ouom,
+                $buom,
+                $matDesc,
+                $poCurrency
+            );
+            if ($tempfinActual !== null && $tempfinActual > 0 && !$fixedBadCons) {
+                // Keep PASSPO value — same as classic grid ($shown = ACTUAL_COST from SP)
+                $actual = $tempfinActual;
+            } elseif ($classicActual !== null) {
+                $actual = $classicActual;
+            } elseif ($tempfinActual !== null && $tempfinActual > 0) {
+                $actual = $tempfinActual;
+            }
+
+            // Trust PASSPO BUDGET_COST_PER_GMT — never invent from zCOST RATE.
+            // Fill only when blank using BUDGETED_CONS × BUDGET_INR (classic Excel).
+            if ($tempfinBudget !== null && $tempfinBudget > 0) {
+                $budget = $tempfinBudget;
+            } elseif ($budget === null || $budget <= 0) {
+                if ($budgetedCons !== null && $budgetedCons > 0 && $budgetInr !== null && $budgetInr > 0) {
+                    $budget = round($budgetedCons * $budgetInr, 4);
+                } elseif ($budgetInr !== null && $budgetInr > 0) {
+                    $scaleRef = $actual ?? $porate;
+                    $looksLikeUnit = $scaleRef === null || $scaleRef <= 0
+                        || $budgetInr <= max(50.0, abs((float) $scaleRef) * 50.0);
+                    if ($looksLikeUnit) {
+                        $budget = $budgetInr;
                     }
                 }
             }
-
-            // Classic: ACTUAL_COST = PORATE × BUDGETED_CONS when actual missing / zero
-            $useCons = ($budgetedCons !== null && $budgetedCons > 0)
-                ? $budgetedCons
-                : (($consumption !== null && $consumption > 0) ? $consumption : null);
-            if ($porate !== null && $useCons !== null && ($actual === null || $actual == 0.0)) {
-                $actual = round($porate * $useCons, 2);
-            }
-
-            // Classic: BUDGET_COST_PER_GMT ≈ BUDGETED_CONS × BUDGET_INR when GMT blank
-            if ($budget === null && $budgetedCons !== null && $budgetInr !== null) {
-                $budget = round($budgetedCons * $budgetInr, 4);
-            }
-            if ($conv === null && $budgetConv !== null) {
-                $conv = $budgetConv;
+            if ($budget !== null && $budget > 0) {
+                $tempfinBudget = $budget;
             }
         }
 
         $status = 'EXCEPTION';
         $result = 'No budget / actual cost';
         $variancePct = null;
+        // Classic UI: green when actual < budget − 0.005; red when actual > budget + 0.005
+        $tol = 0.005;
         if ($rowKind !== 'detail') {
             $status = 'FOOTER';
             $result = $ponoUpper !== '' ? $ponoUpper : ($matgroupUpper !== '' ? $matgroupUpper : 'FOOTER');
-        } elseif ($budget !== null && $actual !== null) {
-            if ($budget != 0.0) {
-                $variancePct = round((($actual - $budget) / $budget) * 100, 2);
-            } else {
-                $variancePct = $actual == 0.0 ? 0.0 : 100.0;
-            }
-            if ($actual <= $budget) {
+        } elseif ($budget !== null && $budget > 0 && $actual !== null) {
+            $variancePct = round((($actual - $budget) / $budget) * 100, 2);
+            if ($actual <= $budget + $tol) {
                 $status = 'PASS';
                 $result = 'PASS — actual cost within budget';
             } else {
                 $status = 'EXCEPTION';
                 $result = 'EXCEPTION — actual cost exceeds budget';
             }
+        } elseif ($rowKind === 'detail' && ($budget === null || $budget <= 0) && $actual !== null) {
+            $status = 'NEEDS_REVIEW';
+            $result = 'No budget RATE — Needs Review';
         }
 
         $pono = $ponoRaw;
         $poitem = (string) $get($row, 'POITEM');
         $salord = (string) $get($row, 'SALORDNO');
+        // Classic portal: danger when actual > budget + 0.005
         $costMismatch = $rowKind === 'detail'
             && $budget !== null
+            && (float) $budget > 0
             && $actual !== null
-            && abs((float) $actual - (float) $budget) > 0.0001;
+            && (float) $actual > ((float) $budget + 0.005);
 
         return [
             'pono'                 => $pono,
@@ -362,22 +413,28 @@ final class PoTempfinCostingService
             'tot_poqty'            => $totPoQty,
             'so_wise_poqty'        => $this->num($get($row, 'SO_WISE_POQTY')),
             'so_wise_po_val'       => $this->num($get($row, 'SO_WISE_PO_VAL')),
-            'ouom'                 => (string) $get($row, 'OUOM'),
+            'ouom'                 => $ouom !== '' ? $ouom : (string) $get($row, 'OUOM'),
             'porate'               => $porate,
             'totvalue'             => $this->num($get($row, 'TOTVALUE')),
             'mat_desc'             => (string) $get($row, 'MAT_DESC', 'mat_desc'),
-            'po_currency'          => (string) $get($row, 'PO_CURRENCY'),
+            'po_currency'          => $poCurrency !== '' ? $poCurrency : (string) $get($row, 'PO_CURRENCY'),
             'budgeted_cons'        => $budgetedCons,
             'budget_inr'           => $budgetInr,
             'budget_currency'      => (string) $get($row, 'BUDGET_CURRENCY'),
             'budget_conv_rt'       => $budgetConv,
             'budget_cost_per_gmt'  => $budget,
             'conv'                 => $conv,
-            'buom'                 => (string) $get($row, 'BUOM'),
+            'buom'                 => $buom !== '' ? $buom : (string) $get($row, 'BUOM'),
             'actual_cost'          => $actual,
-            'cost_item'            => '',
+            // Lock TEMPFIN budget/actual/consumption so zCOST match cannot overwrite Excel values
+            // Lock whenever PASSPO supplied a real value — zCOST match must not overwrite
+            'tempfin_budget_locked'=> $rowKind === 'detail' && $budget !== null && (float) $budget > 0,
+            'tempfin_actual_locked'=> $rowKind === 'detail' && $actual !== null && (float) $actual > 0,
+            'tempfin_cons_locked'  => $rowKind === 'detail' && $consumption !== null && $consumption > 0,
+            'cost_item'            => (string) $get($row, 'ITEM', 'CostingItemNo', 'COSTING_ITEM_NO'),
+            'zcost_item'           => (string) $get($row, 'ITEM', 'CostingItemNo', 'COSTING_ITEM_NO'),
             'costing_quotation_no' => (string) $get($row, 'CostingQuotationNo', 'COSTING_QUOTATION_NO', 'QUOTATIONNO'),
-            'costing_item_no'      => (string) $get($row, 'CostingItemNo', 'COSTING_ITEM_NO', 'ITEM'),
+            'costing_item_no'      => (string) $get($row, 'ITEM', 'CostingItemNo', 'COSTING_ITEM_NO'),
             'maktx'                => '',
             'cost_matrix'          => ($budget !== null || $actual !== null)
                 ? [
@@ -404,7 +461,9 @@ final class PoTempfinCostingService
             'expected_unit_cost'   => $budget,
             'status'               => $status,
             'validation_result'    => $result,
-            'needs_manual_match'   => $rowKind === 'detail' && ($budget === null || $budget <= 0),
+            // TEMPFIN budget+actual is enough to PASS/FAIL — empty zCOST ITEM is not "needs review"
+            'needs_manual_match'   => $rowKind === 'detail'
+                && ($budget === null || $budget <= 0 || $actual === null),
             'selected'             => false,
         ];
     }
@@ -448,12 +507,21 @@ final class PoTempfinCostingService
         $items = [];
         $seenValueItems = [];
         $unit = '';
+        $detailCount = 0;
         foreach ($records as $r) {
-            $st = (string) ($r['status'] ?? '');
+            $kind = (string) ($r['row_kind'] ?? 'detail');
+            // SUB-TOTAL / charges / tax must not count as exceptions (was forcing STATUS : NOT PASSED)
+            if (in_array($kind, ['footer', 'charge', 'tax'], true)) {
+                continue;
+            }
+            $detailCount++;
+            $st = strtoupper((string) ($r['status'] ?? ''));
             if ($st === 'PASS') {
                 $passed++;
             } elseif ($st === 'NEEDS_REVIEW') {
                 $needsReview++;
+            } elseif ($st === 'FOOTER') {
+                continue;
             } else {
                 $exceptions++;
             }
@@ -494,7 +562,7 @@ final class PoTempfinCostingService
             }
         }
         return [
-            'po_items'        => count($items) > 0 ? count($items) : count($records),
+            'po_items'        => count($items) > 0 ? count($items) : $detailCount,
             'unique_po_items' => count($items),
             'materials'       => count($materials),
             'sales_orders'    => count($salesOrders),
@@ -509,8 +577,69 @@ final class PoTempfinCostingService
             'total_expected'  => round($totalExpected, 2),
             'total_actual'    => round($totalActual, 2),
             'currency'        => (string) ($records[0]['po_currency'] ?? $records[0]['currency'] ?? 'INR'),
-            'can_pass_po'     => count($records) > 0 && $exceptions === 0 && $needsReview === 0,
+            'can_pass_po'     => $detailCount > 0 && $exceptions === 0 && $needsReview === 0 && $passed > 0,
         ];
+    }
+
+    /**
+     * Classic portal ACTUAL_COST — same rules as PO Costing Validation/lib/calc-columns.php
+     * po_calc_compute_actual_cost() / po_calc_actual_cost_path().
+     * GRO÷144 only for button-like groups when OUOM is GRO (not every GRO line).
+     */
+    private function computeClassicActualCost(
+        ?float $porate,
+        ?float $conv,
+        ?float $cons,
+        ?float $budgetConv,
+        string $matgroup,
+        string $ouom,
+        string $buom,
+        string $matDesc,
+        string $currency
+    ): ?float {
+        if ($porate === null) {
+            return null;
+        }
+        $conv = ($conv !== null && $conv > 0) ? $conv : 1.0;
+        $fx = ($budgetConv !== null && $budgetConv > 0) ? $budgetConv : 1.0;
+        $mg = strtoupper(trim($matgroup));
+        $ouom = strtoupper(trim($ouom));
+        $buom = strtoupper(trim($buom));
+        $matDesc = strtoupper(trim($matDesc));
+        $currency = strtoupper(trim($currency) ?: 'INR');
+
+        if ($mg === 'THREADS1' && $buom === 'CPS') {
+            return round(($porate / 1000.0) * $conv, 4);
+        }
+        if ($mg === 'THREADS1' && $buom === 'BOX') {
+            return round(($porate / 10000.0) * $conv, 4);
+        }
+
+        if ($cons === null) {
+            return null;
+        }
+
+        // Classic: OUOM=GRO + button family only (BUOM=GRO alone is not enough)
+        $isButtonGro = ($ouom === 'GRO' || $buom === 'GRO') && (
+            str_contains($mg, 'BUTTON')
+            || str_contains($mg, 'SEMI DULL')
+            || str_contains($mg, 'HOOK & EYE')
+            || str_contains($mg, 'PEARL BTN')
+            || str_contains($matDesc, 'BTN')
+            || str_contains($matDesc, 'BUTTON')
+            || str_contains($matDesc, 'PLASTIC')
+        );
+
+        $base = ($currency !== 'INR') ? ($porate * $fx) : $porate;
+        $mid = $base * $conv;
+
+        if ($isButtonGro) {
+            return round(round($mid * $cons, 0) / 144.0, 4);
+        }
+        if ($ouom === 'KG' || $buom === 'KG') {
+            return round(($mid * $cons) / 500.0, 4);
+        }
+        return round($mid * $cons, 4);
     }
 
     private function num(mixed $v): ?float

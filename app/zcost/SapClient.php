@@ -31,6 +31,62 @@ class SapClient
     }
 
     /**
+     * SAP VBELN is CHAR10 / ALPHA — try the raw value, unpadded, and zero-padded keys.
+     *
+     * @return list<string>
+     */
+    private function vbelnCandidates(string $vbeln): array
+    {
+        $raw = trim($vbeln);
+        $digits = preg_replace('/\D+/', '', $raw) ?: $raw;
+        $unpadded = ltrim((string) $digits, '0');
+        if ($unpadded === '') {
+            $unpadded = '0';
+        }
+        $padded = str_pad((string) $digits, 10, '0', STR_PAD_LEFT);
+        $out = [];
+        foreach ([$raw, $digits, $unpadded, $padded] as $candidate) {
+            $candidate = trim((string) $candidate);
+            if ($candidate !== '' && !in_array($candidate, $out, true)) {
+                $out[] = $candidate;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private function sheetLineCount(array $data): int
+    {
+        $n = 0;
+        foreach (['to_Fabric', 'to_Trim', 'to_Packing', 'to_Special'] as $nav) {
+            $rows = $data[$nav]['results'] ?? null;
+            if (is_array($rows)) {
+                $n += count($rows);
+            }
+        }
+        return $n;
+    }
+
+    /**
+     * Prefer the payload that actually has costing lines / approved totals.
+     *
+     * @param array<string, mixed> $data
+     */
+    private function scoreSheet(array $data): int
+    {
+        $score = $this->sheetLineCount($data) * 20;
+        if (strtoupper(trim((string) ($data['Approve'] ?? ''))) === 'X') {
+            $score += 80;
+        }
+        $score += (int) round((float) ($data['Sellprice'] ?? 0));
+        $score += (int) round((float) ($data['Subtot'] ?? 0));
+        $score += (int) round((float) ($data['Making'] ?? 0));
+        return $score;
+    }
+
+    /**
      * Normalize Posnr
      */
     private function cleanPosnr(string $posnr): string
@@ -47,21 +103,73 @@ class SapClient
      */
     public function getCostSheet(string $vbeln = '3000008', string $posnr = '000010'): array
     {
-        $vbelnClean = $this->cleanVbeln($vbeln);
         $posnrClean = $this->cleanPosnr($posnr);
+        $lastError = "Quotation master not found in live SAP for {$vbeln} (Item {$posnrClean})";
+        $lastHttp = 0;
+        $lastUrl = '';
+        $best = null;
+        $bestScore = -1;
 
-        // Query Live SAP OData Service
+        foreach ($this->vbelnCandidates($vbeln) as $vbelnClean) {
+            $fetched = $this->fetchCostSheetByKey($vbelnClean, $posnrClean);
+            $lastHttp = (int) ($fetched['http_code'] ?? 0);
+            $lastUrl = (string) ($fetched['url'] ?? '');
+            if (!empty($fetched['error'])) {
+                $lastError = (string) $fetched['error'];
+            }
+            if (empty($fetched['success']) || !is_array($fetched['data'] ?? null)) {
+                continue;
+            }
+            $data = $this->hydrateNavResults($fetched['data']);
+            $score = $this->scoreSheet($data);
+            if ($score > $bestScore) {
+                $bestScore = $score;
+                $best = [
+                    'success' => true,
+                    'source' => 'LIVE_SAP',
+                    'http_code' => $lastHttp,
+                    'url' => $lastUrl,
+                    'timestamp' => date('Y-m-d H:i:s'),
+                    'data' => $data,
+                ];
+                if ($this->sheetLineCount($data) > 0) {
+                    break;
+                }
+            }
+        }
+
+        if ($best !== null) {
+            return $best;
+        }
+
+        return [
+            'success' => false,
+            'not_found' => true,
+            'source' => 'LIVE_SAP',
+            'http_code' => $lastHttp,
+            'vbeln' => $this->cleanVbeln($vbeln),
+            'posnr' => $posnrClean,
+            'error' => $lastError,
+            'data' => null,
+        ];
+    }
+
+    /**
+     * @return array{success:bool,http_code:int,url:string,data?:array,error?:string}
+     */
+    private function fetchCostSheetByKey(string $vbelnClean, string $posnrClean): array
+    {
         $baseUrl = rtrim($this->config['sap']['base_url'] ?? 'http://APP-PROD.evolvclothing.com:8000', '/');
         $service = $this->config['sap']['service'] ?? '/sap/opu/odata/sap/ZCOST_SRV/ZCOSTHSet';
         $expand = $this->config['defaults']['expand'] ?? 'to_Fabric,to_Trim,to_Special,to_Packing';
 
         $url = sprintf(
-            "%s%s(Vbeln='%s',Posnr='%s')?\$expand=%s&\$format=json",
+            "%s%s(Vbeln='%s',Posnr='%s')?%%24expand=%s&%%24format=json",
             $baseUrl,
             $service,
-            urlencode($vbelnClean),
-            urlencode($posnrClean),
-            $expand
+            rawurlencode($vbelnClean),
+            rawurlencode($posnrClean),
+            rawurlencode($expand)
         );
 
         $ch = curl_init();
@@ -79,28 +187,25 @@ class SapClient
         ]);
 
         $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $curlError = curl_error($ch);
         curl_close($ch);
 
         if ($response !== false && $httpCode === 200) {
-            $decoded = json_decode((string)$response, true);
+            $decoded = json_decode((string) $response, true);
             if (isset($decoded['d']) && is_array($decoded['d'])) {
                 return [
                     'success' => true,
-                    'source' => 'LIVE_SAP',
                     'http_code' => $httpCode,
                     'url' => $url,
-                    'timestamp' => date('Y-m-d H:i:s'),
-                    'data' => $decoded['d']
+                    'data' => $decoded['d'],
                 ];
             }
         }
 
-        // Parse any error message returned from SAP
         $errorMessage = "Quotation master not found in live SAP for {$vbelnClean} (Item {$posnrClean})";
         if (!empty($response)) {
-            $errDecoded = json_decode((string)$response, true);
+            $errDecoded = json_decode((string) $response, true);
             if (isset($errDecoded['error']['message']['value'])) {
                 $errorMessage = $errDecoded['error']['message']['value'];
             }
@@ -110,14 +215,67 @@ class SapClient
 
         return [
             'success' => false,
-            'not_found' => true,
-            'source' => 'LIVE_SAP',
             'http_code' => $httpCode,
-            'vbeln' => $vbelnClean,
-            'posnr' => $posnrClean,
+            'url' => $url,
             'error' => $errorMessage,
-            'data' => null
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    private function hydrateNavResults(array $data): array
+    {
+        foreach (['to_Fabric', 'to_Trim', 'to_Packing', 'to_Special'] as $nav) {
+            $block = $data[$nav] ?? null;
+            if (!is_array($block)) {
+                $data[$nav] = ['results' => []];
+                continue;
+            }
+            if (isset($block['results']) && is_array($block['results']) && $block['results'] !== []) {
+                continue;
+            }
+            if (isset($block['d']['results']) && is_array($block['d']['results'])) {
+                $data[$nav] = ['results' => $block['d']['results']];
+                continue;
+            }
+            $uri = (string) ($block['__deferred']['uri'] ?? '');
+            if ($uri !== '') {
+                $rows = $this->fetchDeferredResults($uri);
+                $data[$nav] = ['results' => $rows];
+                continue;
+            }
+            $data[$nav] = ['results' => []];
+        }
+        return $data;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function fetchDeferredResults(string $uri): array
+    {
+        $ch = curl_init();
+        $url = $uri . (str_contains($uri, '?') ? '&' : '?') . '%24format=json';
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_USERPWD, ($this->config['sap']['username'] ?? 'APIUSER') . ':' . ($this->config['sap']['password'] ?? 'Api@321'));
+        if (!empty($this->config['sap']['resolve'])) {
+            curl_setopt($ch, CURLOPT_RESOLVE, $this->config['sap']['resolve']);
+        }
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, $this->config['sap']['timeout'] ?? 20);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 6);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Accept: application/json']);
+        $response = curl_exec($ch);
+        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($response === false || $httpCode !== 200) {
+            return [];
+        }
+        $decoded = json_decode((string) $response, true);
+        $rows = $decoded['d']['results'] ?? $decoded['d'] ?? [];
+        return is_array($rows) ? array_values(array_filter($rows, 'is_array')) : [];
     }
 
     /** Header fields allowed by ZCOSTH metadata (UI-only fields like Kwmeng must not be sent). */

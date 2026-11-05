@@ -206,6 +206,7 @@ class ZcostController extends Controller
                 'can_edit' => $user['can_edit'],
                 'can_delete' => $user['can_delete'],
                 'can_approve' => $user['can_approve'],
+                'can_copy' => $user['can_copy'] ?? false,
             ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             exit;
         }

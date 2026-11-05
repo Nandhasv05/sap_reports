@@ -76,6 +76,13 @@ class Database
                     );
                 END
             ");
+            $pdo->exec("
+                IF COL_LENGTH('dbo.zcost_user_permissions', 'can_copy') IS NULL
+                BEGIN
+                    ALTER TABLE zcost_user_permissions
+                    ADD can_copy BIT NOT NULL CONSTRAINT DF_zcost_user_permissions_can_copy DEFAULT 0;
+                END
+            ");
 
             // 2. zcost_audit_log
             $pdo->exec("
@@ -114,7 +121,7 @@ class Database
      * Retrieve permissions for a user from database.
      * Admin role has full permissions.
      *
-     * @return array{view: bool, add: bool, edit: bool, delete: bool, approve: bool}
+     * @return array{view: bool, add: bool, edit: bool, delete: bool, approve: bool, copy: bool}
      */
     public static function getUserPermissions(string $username, ?int $userId = null, ?string $role = null): array
     {
@@ -129,6 +136,7 @@ class Database
                 'edit' => true,
                 'delete' => true,
                 'approve' => true,
+                'copy' => true,
             ];
         }
 
@@ -137,7 +145,7 @@ class Database
             try {
                 // Check zcost_user_permissions table
                 $stmt = $pdo->prepare("
-                    SELECT TOP 1 can_view, can_add, can_edit, can_delete, can_approve
+                    SELECT TOP 1 can_view, can_add, can_edit, can_delete, can_approve, can_copy
                     FROM zcost_user_permissions
                     WHERE LOWER(username) = LOWER(?) OR (user_id IS NOT NULL AND user_id = ?)
                 ");
@@ -145,13 +153,71 @@ class Database
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
                 if ($row) {
+                    $add = (bool)$row['can_add'];
+                    $edit = (bool)$row['can_edit'];
+                    $approve = (bool)$row['can_approve'];
+                    $copy = (bool)($row['can_copy'] ?? false);
+                    $view = (bool)$row['can_view'] || $add || $edit || $approve || $copy;
                     return [
-                        'view' => (bool)$row['can_view'],
-                        'add' => (bool)$row['can_add'],
-                        'edit' => (bool)$row['can_edit'],
+                        'view' => $view,
+                        'add' => $add,
+                        'edit' => $edit,
                         'delete' => (bool)$row['can_delete'],
-                        'approve' => (bool)$row['can_approve'],
+                        'approve' => $approve,
+                        'copy' => $copy,
                     ];
+                }
+
+                try {
+                    $sapStmt = $pdo->prepare("
+                        SELECT TOP 1
+                            CAST(can_view AS INT) AS can_view,
+                            CAST(can_add AS INT) AS can_add,
+                            CAST(can_edit AS INT) AS can_edit,
+                            CAST(can_approve AS INT) AS can_approve,
+                            CAST(ISNULL(can_copy, 0) AS INT) AS can_copy
+                        FROM sap_report_userAccessControl
+                        WHERE (user_id = ? OR LOWER(LTRIM(RTRIM(username))) = ?)
+                          AND (LOWER(LTRIM(RTRIM(page_route))) IN ('zcost', 'zcost costing sheet', 'zcost-costing-sheet')
+                               OR page_no = 12)
+                        ORDER BY CAST(can_view AS INT) DESC
+                    ");
+                    $sapStmt->execute([$userId ?? 0, $userKey]);
+                    $sapRow = $sapStmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$sapRow) {
+                        $sapStmt = $pdo->prepare("
+                            SELECT TOP 1
+                                CAST(can_view AS INT) AS can_view,
+                                CAST(can_add AS INT) AS can_add,
+                                CAST(can_edit AS INT) AS can_edit,
+                                CAST(can_approve AS INT) AS can_approve,
+                                CAST(ISNULL(can_copy, 0) AS INT) AS can_copy
+                            FROM tblSapUseracessControl
+                            WHERE (user_id = ? OR LOWER(LTRIM(RTRIM(username))) = ?)
+                              AND (LOWER(LTRIM(RTRIM(page_route))) IN ('zcost', 'zcost costing sheet', 'zcost-costing-sheet')
+                                   OR page_no = 12)
+                            ORDER BY CAST(can_view AS INT) DESC
+                        ");
+                        $sapStmt->execute([$userId ?? 0, $userKey]);
+                        $sapRow = $sapStmt->fetch(PDO::FETCH_ASSOC);
+                    }
+                    if ($sapRow) {
+                        $add = (int) $sapRow['can_add'] === 1;
+                        $edit = (int) $sapRow['can_edit'] === 1;
+                        $approve = (int) $sapRow['can_approve'] === 1;
+                        $copy = (int) ($sapRow['can_copy'] ?? 0) === 1;
+                        $view = (int) $sapRow['can_view'] === 1 || $add || $edit || $approve || $copy;
+                        return [
+                            'view' => $view,
+                            'add' => $add,
+                            'edit' => $edit,
+                            'delete' => $edit,
+                            'approve' => $approve,
+                            'copy' => $copy,
+                        ];
+                    }
+                } catch (Throwable $e) {
+                    error_log('tblSapUseracessControl zcost lookup: ' . $e->getMessage());
                 }
 
                 // Fallback check: user_access module table in EVOL
@@ -169,12 +235,17 @@ class Database
                         }
 
                         $hasBase = !empty($accessMap['zcost costing sheet']) || !empty($accessMap['zcost']);
+                        $add = !empty($accessMap['zcost_add']) || !empty($accessMap['zcost costing sheet_add']);
+                        $edit = !empty($accessMap['zcost_edit']) || !empty($accessMap['zcost costing sheet_edit']);
+                        $approve = !empty($accessMap['zcost_approve']) || !empty($accessMap['zcost costing sheet_approve']);
+                        $copy = !empty($accessMap['zcost_copy']) || !empty($accessMap['zcost costing sheet_copy']);
                         return [
-                            'view' => $hasBase,
-                            'add' => !empty($accessMap['zcost_add']) || !empty($accessMap['zcost costing sheet_add']),
-                            'edit' => !empty($accessMap['zcost_edit']) || !empty($accessMap['zcost costing sheet_edit']),
+                            'view' => $hasBase || $add || $edit || $approve || $copy,
+                            'add' => $add,
+                            'edit' => $edit,
                             'delete' => !empty($accessMap['zcost_delete']) || !empty($accessMap['zcost costing sheet_delete']),
-                            'approve' => !empty($accessMap['zcost_approve']) || !empty($accessMap['zcost costing sheet_approve']),
+                            'approve' => $approve,
+                            'copy' => $copy,
                         ];
                     }
                 }
@@ -191,6 +262,7 @@ class Database
             'edit' => false,
             'delete' => false,
             'approve' => false,
+            'copy' => false,
         ];
     }
 
@@ -220,6 +292,7 @@ class Database
                     ISNULL(p.can_edit, CASE WHEN LOWER(u.Role) IN ('admin', 'superadmin') THEN 1 ELSE 0 END) AS can_edit,
                     ISNULL(p.can_delete, CASE WHEN LOWER(u.Role) IN ('admin', 'superadmin') THEN 1 ELSE 0 END) AS can_delete,
                     ISNULL(p.can_approve, CASE WHEN LOWER(u.Role) IN ('admin', 'superadmin') THEN 1 ELSE 0 END) AS can_approve,
+                    ISNULL(p.can_copy, CASE WHEN LOWER(u.Role) IN ('admin', 'superadmin') THEN 1 ELSE 0 END) AS can_copy,
                     p.updated_at
                 FROM users u
                 LEFT JOIN zcost_user_permissions p
@@ -242,6 +315,7 @@ class Database
                     p.can_edit,
                     p.can_delete,
                     p.can_approve,
+                    p.can_copy,
                     p.updated_at
                 FROM zcost_user_permissions p
                 WHERE LOWER(p.username) NOT IN (SELECT LOWER(UserName) FROM users WHERE UserName IS NOT NULL)
@@ -264,6 +338,7 @@ class Database
                     'can_edit' => (bool)$r['can_edit'],
                     'can_delete' => (bool)$r['can_delete'],
                     'can_approve' => (bool)$r['can_approve'],
+                    'can_copy' => (bool)($r['can_copy'] ?? false),
                     'updated_at' => (string)($r['updated_at'] ?? ''),
                 ];
             }, $all);
@@ -296,6 +371,7 @@ class Database
         $canEdit = !empty($perms['can_edit']) ? 1 : 0;
         $canDelete = !empty($perms['can_delete']) ? 1 : 0;
         $canApprove = !empty($perms['can_approve']) ? 1 : 0;
+        $canCopy = !empty($perms['can_copy']) ? 1 : 0;
 
         try {
             $check = $pdo->prepare("SELECT id FROM zcost_user_permissions WHERE LOWER(username) = LOWER(?)");
@@ -305,17 +381,17 @@ class Database
             if ($existingId) {
                 $stmt = $pdo->prepare("
                     UPDATE zcost_user_permissions
-                    SET can_view = ?, can_add = ?, can_edit = ?, can_delete = ?, can_approve = ?, user_id = COALESCE(?, user_id), updated_at = GETDATE()
+                    SET can_view = ?, can_add = ?, can_edit = ?, can_delete = ?, can_approve = ?, can_copy = ?, user_id = COALESCE(?, user_id), updated_at = GETDATE()
                     WHERE id = ?
                 ");
-                return $stmt->execute([$canView, $canAdd, $canEdit, $canDelete, $canApprove, $userId, $existingId]);
+                return $stmt->execute([$canView, $canAdd, $canEdit, $canDelete, $canApprove, $canCopy, $userId, $existingId]);
             } else {
                 $stmt = $pdo->prepare("
                     INSERT INTO zcost_user_permissions
-                    (user_id, username, can_view, can_add, can_edit, can_delete, can_approve, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, GETDATE(), GETDATE())
+                    (user_id, username, can_view, can_add, can_edit, can_delete, can_approve, can_copy, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), GETDATE())
                 ");
-                return $stmt->execute([$userId, $username, $canView, $canAdd, $canEdit, $canDelete, $canApprove]);
+                return $stmt->execute([$userId, $username, $canView, $canAdd, $canEdit, $canDelete, $canApprove, $canCopy]);
             }
         } catch (Throwable $e) {
             error_log('Database::saveUserPermissions error: ' . $e->getMessage());

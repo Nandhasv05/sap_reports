@@ -56,14 +56,91 @@
         'budgeted_cons', 'budget_inr', 'budget_currency', 'budget_conv_rt', 'budget_cost_per_gmt',
         'conv', 'buom', 'actual_cost', 'variance_pct',
     ]);
+    // Click any cell: show TEMPFIN / SAP API source column + original value
+    // (costing_quotation_no excluded — that opens sap_reports/zcost)
     const EXPLAIN_COLS = new Set([
+        'pono', 'poitem', 'prno', 'salordno', 'style', 'material', 'matgroup',
         'so_qty', 'prwise_so_qty', 'consumption', 'reqqty', 'tot_poqty',
-        'so_wise_poqty', 'so_wise_po_val', 'ouom', 'porate', 'totvalue',
-        'po_currency', 'budgeted_cons', 'budget_inr', 'budget_currency',
+        'so_wise_poqty', 'so_wise_po_val', 'ouom', 'porate', 'totvalue', 'mat_desc',
+        'po_currency', 'costing_item_no', 'maktx',
+        'budgeted_cons', 'budget_inr', 'budget_currency',
         'budget_conv_rt', 'budget_cost_per_gmt', 'conv', 'buom', 'actual_cost',
         'variance_pct',
     ]);
+    /** UI column key → SAP OData (Z_QuotationZCostCom / ZCOSTI*) field name */
+    const API_COL_REF = {
+        status: { api: 'derived', source: 'Z_QuotationZCostCom + ZCOST', desc: 'PASS when ActualCost ≤ RATE (budget per GMT).' },
+        pono: { api: 'PurchaseOrder', source: 'Z_QuotationZCostCom', desc: 'Purchase order number.' },
+        poitem: { api: 'PurchaseOrderItem', source: 'Z_QuotationZCostCom', desc: 'Purchase order item.' },
+        prno: { api: 'PurchaseRequisition', source: 'Z_QuotationZCostCom', desc: 'Purchase requisition number.' },
+        salordno: { api: 'SalesOrderReference', source: 'Z_QuotationZCostCom', desc: 'Sales order number.' },
+        style: { api: 'style', source: 'Z_QuotationZCostCom', desc: 'Style code.' },
+        material: { api: 'Material', source: 'Z_QuotationZCostCom', desc: 'Material number.' },
+        matgroup: { api: 'MaterialGroup', source: 'Z_QuotationZCostCom', desc: 'Material group.' },
+        so_qty: { api: 'SaleOrderQuantity', source: 'Z_QuotationZCostCom', desc: 'Sales order quantity.' },
+        prwise_so_qty: { api: 'SaleOrderQuantity', source: 'Z_QuotationZCostCom', desc: 'Sales order quantity (PR-wise).' },
+        consumption: { api: 'ReqBOMQuantity / SaleOrderQuantity', source: 'Z_QuotationZCostCom', desc: 'Consumption per garment (derived).' },
+        reqqty: { api: 'ReqBOMQuantity', source: 'Z_QuotationZCostCom', desc: 'Required BOM quantity.' },
+        tot_poqty: { api: 'OrderQuantity', source: 'Z_QuotationZCostCom', desc: 'PO order quantity.' },
+        so_wise_poqty: { api: 'OrderQuantity', source: 'Z_QuotationZCostCom', desc: 'SO-wise portion of OrderQuantity.' },
+        so_wise_po_val: { api: 'NetPriceAmount', source: 'Z_QuotationZCostCom', desc: 'SO-wise portion of NetPriceAmount.' },
+        ouom: { api: 'PurchaseOrderQuantityUnit', source: 'Z_QuotationZCostCom', desc: 'PO quantity unit.' },
+        porate: { api: 'NetPriceAmount / OrderQuantity', source: 'Z_QuotationZCostCom', desc: 'Unit rate (derived from net amount ÷ qty).' },
+        totvalue: { api: 'NetPriceAmount', source: 'Z_QuotationZCostCom', desc: 'PO line net price amount.' },
+        mat_desc: { api: 'MaterialDesc', source: 'Z_QuotationZCostCom', desc: 'Material description.' },
+        po_currency: { api: 'DocumentCurrency', source: 'Z_QuotationZCostCom', desc: 'Document currency.' },
+        costing_quotation_no: { api: 'CostingQuotationNo', source: 'Z_QuotationZCostCom', desc: 'zCOST quotation number.' },
+        costing_item_no: { api: 'ITEM', source: 'ZCOSTI / ZCOSTIT / ZCOSTIP / ZCOSTIS', desc: 'zCOST costing line ITEM code.' },
+        maktx: { api: 'MAKTX', source: 'ZCOSTI / ZCOSTIT / ZCOSTIP / ZCOSTIS', desc: 'Costing line material description.' },
+        budgeted_cons: { api: 'GROSS', source: 'ZCOSTI / ZCOSTIT / ZCOSTIP / ZCOSTIS', desc: 'Budgeted consumption (gross).' },
+        budget_inr: { api: 'TOTALINR', source: 'ZCOSTI / ZCOSTIT / ZCOSTIP / ZCOSTIS', desc: 'Budget total in INR.' },
+        budget_currency: { api: 'CURUNIT', source: 'ZCOSTI / ZCOSTIT / ZCOSTIP / ZCOSTIS', desc: 'Costing currency unit.' },
+        budget_conv_rt: { api: 'CONVR', source: 'ZCOSTI / ZCOSTIT / ZCOSTIP / ZCOSTIS', desc: 'Budget conversion rate.' },
+        budget_cost_per_gmt: { api: 'RATE', source: 'ZCOSTI / ZCOSTIT / ZCOSTIP / ZCOSTIS', desc: 'Budget cost per garment.' },
+        conv: { api: 'CONVR', source: 'ZCOSTI / ZCOSTIT / ZCOSTIP / ZCOSTIS', desc: 'Conversion factor.' },
+        buom: { api: 'PurchaseOrderQuantityUnit', source: 'Z_QuotationZCostCom', desc: 'Base / order unit of measure.' },
+        actual_cost: { api: 'PORATE × CONV × CONSUMPTION (BUTTON+GRO ÷ 144)', source: 'TEMPFIN / PASSPO', desc: 'Actual cost per garment. Buttons in GRO: round(PORATE×CONV×CONS)÷144.' },
+        variance_pct: { api: 'derived', source: 'Computed', desc: '(Actual − RATE) ÷ RATE × 100.' },
+    };
     const colGroup = (key) => (ZCOST_COLS.has(key) ? 'zcost' : 'po');
+
+    function padPosnr(v) {
+        const digits = String(v ?? '').replace(/\D/g, '');
+        if (!digits) return '000010';
+        return digits.padStart(6, '0').slice(-6);
+    }
+
+    function zcostViewUrl(quote, itemNo) {
+        const raw = String(quote ?? '').trim();
+        const q = (raw.match(/\d+/) || [raw])[0];
+        if (!q) return '';
+        const item = String(itemNo ?? '').trim();
+        const posnr = /^\d+$/.test(item.replace(/^0+/, '') || item) ? padPosnr(item) : '000010';
+        const configured = String(cfg.zcostUrl || cfg.zcostAppUrl || '').trim();
+        const base = configured || new URL('zcost', window.location.href.replace(/\/[^/]*$/, '/')).pathname;
+        try {
+            const u = new URL(base, window.location.origin);
+            u.searchParams.set('vbeln', q);
+            u.searchParams.set('posnr', posnr);
+            u.searchParams.set('view', '1');
+            return u.href;
+        } catch (err) {
+            return `zcost?vbeln=${encodeURIComponent(q)}&posnr=${encodeURIComponent(posnr)}&view=1`;
+        }
+    }
+
+    function openZcostView(quote, itemNo) {
+        const href = zcostViewUrl(quote, itemNo);
+        if (!href) return;
+        window.open(href, '_blank', 'noopener,noreferrer');
+    }
+
+    function quotationLinkHtml(quote, itemNo) {
+        const q = String(quote ?? '').trim();
+        if (!q) return '—';
+        const href = zcostViewUrl(q, itemNo);
+        return `<a class="pcw-quote-link" href="${esc(href)}" data-quote="${esc(q)}" target="_blank" rel="noopener noreferrer" title="Open zCOST Sales Costing Sheet">${esc(q)}</a>`;
+    }
 
     let rows = [];
     let costLines = [];
@@ -76,7 +153,7 @@
     let sortKey = null;
     let sortDir = null;
     let colFeatures = null;
-    let filterVisible = true;
+    let filterVisible = false;
     let formulaAnchor = null;
     let matchRowIndex = null;
     let matchPickKey = '';
@@ -111,241 +188,144 @@
         return total;
     }
 
-    function explainFor(key, r) {
-        const soQty = nVal(r.so_qty) ?? nVal(r.prwise_so_qty) ?? nVal(r.tot_poqty) ?? nVal(r.order_qty) ?? nVal(r.po_qty);
-        const prSo = nVal(r.prwise_so_qty) ?? nVal(r.so_qty) ?? soQty;
-        const cons = nVal(r.consumption) ?? nVal(r.budgeted_cons) ?? nVal(r.gross) ?? nVal(r.net) ?? (prSo && nVal(r.reqqty) ? nVal(r.reqqty) / prSo : 1);
-        const req = nVal(r.reqqty) ?? (prSo !== null && cons !== null ? prSo * cons : nVal(r.tot_poqty) ?? nVal(r.order_qty));
-        const totPo = nVal(r.tot_poqty) ?? nVal(r.order_qty) ?? nVal(r.po_qty);
-        const soPoQty = nVal(r.so_wise_poqty) ?? totPo;
-        const porate = nVal(r.porate) ?? nVal(r.po_unit_cost) ?? nVal(r.net_price) ?? (totPo && nVal(r.totvalue ?? r.net_value) ? (nVal(r.totvalue ?? r.net_value) / totPo) : null);
-        const conv = nVal(r.conv) ?? nVal(r.convr) ?? nVal(r.budget_conv_rt) ?? 1;
-        const budget = nVal(r.budget_cost_per_gmt) ?? nVal(r.expected_unit_cost) ?? nVal(r.rate);
-        const actual = nVal(r.actual_cost) ?? (porate !== null ? porate * conv * (cons ?? 1) : nVal(r.po_unit_cost));
-        const totValue = nVal(r.totvalue ?? r.net_value) ?? (porate !== null && totPo !== null ? porate * totPo : null);
-        const soPoVal = nVal(r.so_wise_po_val) ?? (porate !== null && soPoQty !== null ? porate * soPoQty * conv : totValue);
-        const budgetCons = nVal(r.budgeted_cons) ?? nVal(r.gross) ?? nVal(r.net) ?? cons;
-        const budgetInr = nVal(r.budget_inr) ?? nVal(r.cost_total_inr) ?? nVal(r.total_inr) ?? (budget !== null && totPo !== null ? budget * totPo : null);
-        const budgetConv = nVal(r.budget_conv_rt) ?? nVal(r.convr) ?? conv;
-        const poCur = String(r.po_currency || r.currency || 'INR');
-        const budCur = String(r.budget_currency || r.curunit || r.quoted_currency || 'INR');
-        const buom = String(r.buom || r.ouom || r.unit || 'EA');
-        const totalReq = totalReqForItem(r);
-        const withinBudget =
-            budget !== null && actual !== null && actual <= budget
-                ? '\n*Within budget (green).'
-                : budget !== null && actual !== null
-                  ? '\n*Above budget — review.'
-                  : '';
+    function formatExplainValue(key, r) {
+        const raw = cellValue(key, r, 0);
+        if (raw === null || raw === undefined || raw === '') return '-';
+        if (key === 'status') return statusDisplay(r).label;
+        if (key === 'variance_pct') {
+            const n = Number(raw);
+            return Number.isFinite(n) ? `${n.toFixed(2)}%` : String(raw);
+        }
+        if (NUM_COLS.has(key)) {
+            const dig = ['porate', 'consumption', 'budgeted_cons', 'budget_conv_rt', 'budget_cost_per_gmt', 'conv', 'actual_cost'].includes(key) ? 4 : 2;
+            return fmtStep(raw, dig);
+        }
+        return String(raw);
+    }
 
-        const defs = {
-            so_qty: {
-                title: 'SO_QTY',
-                desc: 'Total garment quantity on the Sales Order.',
-                example: 'This is the order qty for the style — not the trim consumption qty.',
-                steps: [{ label: 'SO qty for this style', value: fmtStep(soQty) }],
-                resultLabel: 'SO_QTY',
-                resultExpr: `= ${fmtStep(soQty)}`,
+    function statusDisplay(r) {
+        const st = String(r?.status || '').toUpperCase().replace(/\s+/g, '_');
+        const budget = nVal(r?.budget_cost_per_gmt ?? r?.expected_unit_cost);
+        const actual = nVal(r?.actual_cost ?? r?.po_unit_cost);
+        // Classic portal: green when actual ≤ budget + 0.005 (same as PO Costing Validation)
+        if (budget !== null && budget > 0 && actual !== null && actual <= budget + 0.005) {
+            return { code: 'PASS', label: 'PASS', cls: 'is-pass' };
+        }
+        if (st === 'PASS') return { code: 'PASS', label: 'PASS', cls: 'is-pass' };
+        if (st === 'NEEDS_REVIEW') return { code: 'NEEDS_REVIEW', label: 'NEEDS REVIEW', cls: 'is-review' };
+        if (st === 'FOOTER') return { code: 'FOOTER', label: '—', cls: 'is-footer' };
+        if (needsManualMatch(r) || /no matching|no linked|cannot load|no budget/i.test(String(r?.validation_result || ''))) {
+            return { code: 'NOT_MATCHED', label: 'NOT MATCHED', cls: 'is-fail' };
+        }
+        if (st === 'EXCEPTION' || st === 'FAIL' || st === 'NOT_VALIDATED') {
+            return { code: 'NOT_VALIDATED', label: 'NOT VALIDATED', cls: 'is-fail' };
+        }
+        return { code: st || 'NOT_MATCHED', label: st || 'NOT MATCHED', cls: 'is-fail' };
+    }
+
+    function statusReasonExplain(r) {
+        const disp = statusDisplay(r);
+        const budget = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost);
+        const actual = nVal(r.actual_cost ?? r.po_unit_cost);
+        const variance = nVal(r.variance_pct);
+        const quote = String(r.costing_quotation_no || r.matched_quotation || '').trim();
+        const costItem = String(r.costing_item_no || r.cost_item || r.item || '').trim();
+        const matched = !needsManualMatch(r) && !!quote;
+        const savedMsg = String(r.validation_result || '').trim();
+
+        let why = '';
+        if (disp.code === 'PASS') {
+            why = matched
+                ? 'Actual unit cost is within (≤) budget RATE — line passes validation.'
+                : 'Line marked PASS.';
+        } else if (disp.code === 'NEEDS_REVIEW') {
+            why = savedMsg || 'Budget rate missing, zero, or match is uncertain — needs review.';
+        } else if (disp.code === 'NOT_MATCHED') {
+            why = savedMsg || 'No linked zCOST line / quotation item for this PO material — match required.';
+        } else {
+            why = savedMsg || (budget !== null && actual !== null && actual > budget
+                ? 'Actual unit cost exceeds budget RATE — not validated.'
+                : 'Line failed cost validation.');
+        }
+
+        const steps = [
+            { label: 'Status', value: disp.label },
+            { label: 'Why', value: why },
+            { label: 'Match module', value: matched ? `Matched · Quote ${quote}${costItem ? ' / Item ' + costItem : ''}` : 'Not matched to zCOST' },
+            { label: 'Budget module (RATE)', value: budget === null ? '—' : fmtStep(budget, 4) },
+            { label: 'Actual module (PO rate)', value: actual === null ? '—' : fmtStep(actual, 4) },
+            {
+                label: 'Rule',
+                value: 'PASS when Actual ≤ Budget RATE · NOT VALIDATED when Actual > RATE · NOT MATCHED when no zCOST link · NEEDS REVIEW when budget missing/uncertain',
             },
-            prwise_so_qty: {
-                title: 'PRWISE_SO_QTY',
-                desc: 'Garment quantity from the Sales Order.',
-                example: 'Used with REQ QTY to work out consumption per garment.',
-                steps: [{ label: 'SO qty for this material', value: fmtStep(prSo) }],
-                resultLabel: 'PRWISE_SO_QTY',
-                resultExpr: `= ${fmtStep(prSo)}`,
-            },
-            consumption: {
-                title: 'CONSUMPTION',
-                desc: 'Required qty ÷ SO qty (per garment)',
-                formula: 'req_qty / so_qty',
-                example: 'How much material is needed for each garment on the SO.',
-                steps: [
-                    { label: 'REQ QTY', value: fmtStep(req) },
-                    { label: 'PRWISE SO QTY', value: fmtStep(prSo) },
-                ],
-                resultLabel: 'CONSUMPTION',
-                resultExpr:
-                    prSo && prSo !== 0
-                        ? `${fmtStep(req)} ÷ ${fmtStep(prSo)}\n= ${fmtStep(cons ?? req / prSo, 4)}`
-                        : `= ${fmtStep(cons, 4)}`,
-            },
-            reqqty: {
-                title: 'REQQTY',
-                desc: 'Material requirement from the Sales Order',
-                formula: 'so_qty * consumption',
-                example: 'Total material required for this SO line before PO split.',
-                steps: [
-                    { label: 'PRWISE SO QTY', value: fmtStep(prSo) },
-                    { label: 'Consumption', value: fmtStep(cons, 4) },
-                ],
-                resultLabel: 'REQQTY',
-                resultExpr:
-                    prSo !== null && cons !== null
-                        ? `${fmtStep(prSo)} × ${fmtStep(cons, 4)}\n= ${fmtStep(req ?? prSo * cons)}`
-                        : `= ${fmtStep(req)}`,
-            },
-            tot_poqty: {
-                title: 'TOT_POQTY',
-                desc: 'Quantity ordered on the PO line',
-                example: 'This is the full order quantity on the Purchase Order item.',
-                steps: [{ label: 'PO line qty', value: fmtStep(totPo) }],
-                resultLabel: 'TOT_POQTY',
-                resultExpr: `= ${fmtStep(totPo)}`,
-            },
-            so_wise_poqty: {
-                title: 'SO_WISE_POQTY',
-                desc: 'Base qty × REQ QTY ÷ Total req (per PO item)',
-                formula: 'base_qty * req_qty / total_req',
-                example: `PO qty for this SO is ${fmtStep(soPoQty)}. Full material need is ${fmtStep(req)} (SO qty × Consumption).`,
-                steps: [
-                    { label: 'Base qty (PO)', value: fmtStep(totPo) },
-                    { label: 'REQ QTY', value: fmtStep(req) },
-                    { label: 'Total req (PO item)', value: fmtStep(totalReq) },
-                ],
-                resultLabel: 'SO_WISE_POQTY',
-                resultExpr:
-                    totPo !== null && req !== null && totalReq
-                        ? `${fmtStep(totPo)} × ${fmtStep(req)} ÷ ${fmtStep(totalReq)}\n= ${fmtStep(soPoQty ?? (totPo * req) / totalReq)}`
-                        : `= ${fmtStep(soPoQty)}`,
-            },
-            so_wise_po_val: {
-                title: 'SO_WISE_PO_VAL',
-                desc: 'PO Rate × SO Wise PO Qty × Conversion',
-                formula: 'po_rate * so_wise_po_qty * conv',
-                example: 'Value of this PO line portion attributed to the Sales Order.',
-                steps: [
-                    { label: 'PO Rate', value: fmtStep(porate, 4) },
-                    { label: 'SO Wise PO Qty', value: fmtStep(soPoQty) },
-                    { label: 'Conversion', value: fmtStep(conv, 4) },
-                ],
-                resultLabel: 'SO_WISE_PO_VAL',
-                resultExpr:
-                    porate !== null && soPoQty !== null
-                        ? `${fmtStep(porate, 4)} × ${fmtStep(soPoQty)} × ${fmtStep(conv, 4)}\n= ${fmtStep(soPoVal ?? porate * soPoQty * conv)}`
-                        : `= ${fmtStep(soPoVal)}`,
-            },
-            ouom: {
-                title: 'OUOM',
-                desc: 'Unit of measure on the PO (e.g. M, KG, GRO).',
-                example: 'Order unit used with PO qty and PO rate.',
-                steps: [{ label: 'Order UOM', value: String(r.ouom || r.unit || '—') }],
-                resultLabel: 'OUOM',
-                resultExpr: `= ${String(r.ouom || r.unit || '—')}`,
-            },
-            porate: {
-                title: 'PORATE',
-                desc: 'PO net price ÷ price unit',
-                formula: 'net_price / price_unit',
-                example: 'Unit rate used in value and cost calculations.',
-                steps: [{ label: 'Rate per piece', value: fmtStep(porate, 4) }],
-                resultLabel: 'PORATE',
-                resultExpr: `= ${fmtStep(porate, 4)}`,
-            },
-            totvalue: {
-                title: 'TOTVALUE',
-                desc: 'Net price on the PO line',
-                example: 'This is the net price from the PO — not qty × rate, and not SO Wise PO Value.',
-                steps: [{ label: 'PO net price', value: fmtStep(totValue) }],
-                resultLabel: 'TOTVALUE',
-                resultExpr: `= ${fmtStep(totValue)}`,
-            },
-            po_currency: {
-                title: 'PO_CURRENCY',
-                desc: 'Currency on the Purchase Order.',
-                steps: [{ label: 'PO currency', value: poCur }],
-                resultLabel: 'PO_CURRENCY',
-                resultExpr: `= ${poCur}`,
-            },
-            budgeted_cons: {
-                title: 'BUDGETED_CONS',
-                desc: 'Average consumption from budget sheet',
-                example: 'Compare with calculated Consumption — large gap may flag a validation issue.',
-                steps: [{ label: 'Budget consumption', value: fmtStep(budgetCons, 4) }],
-                resultLabel: 'BUDGETED_CONS',
-                resultExpr: `= ${fmtStep(budgetCons, 4)}`,
-            },
-            budget_inr: {
-                title: 'BUDGET_INR',
-                desc: 'Budget amount in INR',
-                example: 'Total budget value for this material on the costing sheet.',
-                steps: [{ label: 'Budget INR', value: fmtStep(budgetInr, 2) }],
-                resultLabel: 'BUDGET_INR',
-                resultExpr: `= ${fmtStep(budgetInr, 2)}`,
-            },
-            budget_currency: {
-                title: 'BUDGET_CURRENCY',
-                desc: 'Currency on the budget / costing sheet.',
-                steps: [{ label: 'Budget currency', value: budCur }],
-                resultLabel: 'BUDGET_CURRENCY',
-                resultExpr: `= ${budCur}`,
-            },
-            budget_conv_rt: {
-                title: 'BUDGET_CONV_RT',
-                desc: '1 when PO is in INR',
-                example: 'Used when converting foreign PO rates to INR for cost comparison.',
-                steps: [{ label: 'Conversion rate', value: fmtStep(budgetConv, 4) }],
-                resultLabel: 'BUDGET_CONV_RT',
-                resultExpr: `= ${fmtStep(budgetConv, 4)}`,
-            },
-            budget_cost_per_gmt: {
-                title: 'BUDGET_COST_PER_GMT',
-                desc: 'Budget cost per garment (INR)',
-                example: 'Target cost per piece — Actual Cost should stay below this (green).',
-                steps: [{ label: 'Budget per garment', value: fmtStep(budget, 4) }],
-                resultLabel: 'BUDGET_COST_PER_GMT',
-                resultExpr: `= ${fmtStep(budget, 4)}`,
-            },
-            conv: {
-                title: 'CONV',
-                desc: 'PO qty ÷ Base qty',
-                formula: 'po_qty / base_qty',
-                example: 'Usually 1 when order qty equals base qty.',
-                steps: [{ label: 'Conversion factor', value: fmtStep(conv, 4) }],
-                resultLabel: 'CONV',
-                resultExpr: `= ${fmtStep(conv, 4)}`,
-            },
-            buom: {
-                title: 'BUOM',
-                desc: 'Base unit of measure on the material.',
-                example: 'Used with CONV when order unit differs from base unit.',
-                steps: [{ label: 'Base UOM', value: buom }],
-                resultLabel: 'BUOM',
-                resultExpr: `= ${buom}`,
-            },
-            actual_cost: {
-                title: 'ACTUAL_COST',
-                desc: 'PO Rate × Conversion × Consumption',
-                formula: 'po_rate * conv * consumption',
-                example: `Cost per garment from PO rate and consumption.${withinBudget}`,
-                steps: [
-                    { label: 'PO Rate', value: fmtStep(porate, 4) },
-                    { label: 'Conversion', value: fmtStep(conv, 4) },
-                    { label: 'Consumption', value: fmtStep(cons, 4) },
-                ],
-                resultLabel: 'ACTUAL_COST',
-                resultExpr:
-                    porate !== null
-                        ? `${fmtStep(porate, 4)} × ${fmtStep(conv, 4)} × ${fmtStep(cons, 4)}\n= ${fmtStep(actual ?? porate * conv * (cons ?? 1), 4)}`
-                        : `= ${fmtStep(actual, 4)}`,
-            },
-            variance_pct: {
-                title: 'Variance %',
-                desc: '(Actual − Budget) ÷ Budget × 100',
-                formula: '(actual - budget) / budget * 100',
-                example: 'Negative or zero = within / under budget. Positive = over budget.',
-                steps: [
-                    { label: 'Budget / GMT', value: fmtStep(budget, 4) },
-                    { label: 'Actual cost', value: fmtStep(actual, 4) },
-                ],
-                resultLabel: 'Variance %',
-                resultExpr:
-                    budget !== null && actual !== null && budget !== 0
-                        ? `(${fmtStep(actual, 4)} − ${fmtStep(budget, 4)}) ÷ ${fmtStep(budget, 4)} × 100\n= ${fmtStep(((actual - budget) / budget) * 100, 2)}%`
-                        : `= ${fmtStep(r.variance_pct, 2)}%`,
-            },
+        ];
+        if (variance !== null) {
+            steps.push({ label: 'Variance %', value: `${variance > 0 ? '+' : ''}${fmtStep(variance, 2)}%` });
+        }
+        if (savedMsg) {
+            steps.push({ label: 'System message', value: savedMsg });
+        }
+
+        return {
+            title: `Status · ${disp.label}`,
+            desc: why,
+            formula: 'ActualCost ≤ RATE → PASS',
+            formulaLabel: 'STATUS RULE',
+            stepsLabel: 'MODULE REASON',
+            example: `PO item ${r.poitem || '—'} · Material ${r.material || '—'}`,
+            steps,
+            resultLabel: disp.label,
+            resultExpr: why,
         };
-        return defs[key] || null;
+    }
+
+    function explainFor(key, r) {
+        if (key === 'status') {
+            return statusReasonExplain(r);
+        }
+        const meta = API_COL_REF[key];
+        if (!meta) return null;
+        const original = formatExplainValue(key, r);
+        const steps = [
+            { label: 'SAP API column', value: meta.api },
+            { label: 'Entity', value: meta.source },
+            { label: 'Original value', value: original },
+        ];
+        // Cost modules: also show why the row is PASS / NOT VALIDATED / NOT MATCHED / REVIEW
+        if (key === 'budget_cost_per_gmt' || key === 'actual_cost' || key === 'variance_pct') {
+            const reason = statusReasonExplain(r);
+            steps.push({ label: 'Row status', value: reason.resultLabel });
+            steps.push({ label: 'Why this status', value: reason.desc });
+            const budget = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost);
+            const actual = nVal(r.actual_cost ?? r.po_unit_cost);
+            if (key === 'budget_cost_per_gmt') {
+                steps.push({
+                    label: 'Module check',
+                    value: budget === null || budget <= 0
+                        ? 'No budget RATE → needs review / not matched'
+                        : `Budget RATE ${fmtStep(budget, 4)} compared with actual ${actual === null ? '—' : fmtStep(actual, 4)}`,
+                });
+            }
+            if (key === 'actual_cost') {
+                steps.push({
+                    label: 'Module check',
+                    value: actual === null
+                        ? 'No actual cost on PO line'
+                        : (budget !== null && actual > budget
+                            ? `Actual ${fmtStep(actual, 4)} > Budget ${fmtStep(budget, 4)} → NOT VALIDATED`
+                            : `Actual ${fmtStep(actual, 4)} ≤ Budget ${budget === null ? '—' : fmtStep(budget, 4)} → PASS`),
+                });
+            }
+        }
+        return {
+            title: meta.api,
+            desc: meta.desc || '',
+            formula: meta.api,
+            example: `Source: ${meta.source}`,
+            steps,
+            resultLabel: meta.api,
+            resultExpr: `= ${original}`,
+        };
     }
 
     function closeFormulaPop() {
@@ -388,14 +368,20 @@
         $('pcwFormulaDesc').textContent = info.desc || '';
 
         const exprBox = $('pcwFormulaExpr');
+        const exprLabel = exprBox?.querySelector('.pcw-formula-formula-label');
         if (info.formula) {
             exprBox.hidden = false;
+            if (exprLabel) {
+                exprLabel.innerHTML = `<span class="pcw-formula-sigma" aria-hidden="true">Σ</span> ${esc(info.formulaLabel || 'SAP API COLUMN')}`;
+            }
             $('pcwFormulaExprText').textContent = info.formula;
         } else {
             exprBox.hidden = true;
         }
 
         const stepsBox = $('pcwFormulaSteps');
+        const stepsLabel = stepsBox?.querySelector('.pcw-formula-steps-label');
+        if (stepsLabel) stepsLabel.textContent = info.stepsLabel || 'VALUE DETAIL';
         const list = $('pcwFormulaStepsList');
         const result = $('pcwFormulaResult');
         if (info.steps && info.steps.length) {
@@ -486,7 +472,7 @@
             formula = 'Total Lines = Count of all item rows evaluated in Purchase Order';
             stepsHtml = `
                 <div class="pcw-cdm-step-item"><span>Passed Lines</span><strong>${fmt(s.passed)}</strong></div>
-                <div class="pcw-cdm-step-item"><span>Exception Lines</span><strong>${fmt(s.exceptions)}</strong></div>
+                <div class="pcw-cdm-step-item"><span>Not Matched / Not Validated</span><strong>${fmt(s.exceptions)}</strong></div>
                 <div class="pcw-cdm-step-item"><span>Needs Review Lines</span><strong>${fmt(s.needs_review)}</strong></div>
                 <div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Evaluated</span><strong>${fmt(s.total_records || detailRows.length)}</strong></div>
             `;
@@ -496,7 +482,7 @@
                 <td class="num">${qty(r.tot_poqty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
                 <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
                 <td class="num">₹${money(r.totvalue ?? ((r.porate ?? r.po_unit_cost ?? 0) * (r.tot_poqty || 1)))}</td>
-                <td>${statusPill(r.status)}</td>
+                <td>${statusPill(r.status, r)}</td>
             </tr>`).join('');
             rowCount = detailRows.length;
         } else if (cardKey === 'status_pass') {
@@ -518,21 +504,21 @@
                 <td class="num">${qty(r.tot_poqty || r.order_qty || r.po_qty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
                 <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
                 <td class="num">₹${money(r.totvalue ?? r.net_value ?? ((r.porate ?? r.po_unit_cost ?? 0) * (r.tot_poqty || r.order_qty || 1)))}</td>
-                <td>${statusPill(r.status)}</td>
+                <td>${statusPill(r.status, r)}</td>
             </tr>`).join('');
             rowCount = passRows.length;
         } else if (cardKey === 'status_fail') {
             icon = 'error';
             subtitle = 'Validation Overview';
-            title = 'Exception Lines';
+            title = 'Not Matched / Not Validated';
             val = fmt(s.exceptions);
-            formula = 'Exceptions = PO lines exceeding budget cost or missing valid costing link';
+            formula = 'Not Matched = no zCOST link · Not Validated = Actual cost > Budget RATE';
             showFilterBtn = true;
-            filterStatus = 'EXCEPTION';
+            filterStatus = 'NOT';
             const failRows = detailRows.filter(r => String(r.status).toUpperCase() !== 'PASS' && String(r.status).toUpperCase() !== 'NEEDS_REVIEW');
             stepsHtml = `
-                <div class="pcw-cdm-step-item"><span>Condition</span><strong>PO Rate > Budget or Unmatched in zCOST</strong></div>
-                <div class="pcw-cdm-step-item"><span>Total Exception Lines</span><strong>${fmt(s.exceptions)} of ${fmt(detailRows.length)}</strong></div>
+                <div class="pcw-cdm-step-item"><span>Condition</span><strong>No zCOST match OR Actual &gt; Budget RATE</strong></div>
+                <div class="pcw-cdm-step-item"><span>Not Matched / Not Validated</span><strong>${fmt(s.exceptions)} of ${fmt(detailRows.length)}</strong></div>
             `;
             rowsHtml = failRows.map((r, i) => `<tr>
                 <td>#${esc(r.poitem || r.po_item || r.item || (i + 1))}</td>
@@ -540,7 +526,7 @@
                 <td class="num">${qty(r.tot_poqty || r.order_qty || r.po_qty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
                 <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
                 <td class="num">₹${money(r.totvalue ?? r.net_value ?? ((r.porate ?? r.po_unit_cost ?? 0) * (r.tot_poqty || r.order_qty || 1)))}</td>
-                <td>${statusPill(r.status)}</td>
+                <td>${statusPill(r.status, r)}</td>
             </tr>`).join('');
             rowCount = failRows.length;
         } else if (cardKey === 'status_review') {
@@ -562,7 +548,7 @@
                 <td class="num">${qty(r.tot_poqty || r.order_qty || r.po_qty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
                 <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
                 <td class="num">₹${money(r.totvalue ?? r.net_value ?? ((r.porate ?? r.po_unit_cost ?? 0) * (r.tot_poqty || r.order_qty || 1)))}</td>
-                <td>${statusPill(r.status)}</td>
+                <td>${statusPill(r.status, r)}</td>
             </tr>`).join('');
             rowCount = revRows.length;
         } else if (cardKey === 'po_items') {
@@ -585,7 +571,7 @@
                 <td class="num">${qty(r.tot_poqty || r.order_qty || 0)} ${esc(r.ouom || uom)}</td>
                 <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
                 <td class="num">₹${money(r.totvalue ?? r.net_value ?? ((r.porate ?? r.po_unit_cost ?? 0) * (r.tot_poqty || r.order_qty || 1)))}</td>
-                <td>${statusPill(r.status)}</td>
+                <td>${statusPill(r.status, r)}</td>
             </tr>`).join('');
             rowCount = distItems.length;
         } else if (cardKey === 'po_materials') {
@@ -608,31 +594,25 @@
                 <td class="num">${qty(r.tot_poqty || r.order_qty || 0)} ${esc(r.ouom || uom)}</td>
                 <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
                 <td class="num">₹${money(r.totvalue ?? r.net_value ?? ((r.porate ?? r.po_unit_cost ?? 0) * (r.tot_poqty || r.order_qty || 1)))}</td>
-                <td>${statusPill(r.status)}</td>
+                <td>${statusPill(r.status, r)}</td>
             </tr>`).join('');
             rowCount = distMats.length;
         } else if (cardKey === 'po_so_qty') {
             icon = 'inventory_2';
             subtitle = 'PO DATA';
             title = 'Total SO Qty';
-            val = fmt(s.total_order_qty || s.total_so_qty);
+            val = fmt(s.total_so_qty || 0);
             unit = uom;
-            formula = 'Total SO Qty = ∑ (PO Order Quantity across unique items)';
-            const seenIt = {};
-            const itRows = detailRows.filter(r => {
-                const it = String(r.poitem || r.po_item || r.item || '').trim();
-                if (it && !seenIt[it]) { seenIt[it] = true; return true; }
-                return !it;
-            });
-            stepsHtml = itRows.map(r => `<div class="pcw-cdm-step-item"><span>PO Item #${esc(r.poitem || r.po_item || r.item)}</span><strong>${qty(r.tot_poqty || r.order_qty || 0)} ${esc(r.ouom || uom)}</strong></div>`).join('')
-                + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Order Qty</span><strong>${fmt(s.total_order_qty || s.total_so_qty)} ${esc(uom)}</strong></div>`;
+            formula = 'Total SO Qty = ∑ SO_QTY (PRWISE_SO_QTY when SO_QTY blank)';
+            stepsHtml = detailRows.map(r => `<div class="pcw-cdm-step-item"><span>PO Item #${esc(r.poitem || r.po_item || r.item)} · SO ${esc(r.salordno || r.sales_order || '—')}</span><strong>${qty(r.so_qty ?? r.prwise_so_qty ?? 0)} ${esc(r.ouom || uom)}</strong></div>`).join('')
+                + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total SO Qty</span><strong>${fmt(s.total_so_qty || 0)} ${esc(uom)}</strong></div>`;
             rowsHtml = detailRows.map((r, i) => `<tr>
                 <td>#${esc(r.poitem || r.po_item || r.item || (i + 1))}</td>
                 <td><strong>${esc(r.material)}</strong><br><small style="color:#64748b;">SO: ${esc(r.salordno || r.sales_order || '—')}</small></td>
-                <td class="num">${qty(r.tot_poqty || r.order_qty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">${qty(r.so_qty ?? r.prwise_so_qty ?? 0)} ${esc(r.ouom || uom)}</td>
                 <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
                 <td class="num">₹${money(r.totvalue ?? r.net_value ?? ((r.porate ?? r.po_unit_cost ?? 0) * (r.tot_poqty || 1)))}</td>
-                <td>${statusPill(r.status)}</td>
+                <td>${statusPill(r.status, r)}</td>
             </tr>`).join('');
             rowCount = detailRows.length;
         } else if (cardKey === 'po_value') {
@@ -656,7 +636,7 @@
                 <td class="num">${qty(r.tot_poqty || r.order_qty || 0)} ${esc(r.ouom || uom)}</td>
                 <td class="num">₹${fmtDec(r.porate ?? r.po_unit_cost, 2)}</td>
                 <td class="num">₹${money(r.totvalue ?? r.net_value ?? ((r.porate ?? r.po_unit_cost ?? 0) * (r.tot_poqty || 1)))}</td>
-                <td>${statusPill(r.status)}</td>
+                <td>${statusPill(r.status, r)}</td>
             </tr>`).join('');
             rowCount = detailRows.length;
         } else if (cardKey === 'zcost_items') {
@@ -682,7 +662,7 @@
                 <td class="num">${qty(r.tot_poqty || r.order_qty || 0)} ${esc(r.ouom || uom)}</td>
                 <td class="num">₹${fmtDec(r.budget_cost_per_gmt ?? r.expected_unit_cost, 4)}</td>
                 <td class="num">₹${money((r.budget_cost_per_gmt ?? r.expected_unit_cost) * (r.tot_poqty || r.order_qty || 1))}</td>
-                <td>${statusPill(r.status)}</td>
+                <td>${statusPill(r.status, r)}</td>
             </tr>`).join('');
             rowCount = distZ.length;
         } else if (cardKey === 'zcost_materials') {
@@ -708,7 +688,7 @@
                 <td class="num">${qty(r.tot_poqty || r.order_qty || 0)} ${esc(r.ouom || uom)}</td>
                 <td class="num">₹${fmtDec(r.budget_cost_per_gmt ?? r.expected_unit_cost, 4)}</td>
                 <td class="num">₹${money((r.budget_cost_per_gmt ?? r.expected_unit_cost) * (r.tot_poqty || r.order_qty || 1))}</td>
-                <td>${statusPill(r.status)}</td>
+                <td>${statusPill(r.status, r)}</td>
             </tr>`).join('');
             rowCount = distMats.length;
         } else if (cardKey === 'zcost_so_qty') {
@@ -717,25 +697,19 @@
             title = 'Total SO Qty';
             val = fmt(s.zcost_so_qty);
             unit = uom;
-            formula = 'zCOST SO Qty = ∑ (Order Quantity of MATCHED PO items only, unmatched excluded)';
+            formula = 'zCOST SO Qty = ∑ SO_QTY on matched lines (same field as PO Total SO Qty)';
             const matchedRows = detailRows.filter(isMatchedRow);
-            const seenIt = {};
-            const itRows = matchedRows.filter(r => {
-                const it = String(r.poitem || r.po_item || r.item || '').trim();
-                if (it && !seenIt[it]) { seenIt[it] = true; return true; }
-                return !it;
-            });
-            stepsHtml = itRows.length
-                ? itRows.map(r => `<div class="pcw-cdm-step-item"><span>Matched Item #${esc(r.poitem || r.po_item || r.item)}</span><strong>${qty(r.tot_poqty || r.order_qty || 0)} ${esc(r.ouom || uom)}</strong></div>`).join('')
-                    + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Matched Qty</span><strong>${fmt(s.zcost_so_qty)} ${esc(uom)}</strong></div>`
+            stepsHtml = matchedRows.length
+                ? matchedRows.map(r => `<div class="pcw-cdm-step-item"><span>Matched Item #${esc(r.poitem || r.po_item || r.item)} · SO ${esc(r.salordno || r.sales_order || '—')}</span><strong>${qty(r.so_qty ?? r.prwise_so_qty ?? 0)} ${esc(r.ouom || uom)}</strong></div>`).join('')
+                    + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Matched SO Qty</span><strong>${fmt(s.zcost_so_qty)} ${esc(uom)}</strong></div>`
                 : '<div class="pcw-cdm-step-item"><span>No matched quantity</span><strong>0</strong></div>';
             rowsHtml = matchedRows.map((r, i) => `<tr>
                 <td>#${esc(r.poitem || r.po_item || r.item || (i + 1))}</td>
                 <td><strong>${esc(r.material)}</strong><br><small style="color:#4338ca;">zCOST: ${esc(r.maktx || r.cost_description || '—')}</small></td>
-                <td class="num">${qty(r.tot_poqty || r.order_qty || r.so_qty || 0)} ${esc(r.ouom || uom)}</td>
+                <td class="num">${qty(r.so_qty ?? r.prwise_so_qty ?? 0)} ${esc(r.ouom || uom)}</td>
                 <td class="num">₹${fmtDec(r.budget_cost_per_gmt ?? r.expected_unit_cost, 4)}</td>
                 <td class="num">₹${money((r.budget_cost_per_gmt ?? r.expected_unit_cost) * (r.tot_poqty || r.order_qty || 1))}</td>
-                <td>${statusPill(r.status)}</td>
+                <td>${statusPill(r.status, r)}</td>
             </tr>`).join('');
             rowCount = matchedRows.length;
         } else if (cardKey === 'zcost_value') {
@@ -744,10 +718,16 @@
             title = 'Total Net Value (Budget Total)';
             val = fmt(s.zcost_net_value);
             unit = curr;
-            formula = 'zCOST Net Value = ∑ (Cost Quantity × Budget Cost per GMT) for MATCHED items only';
+            formula = 'zCOST Net Value = ∑ (TOT_POQTY × BUDGET_COST_PER_GMT) once per matched PO item';
             const matchedRows = detailRows.filter(isMatchedRow);
-            stepsHtml = matchedRows.length
-                ? matchedRows.map(r => {
+            const seenZVal = {};
+            const valRows = matchedRows.filter(r => {
+                const it = String(r.poitem || r.po_item || r.item || '').trim();
+                if (it && !seenZVal[it]) { seenZVal[it] = true; return true; }
+                return !it;
+            });
+            stepsHtml = valRows.length
+                ? valRows.map(r => {
                     const b = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost) || 0;
                     const q = Number(r.tot_poqty || r.order_qty || 1);
                     return `<div class="pcw-cdm-step-item"><span>Item #${esc(r.poitem || r.po_item || r.item)} (${qty(q)} × ₹${fmtDec(b, 4)})</span><strong>₹${money(b * q)}</strong></div>`;
@@ -763,7 +743,7 @@
                     <td class="num">${qty(q)} ${esc(r.ouom || uom)}</td>
                     <td class="num">₹${fmtDec(b, 4)}</td>
                     <td class="num">₹${money(b * q)}</td>
-                    <td>${statusPill(r.status)}</td>
+                    <td>${statusPill(r.status, r)}</td>
                 </tr>`;
             }).join('');
             rowCount = matchedRows.length;
@@ -830,6 +810,67 @@
     function headerPo() {
         return String($('po')?.value || root?.dataset.po || cfg.po || '').replace(/\D/g, '');
     }
+
+    function pdfUrlFor(po) {
+        const digits = String(po || '').replace(/\D/g, '');
+        if (!digits) return '';
+        const u = new URL(cfg.pdfUrl || 'purchase-order/pdf', window.location.origin);
+        u.searchParams.set('po', digits);
+        return u.toString();
+    }
+
+    function closePdfModal() {
+        const modal = $('pcwPdfModal');
+        const backdrop = $('pcwPdfBackdrop');
+        const frame = $('pcwPdfFrame');
+        if (modal) modal.hidden = true;
+        if (backdrop) backdrop.hidden = true;
+        document.body.classList.remove('pcw-pdf-open');
+        if (frame) {
+            frame.hidden = true;
+            frame.removeAttribute('src');
+        }
+        if ($('pcwPdfLoading')) $('pcwPdfLoading').hidden = false;
+    }
+
+    function openPdfModal(po) {
+        const url = pdfUrlFor(po);
+        if (!url) {
+            alert('Enter a purchase order number first.');
+            return;
+        }
+        const modal = $('pcwPdfModal');
+        const backdrop = $('pcwPdfBackdrop');
+        const frame = $('pcwPdfFrame');
+        const loading = $('pcwPdfLoading');
+        const openTab = $('pcwPdfOpenTab');
+        if (!modal || !frame) {
+            window.open(url, '_blank', 'noopener');
+            return;
+        }
+        if ($('pcwPdfTitle')) $('pcwPdfTitle').textContent = 'PO PDF';
+        if ($('pcwPdfMeta')) $('pcwPdfMeta').textContent = 'Purchase Order ' + po;
+        if (openTab) openTab.href = url;
+        if (loading) loading.hidden = false;
+        frame.hidden = true;
+        frame.onload = () => {
+            if (loading) loading.hidden = true;
+            frame.hidden = false;
+        };
+        frame.src = url;
+        modal.hidden = false;
+        if (backdrop) backdrop.hidden = false;
+        document.body.classList.add('pcw-pdf-open');
+    }
+
+    function openPdfTab(po) {
+        const url = pdfUrlFor(po);
+        if (!url) {
+            alert('Enter a purchase order number first.');
+            return;
+        }
+        window.open(url, '_blank', 'noopener');
+    }
     function headerSo() {
         return String($('so')?.value || root?.dataset.so || cfg.salesOrder || '').replace(/\D/g, '');
     }
@@ -858,6 +899,7 @@
         const review = Number(s.needs_review || 0);
         const passed = Number(s.passed || 0);
         const canPass = !!s.can_pass_po || (passed > 0 && exceptions === 0 && review === 0);
+        const mayPass = cfg.canPassPo !== false;
         if (canPass && passed > 0) {
             el.textContent = 'STATUS : READY TO PASS';
             el.classList.add('is-partial');
@@ -869,7 +911,25 @@
         } else {
             el.textContent = 'STATUS : NOT PASSED';
         }
-        if (btn) btn.disabled = !canPass;
+        if (btn) {
+            btn.hidden = !mayPass;
+            btn.disabled = !mayPass || !canPass;
+        }
+        const validateBtn = $('pcwOpenValidateBtn');
+        if (validateBtn) {
+            const mayValidate = cfg.canValidate !== false;
+            validateBtn.hidden = !mayValidate;
+            validateBtn.disabled = !mayValidate;
+        }
+        const assignWrap = $('pcwUserAssign')?.closest('.pcw-user-assign, .pcw-assign-wrap, label, div') || $('pcwUserAssign');
+        if ($('pcwUserAssign')) {
+            const mayAssign = cfg.canAssign !== false;
+            $('pcwUserAssign').disabled = !mayAssign;
+            if (assignWrap && assignWrap !== $('pcwUserAssign')) {
+                assignWrap.style.opacity = mayAssign ? '' : '0.45';
+                assignWrap.style.pointerEvents = mayAssign ? '' : 'none';
+            }
+        }
     }
 
     function isFooterRow(r) {
@@ -898,6 +958,13 @@
     function needsZcostItemPick(r) {
         if (!r || isFooterRow(r)) return false;
         if (r._editingMatch) return true;
+        // TEMPFIN already validated (budget+actual) — empty zCOST ITEM is optional, not "needs review"
+        const budget = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost);
+        const actual = nVal(r.actual_cost ?? r.po_unit_cost);
+        const st = String(r.status || '').toUpperCase();
+        if ((st === 'PASS' || st === 'EXCEPTION') && budget !== null && budget > 0 && actual !== null) {
+            return false;
+        }
         return !(r.manual_match || r.matched_line_key || r.cost_item || r.maktx);
     }
 
@@ -925,7 +992,7 @@
 
         (list || []).forEach((r) => {
             if (isFooterRow(r)) return;
-            const st = String(r.status || '').toUpperCase();
+            const st = statusDisplay(r).code;
             if (st === 'PASS') passed += 1;
             else if (st === 'NEEDS_REVIEW') needsReview += 1;
             else exceptions += 1;
@@ -938,9 +1005,10 @@
 
             const rowSoQty = Number(r.so_qty ?? r.prwise_so_qty ?? 0) || 0;
             const rowOrderQty = Number(r.tot_poqty ?? r.order_qty ?? r.po_qty ?? 0) || 0;
-            const effectiveQty = rowSoQty > 0 ? rowSoQty : rowOrderQty;
-            poSoQty += effectiveQty;
+            // Total SO Qty card = ∑ SO_QTY (not TOT_POQTY)
+            poSoQty += rowSoQty > 0 ? rowSoQty : 0;
 
+            // PO net value & PO order qty — once per PO item (TOTVALUE repeats per SO line)
             if (item && !seenValue[item]) {
                 seenValue[item] = true;
                 totalValue += Number(r.totvalue ?? r.net_value ?? 0) || 0;
@@ -951,7 +1019,8 @@
             }
             const budget = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost);
             const actual = nVal(r.actual_cost ?? r.po_unit_cost);
-            const costQty = rowSoQty > 0 ? rowSoQty : (rowOrderQty > 0 ? rowOrderQty : 1);
+            // Budget/actual totals use PO qty (same basis as PO net = PORATE × TOT_POQTY)
+            const costQty = rowOrderQty > 0 ? rowOrderQty : (rowSoQty > 0 ? rowSoQty : 1);
             if (budget !== null) totalExpected += budget * costQty;
             if (actual !== null) totalActual += actual * costQty;
 
@@ -962,26 +1031,24 @@
                 if (item) zItems[item] = true;
                 if (mat) zMaterials[mat] = true;
 
-                if (rowSoQty > 0) {
-                    zcostSoQty += rowSoQty;
-                } else if (item && !seenZItem[item]) {
+                // zCOST Total SO Qty = ∑ SO_QTY on matched lines (same field as PO card)
+                zcostSoQty += rowSoQty > 0 ? rowSoQty : 0;
+
+                // zCOST Net Value = ∑ (BUDGET_COST_PER_GMT × TOT_POQTY) once per PO item
+                if (item && !seenZItem[item]) {
                     seenZItem[item] = true;
-                    zcostSoQty += rowOrderQty;
+                    zcostExpected += (budget || 0) * (rowOrderQty > 0 ? rowOrderQty : costQty);
                 } else if (!item) {
-                    zcostSoQty += rowOrderQty;
+                    zcostExpected += (budget || 0) * costQty;
                 }
-                zcostExpected += (budget || 0) * costQty;
             }
 
             if (!unit) unit = String(r.ouom || r.unit || '').trim();
             if (r.po_currency || r.currency) currency = String(r.po_currency || r.currency);
         });
 
-        const poTotalSoQty = totalOrderQty > 0 ? totalOrderQty : poSoQty;
         const zcostItemCount = Object.keys(zItems).length;
         const zcostMatCount = Object.keys(zMaterials).length;
-        const finalZcostSoQty = zcostSoQty;
-        const finalZcostNetValue = zcostExpected;
 
         return {
             total_records: (list || []).length,
@@ -989,12 +1056,12 @@
             materials: Object.keys(materials).length,
             sales_orders: Object.keys(salesOrders).length,
             total_order_qty: totalOrderQty,
-            total_so_qty: poTotalSoQty,
+            total_so_qty: poSoQty,
             total_po_value: totalValue,
             zcost_items: zcostItemCount,
             zcost_materials: zcostMatCount,
-            zcost_so_qty: finalZcostSoQty,
-            zcost_net_value: finalZcostNetValue,
+            zcost_so_qty: zcostSoQty,
+            zcost_net_value: zcostExpected,
             total_expected: totalExpected,
             total_actual: totalActual,
             unit,
@@ -1014,20 +1081,27 @@
                 Object.entries(fromApi).filter(([, v]) => v !== null && v !== undefined && v !== '')
             ),
         };
-        // Prefer API counts when present; keep row-derived qty/value if API zeros look wrong
-        if (!(Number(fromApi.total_order_qty) > 0) && Number(fromRows.total_order_qty) > 0) {
+        // Always trust row-derived PASS / EXCEPTION / REVIEW (API used to count SUB-TOTAL as exceptions)
+        if (rows.length) {
+            s.passed = fromRows.passed;
+            s.exceptions = fromRows.exceptions;
+            s.needs_review = fromRows.needs_review;
+            s.can_pass_po = fromRows.can_pass_po
+                ?? (Number(fromRows.passed) > 0 && Number(fromRows.exceptions) === 0 && Number(fromRows.needs_review) === 0);
+        }
+        // Always prefer row-derived qty/value cards (API summary used wrong fields)
+        if (rows.length) {
             s.total_order_qty = fromRows.total_order_qty;
             s.total_so_qty = fromRows.total_so_qty;
-            s.unit = fromRows.unit || s.unit;
-        }
-        if (!(Number(fromApi.total_po_value) > 0) && Number(fromRows.total_po_value) > 0) {
             s.total_po_value = fromRows.total_po_value;
-        }
-        if (!(Number(fromApi.total_expected) > 0) && Number(fromRows.total_expected) > 0) {
             s.total_expected = fromRows.total_expected;
-        }
-        if (!(Number(fromApi.total_actual) > 0) && Number(fromRows.total_actual) > 0) {
             s.total_actual = fromRows.total_actual;
+            s.zcost_so_qty = fromRows.zcost_so_qty;
+            s.zcost_net_value = fromRows.zcost_net_value;
+            s.zcost_items = fromRows.zcost_items;
+            s.zcost_materials = fromRows.zcost_materials;
+            s.unit = fromRows.unit || s.unit;
+            s.currency = fromRows.currency || s.currency;
         }
         const fmt = (n) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
         const total = (Number(s.passed) || 0) + (Number(s.exceptions) || 0) + (Number(s.needs_review) || 0) || rows.length || 0;
@@ -1038,10 +1112,10 @@
         if ($('pcwKpiExceptions')) $('pcwKpiExceptions').textContent = fmt(s.exceptions || 0);
         if ($('pcwKpiReview')) $('pcwKpiReview').textContent = fmt(s.needs_review || 0);
 
-        // Row 2 Left: PO Data
+        // Row 2 Left: PO Data — Total SO Qty must use SO_QTY (not TOT_POQTY)
         const poItems = Number(s.po_items) > 0 ? s.po_items : (s.unique_po_items || rows.length || 0);
         const poMaterials = Number(s.materials) > 0 ? s.materials : 0;
-        const poSoQty = Number(s.total_order_qty) > 0 ? s.total_order_qty : (s.total_so_qty || 0);
+        const poSoQty = Number(s.total_so_qty) > 0 ? Number(s.total_so_qty) : (Number(s.total_order_qty) || 0);
         const poNetVal = Number(s.total_po_value) >= 0 ? s.total_po_value : 0;
         const curr = s.currency || 'INR';
         const unit = s.unit || '';
@@ -1063,12 +1137,12 @@
         if ($('pcwKpiValueUnit')) $('pcwKpiValueUnit').textContent = curr;
 
         // Row 2 Right: zCOST Data (Matched only)
-        const zItems = fromRows.zcost_items ?? 0;
-        const zMaterials = fromRows.zcost_materials ?? 0;
-        const zSoQty = fromRows.zcost_so_qty ?? 0;
-        const zNetVal = (Number(fromRows.zcost_net_value) > 0)
-            ? Number(fromRows.zcost_net_value)
-            : ((Number(s.total_expected) > 0 && zItems > 0) ? Number(s.total_expected) : 0);
+        const zItems = s.zcost_items ?? fromRows.zcost_items ?? 0;
+        const zMaterials = s.zcost_materials ?? fromRows.zcost_materials ?? 0;
+        const zSoQty = s.zcost_so_qty ?? fromRows.zcost_so_qty ?? 0;
+        const zNetVal = Number(s.zcost_net_value ?? fromRows.zcost_net_value) > 0
+            ? Number(s.zcost_net_value ?? fromRows.zcost_net_value)
+            : 0;
 
         if ($('pcwKpiZcostItems')) $('pcwKpiZcostItems').textContent = fmt(zItems);
         if ($('pcwKpiZcostMaterials')) $('pcwKpiZcostMaterials').textContent = fmt(zMaterials);
@@ -1085,19 +1159,20 @@
         if ($('pcwKpis')) $('pcwKpis').hidden = false;
     }
 
-    function statusPill(status) {
-        const st = String(status || '').toUpperCase();
-        let cls = 'is-fail';
-        let label = st || '—';
-        if (st === 'PASS') cls = 'is-pass';
-        else if (st === 'NEEDS_REVIEW') {
-            cls = 'is-review';
-            label = 'NEEDS REVIEW';
-        } else if (st === 'FOOTER') {
-            cls = 'is-footer';
-            label = '—';
-        }
-        return `<span class="pcw-pill ${cls}">${esc(label)}</span>`;
+    function statusPill(status, row) {
+        const disp = row
+            ? statusDisplay(row)
+            : (() => {
+                const st = String(status || '').toUpperCase();
+                if (st === 'PASS') return { label: 'PASS', cls: 'is-pass' };
+                if (st === 'NEEDS_REVIEW') return { label: 'NEEDS REVIEW', cls: 'is-review' };
+                if (st === 'FOOTER') return { label: '—', cls: 'is-footer' };
+                if (st === 'EXCEPTION' || st === 'FAIL' || st === 'NOT_VALIDATED') {
+                    return { label: 'NOT VALIDATED', cls: 'is-fail' };
+                }
+                return { label: st || 'NOT MATCHED', cls: 'is-fail' };
+            })();
+        return `<span class="pcw-pill ${disp.cls}">${esc(disp.label)}</span>`;
     }
 
     function varianceCell(pct) {
@@ -1128,6 +1203,11 @@
 
     function needsManualMatch(r) {
         if (!r || isFooterRow(r)) return false;
+        if (r.needs_manual_match === false) {
+            const budget = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost);
+            const actual = nVal(r.actual_cost ?? r.po_unit_cost);
+            if (budget !== null && budget > 0 && actual !== null) return false;
+        }
         return needsZcostItemPick(r) || !isMatchedRow(r);
     }
 
@@ -1258,7 +1338,7 @@
 
         if (!key) {
             targetRow.cost_item = '';
-            targetRow.item = '';
+            targetRow.zcost_item = '';
             targetRow.costing_item_no = '';
             targetRow.costing_quotation_no = '';
             targetRow.maktx = '';
@@ -1357,28 +1437,61 @@
     }
 
     function applyCostLineToRow(r, line) {
-        const budget = nVal(line.rate) ?? nVal(line.purp) ?? nVal(line.net_price);
-        const actual = nVal(r.actual_cost ?? r.po_unit_cost ?? r.porate);
+        // Classic portal / TEMPFIN values win — zCOST RATE must never replace BUDGET or ACTUAL
+        const tempfinBudget = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost);
+        const tempfinActual = nVal(r.actual_cost ?? r.po_unit_cost);
+        const lockedBudget = !!r.tempfin_budget_locked || (tempfinBudget !== null && tempfinBudget > 0);
+        const lockedActual = !!r.tempfin_actual_locked || (tempfinActual !== null && tempfinActual > 0);
+        const lockedCons = !!r.tempfin_cons_locked || (nVal(r.consumption) !== null && nVal(r.consumption) > 0);
+        const priorStatus = String(r.status || '').toUpperCase().replace(/\s+/g, '_');
+        const rawLineBudget = nVal(line.rate) ?? nVal(line.purp) ?? nVal(line.net_price);
+        // Zero / blank zCOST RATE is not a usable budget — never write 0 over TEMPFIN
+        const lineBudget = (rawLineBudget !== null && rawLineBudget > 0) ? rawLineBudget : null;
+        const budget = lockedBudget
+            ? tempfinBudget
+            : ((tempfinBudget !== null && tempfinBudget > 0) ? tempfinBudget : lineBudget);
+        const actual = tempfinActual;
         let variancePct = null;
-        let status = 'PASS';
-        let result = 'PASS — manually matched to zCOST line';
+        let status = priorStatus || 'PASS';
+        let result = String(r.validation_result || 'PASS — manually matched to zCOST line');
         if (budget !== null && budget > 0 && actual !== null) {
             variancePct = roundPct(((actual - budget) / budget) * 100);
-            if (actual <= budget) {
+            if (actual <= budget + 0.005) {
                 status = 'PASS';
                 result = 'PASS — manually matched to zCOST line';
             } else {
                 status = 'EXCEPTION';
-                result = 'EXCEPTION — actual cost exceeds matched budget';
+                result = 'NOT VALIDATED — actual cost exceeds matched budget RATE';
             }
         } else if (budget !== null && budget > 0) {
             status = 'PASS';
             result = 'PASS — manually matched to zCOST line';
+        } else if (priorStatus === 'PASS' && tempfinBudget !== null && tempfinBudget > 0) {
+            // Keep Excel/TEMPFIN PASS — matched line had no RATE
+            status = 'PASS';
+            result = String(r.validation_result || 'PASS — actual cost within budget');
+        } else {
+            status = 'NEEDS_REVIEW';
+            result = 'Matched zCOST line but budget RATE is zero — Needs Review';
         }
+        // Prefer recovered TEMPFIN budget when match RATE was blank/zero
+        const finalBudget = (budget !== null && budget > 0)
+            ? budget
+            : ((tempfinBudget !== null && tempfinBudget > 0) ? tempfinBudget : null);
 
-        r.cost_item = String(line.item || line.costing_item_no || '');
-        r.item = r.cost_item;
-        r.costing_item_no = String(line.costing_item_no || line.item || '');
+        // API ITEM only — never invent POSNR-ZLINE when ITEM is blank
+        r.zcost_item = Object.prototype.hasOwnProperty.call(line, 'zcost_item')
+            ? String(line.zcost_item || '')
+            : String(line.item || line.costing_item_no || '');
+        if (/^\d+-\d+$/.test(r.zcost_item)) {
+            const soItem = String(line.so_item || '').trim();
+            const lineNo = String(line.line_no || '').trim();
+            if (soItem && lineNo && r.zcost_item === `${soItem}-${lineNo}`) {
+                r.zcost_item = '';
+            }
+        }
+        r.cost_item = r.zcost_item;
+        r.costing_item_no = r.zcost_item;
         r.costing_quotation_no = String(
             line.costing_quotation_no || line.quotation_no || line.parent_quotation_no || ''
         );
@@ -1386,28 +1499,46 @@
         r.cost_description = r.maktx;
         r.cost_section = String(line.section || '');
         r.zsection = String(line.zsection || '');
-        r.budgeted_cons = nVal(line.gross) ?? nVal(line.net) ?? r.budgeted_cons;
-        r.budget_inr = nVal(line.total_inr) ?? r.budget_inr;
+        // Do not overwrite TEMPFIN BUDGETED_CONS / CONSUMPTION with zCOST GROSS when locked
+        if (!lockedCons) {
+            r.budgeted_cons = nVal(line.gross) ?? nVal(line.net) ?? r.budgeted_cons;
+        }
+        // Never write zCOST total_inr over TEMPFIN BUDGET_INR when budget is locked
+        if (!lockedBudget) {
+            r.budget_inr = nVal(line.total_inr) ?? r.budget_inr;
+        }
         r.budget_currency = String(line.currency || r.budget_currency || 'INR');
         r.budget_conv_rt = nVal(line.convr) ?? r.budget_conv_rt;
-        r.budget_cost_per_gmt = budget;
-        r.expected_unit_cost = budget;
+        // Keep prior TEMPFIN budget when match had no usable RATE (do not store 0)
+        if (finalBudget !== null && finalBudget > 0) {
+            r.budget_cost_per_gmt = finalBudget;
+            r.expected_unit_cost = finalBudget;
+        }
+        r.tempfin_budget_locked = lockedBudget || (finalBudget !== null && finalBudget > 0 && finalBudget === tempfinBudget);
         r.conv = nVal(line.convr) ?? r.conv;
-        r.buom = String(line.unit || r.buom || '');
+        // Keep TEMPFIN BUOM (GRO) — do not replace with zCOST unit
+        if (!r.buom) {
+            r.buom = String(line.unit || '');
+        }
         if (actual !== null) {
-            r.actual_cost = actual;
-            r.po_unit_cost = actual;
+            // Always keep existing TEMPFIN actual when locked
+            if (!lockedActual) {
+                r.actual_cost = actual;
+                r.po_unit_cost = actual;
+            }
+            r.tempfin_actual_locked = lockedActual;
         }
         r.variance_pct = variancePct;
         r.status = status;
         r.validation_result = result;
         r.cost_matrix = {
-            budget,
+            budget: finalBudget,
             actual,
             status,
         };
         r.manual_match = true;
-        r.needs_manual_match = false;
+        // TEMPFIN already has budget+actual → match is optional identity only
+        r.needs_manual_match = !(finalBudget !== null && finalBudget > 0 && actual !== null);
         r._editingMatch = false;
         r.matched_quotation = String(line.quotation_no || line.costing_quotation_no || '');
         r.matched_line_no = String(line.line_no || '');
@@ -1566,7 +1697,7 @@
             case 'sno':
                 return String(index + 1);
             case 'status':
-                return String(r.status || '');
+                return statusDisplay(r).label;
             case 'pono':
                 return r.pono || r.purchase_order || '';
             case 'poitem':
@@ -1581,12 +1712,22 @@
                 return r.material || '';
             case 'matgroup':
                 return r.matgroup || r.material_group || '';
-            case 'so_qty':
-                return r.so_qty ?? r.prwise_so_qty ?? r.SaleOrderQuantity;
-            case 'prwise_so_qty':
-                return r.prwise_so_qty ?? r.so_qty ?? r.SaleOrderQuantity;
-            case 'consumption':
-                return r.consumption ?? r.budgeted_cons ?? r.gross ?? r.net;
+            case 'so_qty': {
+                const so = nVal(r.so_qty) ?? nVal(r.prwise_so_qty) ?? nVal(r.SaleOrderQuantity);
+                return so;
+            }
+            case 'prwise_so_qty': {
+                const pr = nVal(r.prwise_so_qty) ?? nVal(r.so_qty) ?? nVal(r.SaleOrderQuantity);
+                return pr;
+            }
+            case 'consumption': {
+                // Prefer TEMPFIN CONSUMPTION / BUDGETED_CONS — never invent REQQTY÷SO (wrong vs Excel)
+                const cons = nVal(r.consumption);
+                if (cons !== null && cons > 0) return cons;
+                const bc = nVal(r.budgeted_cons);
+                if (bc !== null && bc > 0) return bc;
+                return null;
+            }
             case 'reqqty':
                 return r.reqqty ?? r.ReqBOMQuantity;
             case 'tot_poqty':
@@ -1607,8 +1748,15 @@
                 return r.po_currency || r.currency || 'INR';
             case 'costing_quotation_no':
                 return r.costing_quotation_no || r.costing_quotation || r.matched_quotation || r.quotation || '';
-            case 'costing_item_no':
-                return r.costing_item_no || r.cost_item || r.item || r.posnr || '';
+            case 'costing_item_no': {
+                // zCOST ITEM only — empty API ITEM must show empty (not POSNR-ZLINE)
+                if (Object.prototype.hasOwnProperty.call(r, 'zcost_item')) {
+                    return String(r.zcost_item || '');
+                }
+                const raw = String(r.cost_item || r.costing_item_no || '').trim();
+                if (/^\d+-\d+$/.test(raw)) return '';
+                return raw;
+            }
             case 'maktx':
                 return r.maktx || r.cost_description || '';
             case 'budgeted_cons':
@@ -1620,7 +1768,8 @@
             case 'budget_conv_rt':
                 return r.budget_conv_rt ?? r.convr ?? r.conv ?? 1;
             case 'budget_cost_per_gmt':
-                return r.budget_cost_per_gmt ?? r.expected_unit_cost ?? r.rate;
+                // Never fall back to zCOST RATE — that showed 15.9 instead of TEMPFIN budget
+                return r.budget_cost_per_gmt ?? r.expected_unit_cost;
             case 'conv':
                 return r.conv ?? r.convr ?? 1;
             case 'buom':
@@ -1675,7 +1824,7 @@
 
     function wrapExplain(key, index, displayHtml) {
         if (!EXPLAIN_COLS.has(key)) return displayHtml;
-        return `<button type="button" class="pcw-formula-cell" data-explain="${esc(key)}" data-idx="${index}" title="Show calculation">${displayHtml}</button>`;
+        return `<button type="button" class="pcw-formula-cell" data-explain="${esc(key)}" data-idx="${index}" title="Show API column">${displayHtml}</button>`;
     }
 
     function renderCell(key, r, index) {
@@ -1693,17 +1842,14 @@
                 if (isFooterRow(r)) {
                     inner = '';
                 } else {
-                    const unmatched = needsManualMatch(r);
+                    const pill = `<button type="button" class="pcw-formula-cell pcw-status-reason-btn" data-explain="status" data-idx="${index}" title="Why this status?">
+                        ${statusPill(r.status, r)}
+                    </button>`;
                     inner = `<div class="pcw-status-cell">
-                        ${statusPill(r.status)}
-                        ${unmatched
-                            ? `<button type="button" class="pcw-match-btn" data-idx="${index}" title="Manually match this PO item to a zCOST line">
-                                <span class="material-icons-round">link</span>
-                                Match
-                            </button>`
-                            : (r.manual_match
-                                ? `<span class="pcw-match-tag" title="Manually matched">Manual</span>`
-                                : '')}
+                        ${pill}
+                        ${r.manual_match
+                            ? `<span class="pcw-match-tag" title="Manually matched">Manual</span>`
+                            : ''}
                     </div>`;
                 }
                 break;
@@ -1711,19 +1857,27 @@
                 if (isFooterRow(r)) {
                     inner = `<strong class="pcw-footer-label">${esc(r.pono || r.matgroup || r.validation_result || '—')}</strong>`;
                 } else {
-                    inner = `<span class="pcw-mat">${dash(r.pono || r.purchase_order)}</span>`;
+                    inner = wrapExplain(key, index, `<span class="pcw-mat">${dash(r.pono || r.purchase_order)}</span>`);
                 }
                 break;
             case 'material':
-                inner = `<span class="pcw-mat">${dash(r.material)}</span>`;
+                inner = wrapExplain(key, index, `<span class="pcw-mat">${dash(r.material)}</span>`);
                 break;
             case 'mat_desc':
-                inner = `<span class="pcw-compare-po" title="${esc(r.mat_desc || r.material_desc || '')}">${dash(r.mat_desc || r.material_desc)}</span>`;
+                inner = wrapExplain(
+                    key,
+                    index,
+                    `<span class="pcw-compare-po" title="${esc(r.mat_desc || r.material_desc || '')}">${dash(r.mat_desc || r.material_desc)}</span>`
+                );
                 break;
             case 'costing_quotation_no':
+                // Quotation stays a link to sap_reports/zcost (not API popover)
                 inner = isFooterRow(r)
                     ? '—'
-                    : `<span class="pcw-nav-chip" title="CostingQuotationNo">${dash(cellValue(key, r, index))}</span>`;
+                    : quotationLinkHtml(
+                        cellValue(key, r, index),
+                        cellValue('costing_item_no', r, index)
+                    );
                 break;
             case 'costing_item_no':
                 if (isFooterRow(r)) {
@@ -1731,14 +1885,22 @@
                 } else if (needsManualMatch(r) || !!r._editingMatch) {
                     inner = zcostSelectHtml(r, index);
                 } else {
-                    inner = `<span class="pcw-nav-chip" title="CostingItemNo">${dash(cellValue(key, r, index))}</span>`;
+                    inner = wrapExplain(
+                        key,
+                        index,
+                        `<span class="pcw-nav-chip" title="zCOST ITEM">${dash(cellValue(key, r, index))}</span>`
+                    );
                 }
                 break;
             case 'maktx':
                 if (isFooterRow(r)) {
                     inner = '—';
                 } else {
-                    inner = `<span class="pcw-compare-maktx" title="${esc(r.maktx || r.cost_description || '')}">${dash(r.maktx || r.cost_description)}</span>`;
+                    inner = wrapExplain(
+                        key,
+                        index,
+                        `<span class="pcw-compare-maktx" title="${esc(r.maktx || r.cost_description || '')}">${dash(r.maktx || r.cost_description)}</span>`
+                    );
                 }
                 break;
             case 'so_qty':
@@ -1775,6 +1937,13 @@
             }
             case 'variance_pct':
                 inner = wrapExplain(key, index, varianceCell(cellValue(key, r, index)));
+                break;
+            case 'poitem':
+            case 'prno':
+            case 'salordno':
+            case 'style':
+            case 'matgroup':
+                inner = wrapExplain(key, index, dash(cellValue(key, r, index)));
                 break;
             default:
                 inner = EXPLAIN_COLS.has(key)
@@ -1889,14 +2058,18 @@
         if (noMatch) noMatch.style.display = 'none';
         tbody.innerHTML = matched
             .map(({ row, index }) => {
-                const st = String(row.status || '').toUpperCase();
+                const disp = statusDisplay(row);
+                const st = disp.code;
                 const open = needsDropdown(row) ? ' is-open' : '';
-                const pass = st === 'PASS' ? ' is-pass-row' : '';
-                const fail = st === 'EXCEPTION' ? ' is-fail-row' : '';
+                const unmatched = !isFooterRow(row) && needsManualMatch(row) && st !== 'PASS';
+                const pass = !unmatched && st === 'PASS' ? ' is-pass-row' : '';
+                const review = !unmatched && st === 'NEEDS_REVIEW' ? ' is-review-row' : '';
+                const fail = !unmatched && (st === 'NOT_VALIDATED' || st === 'EXCEPTION' || st === 'FAIL') ? ' is-fail-row' : '';
+                const unmatchedCls = unmatched ? ' is-unmatched-row' : '';
                 const sel = row.selected ? ' is-selected' : '';
                 const footer = isFooterRow(row) ? ` is-footer-row is-${String(row.row_kind || 'footer')}` : '';
-                const mismatch = row.cost_mismatch ? ' is-cost-mismatch' : '';
-                return `<tr class="pcw-row${open}${pass}${fail}${sel}${footer}${mismatch}" data-idx="${index}" data-row-kind="${esc(row.row_kind || 'detail')}">${COLS.map((k) => renderCell(k, row, index)).join('')}</tr>`;
+                const mismatch = row.cost_mismatch && !unmatched && st !== 'PASS' ? ' is-cost-mismatch' : '';
+                return `<tr class="pcw-row${open}${pass}${review}${fail}${unmatchedCls}${sel}${footer}${mismatch}" data-idx="${index}" data-row-kind="${esc(row.row_kind || 'detail')}">${COLS.map((k) => renderCell(k, row, index)).join('')}</tr>`;
             })
             .join('');
         if (noMatch) tbody.appendChild(noMatch);
@@ -2038,6 +2211,7 @@
     }
 
     function openValidateModal() {
+        if (cfg.canValidate === false) return;
         const selected = rows.filter((r) => !!r.selected && !isFooterRow(r));
         const detailRows = rows.filter((r) => !isFooterRow(r));
         const targets = selected.length ? selected : detailRows;
@@ -2291,13 +2465,24 @@
             if (e.target.closest('#pcwUserAssign')) return;
             if ($('pcwUserMenu')) $('pcwUserMenu').hidden = true;
         });
-        $('pcwOpenValidateBtn')?.addEventListener('click', openValidateModal);
+        $('pcwOpenValidateBtn')?.addEventListener('click', () => {
+            if (cfg.canValidate === false) return;
+            openValidateModal();
+        });
         $('pcwValidateClose')?.addEventListener('click', closeValidateModal);
         $('pcwValidateCancel')?.addEventListener('click', closeValidateModal);
         $('pcwValidateBackdrop')?.addEventListener('click', closeValidateModal);
         $('pcwValidateSave')?.addEventListener('click', () => {
             void saveValidationLog();
         });
+        $('pcwViewPdfBtn')?.addEventListener('click', () => {
+            openPdfModal(headerPo());
+        });
+        $('pcwOpenPdfBtn')?.addEventListener('click', () => {
+            openPdfTab(headerPo());
+        });
+        $('pcwPdfClose')?.addEventListener('click', closePdfModal);
+        $('pcwPdfBackdrop')?.addEventListener('click', closePdfModal);
         $('pcwHistoryBtn')?.addEventListener('click', () => {
             void openHistoryModal();
         });
@@ -2312,6 +2497,10 @@
             });
         });
         document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && $('pcwPdfModal') && !$('pcwPdfModal').hidden) {
+                closePdfModal();
+                return;
+            }
             if (e.key === 'Escape' && $('pcwValidateModal') && !$('pcwValidateModal').hidden) {
                 closeValidateModal();
             }
@@ -2399,11 +2588,19 @@
         $('rptClearAllFilters')?.addEventListener('click', clearFilters);
         $('rptResetFilterTableBtn')?.addEventListener('click', clearFilters);
 
+        // Default: clean table view — column filters open only when this button is clicked
+        const filterRow = $('rptFilterRow');
+        if (filterRow) filterRow.style.display = 'none';
+        $('rptToggleColFilters')?.classList.remove('is-active');
         $('rptToggleColFilters')?.addEventListener('click', () => {
             filterVisible = !filterVisible;
             const row = $('rptFilterRow');
             if (row) row.style.display = filterVisible ? '' : 'none';
             $('rptToggleColFilters')?.classList.toggle('is-active', filterVisible);
+            $('rptToggleColFilters')?.setAttribute(
+                'title',
+                filterVisible ? 'Hide column filter inputs' : 'Show column filter inputs'
+            );
         });
 
         $('rptToggleStickyScroll')?.addEventListener('click', () => {
@@ -2467,6 +2664,7 @@
             document.title = 'EVOLV | PO Costing';
         });
         $('pcwPassPoBtn')?.addEventListener('click', () => {
+            if (cfg.canPassPo === false) return;
             const po = headerPo();
             if (!po) return;
             const type = selectedMat() === 'fabric' ? 'FABRIC' : 'TRIMS';
@@ -2508,6 +2706,20 @@
 
         tbody?.addEventListener('change', onRowSelectChange);
         tbody?.addEventListener('click', (e) => {
+            const quoteHit = e.target.closest('a.pcw-quote-link, td[data-col-id="costing_quotation_no"]');
+            if (!quoteHit) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const tr = quoteHit.closest('tr');
+            const idx = Number(tr?.getAttribute('data-idx'));
+            const row = Number.isFinite(idx) ? rows[idx] : null;
+            const q = quoteHit.getAttribute('data-quote')
+                || (row ? cellValue('costing_quotation_no', row, idx) : '');
+            const item = row ? cellValue('costing_item_no', row, idx) : '';
+            openZcostView(q, item);
+        }, true);
+        tbody?.addEventListener('click', (e) => {
+            if (e.target.closest('a.pcw-quote-link, td[data-col-id="costing_quotation_no"]')) return;
             const matchBtn = e.target.closest('button.pcw-match-btn');
             if (matchBtn) {
                 e.preventDefault();

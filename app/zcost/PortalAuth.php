@@ -72,9 +72,9 @@ class PortalAuth
 
     /**
      * Dynamic permissions resolved from database for ZCOST module.
-     * Returns 5 granular rights: view, add, edit, delete, approve.
+     * Returns rights: view, add, edit, delete, approve, copy.
      *
-     * @return array{view: bool, add: bool, edit: bool, delete: bool, approve: bool}
+     * @return array{view: bool, add: bool, edit: bool, delete: bool, approve: bool, copy: bool}
      */
     public static function getPermissions(?string $username = null, ?int $userId = null, ?string $role = null): array
     {
@@ -105,6 +105,11 @@ class PortalAuth
     public static function canApprove(?string $username = null, ?int $userId = null, ?string $role = null): bool
     {
         return self::getPermissions($username, $userId, $role)['approve'];
+    }
+
+    public static function canCopy(?string $username = null, ?int $userId = null, ?string $role = null): bool
+    {
+        return !empty(self::getPermissions($username, $userId, $role)['copy']);
     }
 
     /**
@@ -175,6 +180,7 @@ class PortalAuth
             'can_edit' => $permissions['edit'],
             'can_delete' => $permissions['delete'],
             'can_approve' => $permissions['approve'],
+            'can_copy' => !empty($permissions['copy']),
             'user_id' => $userId,
             'username' => $username !== '' ? $username : 'Guest',
             'loginuserid' => $loginUserId !== '' ? $loginUserId : ($userId > 0 ? (string)$userId : ($username !== '' ? $username : 'ADMIN')),

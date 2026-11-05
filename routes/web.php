@@ -30,6 +30,8 @@ $router->get('sales/material-api', [SalesController::class, 'materialApiData']);
 $router->get('sales/sales-api', [SalesController::class, 'salesApiHubData']);
 $router->get('sales/orders-by-date', [SalesController::class, 'ordersByDate']);
 $router->get('fabric-sale', [ReportsController::class, 'showFabricSale']);
+$router->get('po-costing', [ReportsController::class, 'showPoCosting']);
+$router->get('po-costing-validation', [ReportsController::class, 'showPoCosting']);
 $router->get('sale', function () {
     header('Location: ' . url('sales'));
     exit;
@@ -68,6 +70,9 @@ $router->get('procurement', function () {
     (new ReportsController())->show('procurement');
 });
 $router->get('purchase-order/data', [ReportsController::class, 'purchaseOrderData']);
+if (method_exists(ReportsController::class, 'purchaseOrderPdf')) {
+    $router->get('purchase-order/pdf', [ReportsController::class, 'purchaseOrderPdf']);
+}
 if (method_exists(ReportsController::class, 'purchaseOrderValidate')) {
     $router->get('purchase-order/validate', [ReportsController::class, 'purchaseOrderValidate']);
 }

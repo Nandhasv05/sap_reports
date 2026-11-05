@@ -252,6 +252,53 @@ class SapODataClient
         return $this->requestViaStream($url, $username, $password, $timeout);
     }
 
+    /**
+     * Fetch a binary SAP media URL (e.g. POPDFSet $value) without JSON decoding.
+     *
+     * @return array{body:?string, status:int, content_type:string, error:?string}
+     */
+    public function fetchRaw(string $url, int $timeout = 60, array $accept = ['application/pdf', '*/*']): array
+    {
+        $username = (string) ($this->cfg['username'] ?? '');
+        $password = (string) ($this->cfg['password'] ?? '');
+        if ($username === '' || $password === '') {
+            return ['body' => null, 'status' => 0, 'content_type' => '', 'error' => 'SAP credentials are not configured.'];
+        }
+        if (!function_exists('curl_init')) {
+            return ['body' => null, 'status' => 0, 'content_type' => '', 'error' => 'cURL is required to download SAP PDFs.'];
+        }
+
+        $ch = curl_init($url);
+        $opts = [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPAUTH       => CURLAUTH_BASIC,
+            CURLOPT_USERPWD        => $username . ':' . $password,
+            CURLOPT_TIMEOUT        => $timeout,
+            CURLOPT_CONNECTTIMEOUT => min(15, $timeout),
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_HTTPHEADER     => ['Accept: ' . implode(', ', $accept)],
+        ];
+        $resolve = $this->cfg['resolve'] ?? [];
+        if (is_array($resolve) && $resolve !== []) {
+            $opts[CURLOPT_RESOLVE] = array_values($resolve);
+        }
+        curl_setopt_array($ch, $opts);
+        $body = curl_exec($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $contentType = (string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+        $err = curl_error($ch);
+        curl_close($ch);
+
+        if ($body === false) {
+            return ['body' => null, 'status' => $status, 'content_type' => $contentType, 'error' => $err !== '' ? $err : 'SAP request failed.'];
+        }
+        if ($status >= 400) {
+            return ['body' => $body, 'status' => $status, 'content_type' => $contentType, 'error' => "SAP HTTP {$status}: " . $this->truncate($body)];
+        }
+
+        return ['body' => $body, 'status' => $status, 'content_type' => $contentType, 'error' => null];
+    }
+
     /*
      * Fetch a full URL directly (used by SalesController for BOM, Material API, Procurement endpoints).
      *

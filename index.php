@@ -19,7 +19,7 @@ $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 $rel = preg_replace('#^/sap_reports(?=/|$)#', '', $path) ?: '/';
 $rel = preg_replace('#/index\.php$#', '/', $rel) ?: '/';
 
-if (preg_match('#^/(login|logout)\.php$#', $rel, $m)) {
+if (preg_match('#^/(login|logout|uac_repair|uac_diag|uac_save_test)\.php$#', $rel, $m)) {
     require EVOLV_ROOT . '/public/' . $m[1] . '.php';
     exit;
 }

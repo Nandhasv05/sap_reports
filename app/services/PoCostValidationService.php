@@ -158,14 +158,21 @@ class PoCostValidationService
                     $records[] = $rec;
                     continue;
                 }
-                // Needs zCOST ITEM pick when no linked cost line yet, or budget/actual missing
+                // TEMPFIN already has budget+actual (e.g. 5.78 vs 1.65 → PASS).
+                // Do NOT force "needs review" just because zCOST ITEM is empty.
                 $budget = $rec['budget_cost_per_gmt'] ?? $rec['expected_unit_cost'] ?? null;
                 $actual = $rec['actual_cost'] ?? $rec['po_unit_cost'] ?? null;
-                $hasZcostItem = trim((string) ($rec['cost_item'] ?? $rec['maktx'] ?? $rec['matched_line_key'] ?? '')) !== '';
+                $hasCosts = $budget !== null && $budget !== '' && (float) $budget > 0.0
+                    && $actual !== null && $actual !== '';
                 $st = strtoupper((string) ($rec['status'] ?? ''));
-                $needsManual = !$hasZcostItem
-                    || ($budget === null || $budget === '' || (float) $budget <= 0.0)
-                    || ($actual === null || $actual === '')
+                // Classic portal tolerance: actual ≤ budget + 0.005 → PASS
+                if ($hasCosts && (float) $actual <= ((float) $budget + 0.005)) {
+                    $rec['status'] = 'PASS';
+                    $rec['validation_result'] = 'PASS — actual cost within budget';
+                    $st = 'PASS';
+                    $rec['cost_mismatch'] = false;
+                }
+                $needsManual = !$hasCosts
                     || ($st === 'EXCEPTION' && preg_match('/no matching|no linked|cannot load|no budget/i', (string) ($rec['validation_result'] ?? '')));
                 $rec['needs_manual_match'] = (bool) $needsManual;
                 $rec['selected'] = false;
@@ -891,7 +898,7 @@ class PoCostValidationService
                         $curunit = 'INR';
                     }
 
-                    $resolvedItemNo = $itemCode !== '' ? $itemCode : ($posnr !== '' ? ($zline !== '' ? "{$posnr}-{$zline}" : $posnr) : '');
+                    // ITEM is the only value shown in "zCOST Item". Do not invent POSNR-ZLINE when ITEM is blank.
                     $costLines[] = [
                         'section'             => $section,
                         'zsection'            => trim((string) ($line['ZSECTION'] ?? '')),
@@ -899,11 +906,12 @@ class PoCostValidationService
                         'quotation_no'        => $lineQuote,
                         'parent_quotation_no' => $parentQuote,
                         'costing_quotation_no'=> $costingQuoteNo !== '' ? $costingQuoteNo : $lineQuote,
-                        'costing_item_no'     => $resolvedItemNo,
+                        'costing_item_no'     => $itemCode,
+                        'zcost_item'          => $itemCode,
                         'is_validated'        => $isValidatedRow,
                         'so_item'             => $posnr,
                         'line_no'             => $zline,
-                        'item'                => $resolvedItemNo,
+                        'item'                => $itemCode,
                         'description'         => $maktx,
                         'maktx'               => $maktx,
                         'material'            => $itemCode !== '' ? $itemCode : $maktx,
@@ -1252,16 +1260,27 @@ class PoCostValidationService
             $result = 'No linked sales order / quotation — cannot load ZCOST';
         }
 
-        $costItem = trim((string) ($match['item'] ?? ''));
+        // zCOST Item column must mirror API ITEM only (empty ITEM => empty UI)
+        $costItem = trim((string) ($match['zcost_item'] ?? ''));
         if ($costItem === '') {
+            $costItem = trim((string) ($match['item'] ?? ''));
+        }
+        // Reject synthetic POSNR-ZLINE placeholders previously used when ITEM was blank
+        if ($costItem !== '' && preg_match('/^\d+-\d+$/', $costItem)) {
             $soItem = trim((string) ($match['so_item'] ?? ($match['posnr'] ?? '')));
             $lineNo = trim((string) ($match['line_no'] ?? ($match['zline'] ?? '')));
-            $costItem = $soItem !== '' ? ($lineNo !== '' ? "{$soItem}-{$lineNo}" : $soItem) : ($lineNo !== '' ? $lineNo : '');
+            if ($soItem !== '' && $lineNo !== '' && $costItem === "{$soItem}-{$lineNo}") {
+                $costItem = '';
+            }
         }
         $costDesc = (string) ($match['description'] ?? ($match['maktx'] ?? ''));
         $costSection = (string) ($match['section'] ?? '');
 
         $soQty = (float) ($item['so_qty'] ?? $item['SaleOrderQuantity'] ?? 0);
+        $prSoQty = (float) ($item['prwise_so_qty'] ?? 0);
+        if ($soQty <= 0 && $prSoQty > 0) {
+            $soQty = $prSoQty;
+        }
         $reqQty = (float) ($item['reqqty'] ?? $item['ReqBOMQuantity'] ?? 0);
         $style = (string) ($item['style'] ?? '');
 
@@ -1272,8 +1291,17 @@ class PoCostValidationService
             $convr = 1.0;
         }
 
-        $consumption = $net !== null && $net > 0 ? $net : ($gross !== null && $gross > 0 ? $gross : 1.0);
-        $budgetedCons = $consumption;
+        // CONSUMPTION = TEMPFIN per-garment (or BUDGETED_CONS). Never invent REQQTY÷SO.
+        $poConsumption = (float) ($item['consumption'] ?? 0);
+        $itemBudgetedCons = (float) ($item['budgeted_cons'] ?? 0);
+        if ($poConsumption <= 0 && $itemBudgetedCons > 0) {
+            $poConsumption = $itemBudgetedCons;
+        }
+        $budgetedCons = $net !== null && $net > 0 ? $net : ($gross !== null && $gross > 0 ? $gross : null);
+        if ($itemBudgetedCons > 0) {
+            $budgetedCons = $itemBudgetedCons;
+        }
+        $consumption = $poConsumption > 0 ? $poConsumption : ($budgetedCons ?? 1.0);
 
         $totPoQty = $qty;
         $poRate = $poUnit;
@@ -1289,17 +1317,46 @@ class PoCostValidationService
         $soWisePoQty = $totPoQty;
         $soWisePoVal = round($poRate * $soWisePoQty * $convr, 2);
 
-        $actualCost = round($poRate * $convr * ($consumption ?? 1.0), 4);
         $budgetCostPerGmt = $expected;
         $budgetInr = (float) ($match['total_inr'] ?? ($match['rate'] ?? $expected));
         $budgetCurrency = (string) ($match['currency'] ?? ($item['currency'] ?? 'INR'));
         $poCurrency = (string) ($item['currency'] ?? 'INR');
-        $ouom = (string) ($item['unit'] ?? '');
+        $ouom = strtoupper(trim((string) ($item['ouom'] ?? $item['unit'] ?? '')));
         $matchUom = trim((string) ($match['unit'] ?? $match['uom'] ?? ''));
         if (in_array(strtoupper($matchUom), ['INR', 'USD', 'EUR', 'GBP', 'AUD', ''], true)) {
             $matchUom = '';
         }
-        $buom = $matchUom !== '' ? $matchUom : (string) ($item['unit'] ?? 'EA');
+        $buomRaw = strtoupper(trim((string) ($item['buom'] ?? '')));
+        $buom = $matchUom !== '' ? strtoupper($matchUom) : ($buomRaw !== '' ? $buomRaw : ($ouom !== '' ? $ouom : 'EA'));
+        $consForActual = $consumption ?? 1.0;
+        $matDescUpper = strtoupper(trim((string) ($description ?? '')));
+        $matGroupUpper = strtoupper(trim($materialGroup));
+        $poCurrUpper = strtoupper(trim($poCurrency) ?: 'INR');
+        $convFactor = $convr > 0 ? $convr : 1.0;
+        // Classic: BUDGET_CONV_RT for FX, CONV for unit conversion
+        $budgetConvRt = (float) ($item['budget_conv_rt'] ?? $item['BUDGET_CONV_RT'] ?? 1.0);
+        if ($budgetConvRt <= 0) {
+            $budgetConvRt = 1.0;
+        }
+        $baseRate = ($poCurrUpper !== 'INR') ? ($poRate * $budgetConvRt) : $poRate;
+        $midActual = $baseRate * $convFactor * $consForActual;
+        // Classic calc-columns: GRO÷144 only for button-like groups (not every GRO UOM)
+        $isButtonGro = ($ouom === 'GRO' || $buom === 'GRO') && (
+            str_contains($matGroupUpper, 'BUTTON')
+            || str_contains($matGroupUpper, 'SEMI DULL')
+            || str_contains($matGroupUpper, 'HOOK & EYE')
+            || str_contains($matGroupUpper, 'PEARL BTN')
+            || str_contains($matDescUpper, 'BTN')
+            || str_contains($matDescUpper, 'BUTTON')
+            || str_contains($matDescUpper, 'PLASTIC')
+        );
+        if ($isButtonGro) {
+            $actualCost = round(round($midActual, 0) / 144.0, 4);
+        } elseif ($ouom === 'KG' || $buom === 'KG') {
+            $actualCost = round($midActual / 500.0, 4);
+        } else {
+            $actualCost = round($midActual, 4);
+        }
 
         return [
             'pono'                => $this->displayNumber($poNumber),
@@ -1353,7 +1410,8 @@ class PoCostValidationService
             'expected_unit_cost'  => $budgetCostPerGmt,
             'cost_section'        => $costSection,
             'cost_nav'            => $this->costNavName($costSection),
-            'cost_item'           => $costItem !== '' ? $costItem : (string) ($match['posnr'] ?? ''),
+            'cost_item'           => $costItem,
+            'zcost_item'          => $costItem,
             'cost_description'    => $costDesc !== '' ? $costDesc : $description,
             'maktx'               => $costDesc !== '' ? $costDesc : $description,
             'quotation'           => $itemQuotations[0] ?? '',
@@ -1365,11 +1423,7 @@ class PoCostValidationService
                 ?? $item['costing_quotation']
                 ?? ($itemQuotations[0] ?? '')
             ),
-            'costing_item_no'     => (string) (
-                $match['costing_item_no']
-                ?? $match['item']
-                ?? ($costItem !== '' ? $costItem : ($item['costing_item_no'] ?? ''))
-            ),
+            'costing_item_no'     => $costItem,
             'costing_ref'         => $costingRef,
             'difference'          => $diff,
             'variance_pct'        => $variancePct,
@@ -1670,12 +1724,20 @@ class PoCostValidationService
         $salesOrders = [];
         $unit = '';
         $mixedUnit = false;
+        $detailCount = 0;
         foreach ($records as $r) {
-            $st = (string) ($r['status'] ?? '');
+            $kind = (string) ($r['row_kind'] ?? 'detail');
+            if (in_array($kind, ['footer', 'charge', 'tax'], true)) {
+                continue;
+            }
+            $detailCount++;
+            $st = strtoupper((string) ($r['status'] ?? ''));
             if ($st === 'PASS') {
                 $passed++;
             } elseif ($st === 'NEEDS_REVIEW') {
                 $needsReview++;
+            } elseif ($st === 'FOOTER') {
+                continue;
             } else {
                 $exceptions++;
             }
@@ -1745,7 +1807,7 @@ class PoCostValidationService
             'total_expected'    => round($totalExpected, 2),
             'total_actual'      => round($totalActual, 2),
             'currency'          => $primaryCurr,
-            'can_pass_po'       => count($records) > 0 && $exceptions === 0 && $needsReview === 0,
+            'can_pass_po'       => $detailCount > 0 && $exceptions === 0 && $needsReview === 0 && $passed > 0,
         ];
     }
 

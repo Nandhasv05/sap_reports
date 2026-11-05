@@ -621,6 +621,31 @@ class ReportsController extends Controller
     }
 
     /*
+     * PO Costing Validation lookup:
+     * Full-page landing (header + footer). PO → workbench; date range → bulk validation.
+     */
+    public function showPoCosting(): void
+    {
+        if (function_exists('sap_reports_user_can_access') && !sap_reports_user_can_access('po-costing')) {
+            $_SESSION['flash_error'] = 'Access restricted: You do not have permission to view PO Costing Validation.';
+            $this->redirect(url('/'));
+            return;
+        }
+        require_once base_path('app/services/SapPurchaseOrderService.php');
+        $this->view('reports/po_costing', [
+            'pageTitle'   => 'PO Costing Validation',
+            'appShell'    => true,
+            'layoutWide'  => true,
+            'presets'     => SapPurchaseOrderService::rangePresets(),
+            'poBaseUrl'   => url('purchase-order'),
+            'home'        => sap_reports_evol_url('portal_dashboard.php'),
+            'catalogHome' => url('/'),
+            'logoUrl'     => sap_reports_logo_url(),
+            'extraScripts'=> '',
+        ]);
+    }
+
+    /*
      * Purchase Order report page:
      * - Without ?po: condition-wise PO list view (date range, plant, supplier, quick search)
      * - With ?po=4000006524: single PO details view (Hero, KPI cards, charts, items table)
@@ -825,6 +850,55 @@ class ReportsController extends Controller
             fputcsv($out, $line);
         }
         fclose($out);
+    }
+
+    /*
+     * Stream SAP PO PDF: ZCOST_SRV/POPDFSet(EBELN='…')/$value
+     * GET purchase-order/pdf?po=1000000543
+     */
+    public function purchaseOrderPdf(): void
+    {
+        $po = preg_replace('/\D/', '', (string) ($_GET['po'] ?? '')) ?? '';
+        if ($po === '' || !preg_match('/^\d{1,10}$/', $po)) {
+            $message = 'Purchase order must be a number of up to 10 digits.';
+            $this->jsonResponse(['success' => false, 'message' => $message, 'error' => $message], 422);
+        }
+        $ebeln = str_pad($po, 10, '0', STR_PAD_LEFT);
+        require_once base_path('app/core/SapODataClient.php');
+        $cfg = config('sap') ?: [];
+        $base = rtrim((string) ($cfg['base_url'] ?? ''), '/');
+        $service = (string) ($cfg['po_pdf_service'] ?? '/sap/opu/odata/sap/ZCOST_SRV/POPDFSet');
+        $url = $base . $service . "(EBELN='" . $ebeln . "')/\$value";
+
+        $raw = (new SapODataClient($cfg))->fetchRaw($url, (int) ($cfg['timeout'] ?? 60));
+        $body = $raw['body'] ?? null;
+        if (is_string($body) && str_starts_with($body, "\xEF\xBB\xBF")) {
+            $body = substr($body, 3);
+        }
+        $ctype = strtolower((string) ($raw['content_type'] ?? ''));
+        $isPdf = is_string($body) && (
+            strncmp($body, '%PDF', 4) === 0
+            || str_contains($ctype, 'application/pdf')
+        );
+        if ($raw['error'] !== null || !is_string($body) || $body === '' || !$isPdf) {
+            $message = $raw['error'] ?? 'SAP did not return a PDF for this purchase order.';
+            $this->jsonResponse([
+                'success' => false,
+                'message' => $message,
+                'error'   => $message,
+                'po'      => $ebeln,
+            ], 502);
+        }
+
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: inline; filename="PO_' . $ebeln . '.pdf"');
+        header('Content-Length: ' . (string) strlen($body));
+        header('Cache-Control: private, max-age=120');
+        echo $body;
+        exit;
     }
 
     /*
