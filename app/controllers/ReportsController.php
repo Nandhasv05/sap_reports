@@ -995,7 +995,7 @@ class ReportsController extends Controller
     public function purchaseOrderValidationLogSave(): void
     {
         require_once base_path('app/services/PoValidationLogService.php');
-        $raw = file_get_contents('php://input') ?: '';
+        $raw = function_exists('sap_reports_request_raw_body') ? sap_reports_request_raw_body() : ((string) (file_get_contents('php://input') ?: ''));
         $input = json_decode($raw, true);
         if (!is_array($input)) {
             $input = $_POST;

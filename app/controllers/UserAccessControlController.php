@@ -7,7 +7,7 @@ declare(strict_types=1);
  * DESCRIPTION : SAP Reports User Access Control Controller
  *               Restricted to: admin, saravan, nandhakumar
  *               Reports: View · PO Costing: View/Pass PO/Assign/Validate · ZCOST: Add/Update/Copy/Approve
- *               Persisted to dbo.sap_report_userAccessControl
+ *               Persisted to dbo.sap_report_userascesscontrol
 */
 
 require_once base_path('app/core/Controller.php');
@@ -18,7 +18,7 @@ require_once base_path('app/core/access.php');
 class UserAccessControlController extends Controller
 {
     /** Canonical permission table (one table for all modules). */
-    public const ACCESS_TABLE = 'sap_report_userAccessControl';
+    public const ACCESS_TABLE = 'sap_report_userascesscontrol';
 
     /**
      * Allowed usernames who can access this management screen
@@ -231,12 +231,9 @@ class UserAccessControlController extends Controller
         $this->ensureAuthorized();
         $this->ensureTableExists();
 
-        header('Content-Type: application/json; charset=UTF-8');
-
         $userId = (int) ($_GET['user_id'] ?? 0);
         if ($userId <= 0) {
-            echo json_encode(['success' => false, 'error' => 'Invalid user ID']);
-            exit;
+            $this->jsonResponse(['success' => false, 'error' => 'Invalid user ID'], 422);
         }
 
         try {
@@ -251,8 +248,10 @@ class UserAccessControlController extends Controller
             }
 
             $table = self::ACCESS_TABLE;
+            // Do not SELECT page_name/page_route — ODBC can raise 22001 on fetch for wide NVARCHAR cols,
+            // and the API response only needs page_no + bit flags.
             $stmt = $pdo->prepare("
-                SELECT page_no, page_name, page_route,
+                SELECT page_no,
                        CAST(can_add AS INT) AS can_add,
                        CAST(can_view AS INT) AS can_view,
                        CAST(can_edit AS INT) AS can_edit,
@@ -262,10 +261,29 @@ class UserAccessControlController extends Controller
                        CAST(ISNULL(can_validate, 0) AS INT) AS can_validate
                 FROM [dbo].[{$table}]
                 WHERE user_id = ?
-                   OR (? <> '' AND username IS NOT NULL AND LOWER(LTRIM(RTRIM(username))) = ?)
             ");
-            $stmt->execute([$userId, $username, $username]);
+            $stmt->bindValue(1, $userId, PDO::PARAM_INT);
+            $stmt->execute();
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            // Fallback: match by username if this user_id has no rows yet
+            if (!$rows && $username !== '') {
+                $stmt2 = $pdo->prepare("
+                    SELECT page_no,
+                           CAST(can_add AS INT) AS can_add,
+                           CAST(can_view AS INT) AS can_view,
+                           CAST(can_edit AS INT) AS can_edit,
+                           CAST(can_approve AS INT) AS can_approve,
+                           CAST(ISNULL(can_copy, 0) AS INT) AS can_copy,
+                           CAST(ISNULL(can_assign, 0) AS INT) AS can_assign,
+                           CAST(ISNULL(can_validate, 0) AS INT) AS can_validate
+                    FROM [dbo].[{$table}]
+                    WHERE username IS NOT NULL AND LOWER(LTRIM(RTRIM(username))) = ?
+                ");
+                $stmt2->bindValue(1, $username, PDO::PARAM_STR);
+                $stmt2->execute();
+                $rows = $stmt2->fetchAll(PDO::FETCH_ASSOC);
+            }
 
             $permissions = [];
             foreach ($rows as $row) {
@@ -291,15 +309,13 @@ class UserAccessControlController extends Controller
                 $permissions[$pNo]['validate'] = max($permissions[$pNo]['validate'], (int) ($row['can_validate'] ?? 0));
             }
 
-            echo json_encode([
+            $this->jsonResponse([
                 'success'     => true,
                 'user_id'     => $userId,
                 'permissions' => $permissions
             ]);
-            exit;
         } catch (Throwable $e) {
-            echo json_encode(['success' => false, 'error' => $e->getMessage()]);
-            exit;
+            $this->jsonResponse(['success' => false, 'error' => $e->getMessage()], 500);
         }
     }
 
@@ -311,12 +327,9 @@ class UserAccessControlController extends Controller
         $this->ensureAuthorized();
         $this->ensureTableExists();
 
-        header('Content-Type: application/json; charset=UTF-8');
-
-        $input = json_decode((string) file_get_contents('php://input'), true);
+        $input = json_decode(sap_reports_request_raw_body(), true);
         if (!is_array($input)) {
-            echo json_encode(['success' => false, 'error' => 'Invalid JSON input']);
-            exit;
+            $this->jsonResponse(['success' => false, 'error' => 'Invalid JSON input'], 422);
         }
 
         $userId = (int) ($input['user_id'] ?? 0);
@@ -324,18 +337,20 @@ class UserAccessControlController extends Controller
         $permissions = $input['permissions'] ?? [];
 
         if ($userId <= 0 || !is_array($permissions)) {
-            echo json_encode(['success' => false, 'error' => 'Missing user_id or permissions array']);
-            exit;
+            $this->jsonResponse(['success' => false, 'error' => 'Missing user_id or permissions array'], 422);
         }
 
         try {
             $pdo = Database::connection();
 
-            // If username wasn't passed, resolve from users table
-            if ($username === '') {
-                $uStmt = $pdo->prepare("SELECT UserName FROM [dbo].[users] WHERE Id = ?");
-                $uStmt->execute([$userId]);
-                $username = (string) ($uStmt->fetchColumn() ?: '');
+            // Always trust users.UserName from DB (never email / client display text)
+            $uStmt = $pdo->prepare('SELECT UserName FROM [dbo].[users] WHERE Id = ?');
+            $uStmt->execute([$userId]);
+            $dbUser = trim((string) ($uStmt->fetchColumn() ?: ''));
+            if ($dbUser !== '') {
+                $username = $dbUser;
+            } elseif ($username === '') {
+                $username = 'user' . $userId;
             }
 
             $pagesCatalog = self::getPagesCatalog();
@@ -346,17 +361,28 @@ class UserAccessControlController extends Controller
 
             $table = self::ACCESS_TABLE;
             $this->ensureBitColumns($pdo);
+            $this->ensureStringColumnsWide($pdo);
 
-            $result = $this->persistPermissions($pdo, $table, $userId, $username, $permissions, $catalogMap);
+            try {
+                $result = $this->persistPermissions($pdo, $table, $userId, $username, $permissions, $catalogMap);
+            } catch (Throwable $first) {
+                // SQLSTATE 22001 = string truncation — widen/rebuild then retry once
+                if (!$this->isStringTruncation($first)) {
+                    throw $first;
+                }
+                error_log('UAC save truncation — repairing schema: ' . $first->getMessage());
+                $this->ensureStringColumnsWide($pdo, true);
+                $result = $this->persistPermissions($pdo, $table, $userId, $username, $permissions, $catalogMap);
+            }
 
-            echo json_encode([
+            $this->jsonResponse([
                 'success' => true,
                 'message' => "Successfully saved permissions for user {$username} ({$result} pages updated)",
                 'user_id' => $userId,
                 'saved'   => $result,
-                'save_version' => 'uac-v5',
+                'save_version' => 'uac-v7',
+                'table' => self::ACCESS_TABLE,
             ]);
-            exit;
         } catch (Throwable $e) {
             if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
                 try {
@@ -364,12 +390,16 @@ class UserAccessControlController extends Controller
                 } catch (Throwable $ignored) {
                 }
             }
-            echo json_encode([
+            $msg = $e->getMessage();
+            if ($this->isStringTruncation($e)) {
+                $msg = 'Permission text too long for database column. Refresh the page and save again. (' . $msg . ')';
+            }
+            $this->jsonResponse([
                 'success' => false,
-                'error' => $e->getMessage(),
-                'save_version' => 'uac-v5',
-            ]);
-            exit;
+                'error' => $msg,
+                'save_version' => 'uac-v7',
+                'table' => self::ACCESS_TABLE,
+            ], 500);
         }
     }
 
@@ -387,10 +417,15 @@ class UserAccessControlController extends Controller
         array $permissions,
         array $catalogMap
     ): int {
-        // Strip anything that is not a safe username token; hard-cap length
-        $safeUser = strtolower($this->clip(preg_replace('/[^a-zA-Z0-9._@-]/', '', $username) ?? '', 40));
-        if ($safeUser === '') {
-            $safeUser = 'user' . $userId;
+        $limits = $this->stringColumnLimits($pdo, $table);
+        $userMax = max(40, (int) ($limits['username'] ?? 255));
+        $nameMax = max(40, (int) ($limits['page_name'] ?? 255));
+        $routeMax = max(40, (int) ($limits['page_route'] ?? 255));
+
+        // Login name only — strip email/display junk, clip to column width
+        $safeUser = strtolower($this->clip(preg_replace('/[^a-zA-Z0-9._-]/', '', $username) ?? '', $userMax));
+        if ($safeUser === '' || str_contains($safeUser, '@')) {
+            $safeUser = $this->clip('user' . $userId, $userMax);
         }
 
         $byPage = [];
@@ -409,12 +444,19 @@ class UserAccessControlController extends Controller
         $zcostSync = null;
         $savedCount = 0;
 
+        // ODBC + ANSI_WARNINGS ON turns any length mismatch into SQLSTATE 22001
+        try {
+            $pdo->exec('SET ANSI_WARNINGS OFF');
+        } catch (Throwable $ignored) {
+        }
+
         $pdo->beginTransaction();
         try {
             $del = $pdo->prepare('DELETE FROM [dbo].[' . $table . '] WHERE user_id = ?');
-            $del->execute([(int) $userId]);
+            $del->bindValue(1, (int) $userId, PDO::PARAM_INT);
+            $del->execute();
 
-            // Prepared params only — never PDO::quote() (ODBC Driver 18 throws IM001)
+            // Plain binds + PHP clip (no CAST) — CAST(? AS NVARCHAR(n)) itself can raise 22001 under ODBC
             $ins = $pdo->prepare(
                 'INSERT INTO [dbo].[' . $table . ']
                     (user_id, username, page_no, page_name, page_route,
@@ -435,23 +477,22 @@ class UserAccessControlController extends Controller
                     ];
                 }
 
-                $pageName = $this->clip((string) ($meta['name'] ?? ('Page ' . $pageNo)), 40);
-                $pageRoute = $this->clip((string) ($meta['route'] ?? ''), 40);
+                $pageName = $this->clip((string) ($meta['name'] ?? ('Page ' . $pageNo)), $nameMax);
+                $pageRoute = $this->clip((string) ($meta['route'] ?? ''), $routeMax);
 
-                $ins->execute([
-                    (int) $userId,
-                    $safeUser,
-                    $pageNo,
-                    $pageName,
-                    $pageRoute,
-                    (int) $flags['can_add'],
-                    (int) $flags['can_view'],
-                    (int) $flags['can_edit'],
-                    (int) $flags['can_approve'],
-                    (int) $flags['can_copy'],
-                    (int) $flags['can_assign'],
-                    (int) $flags['can_validate'],
-                ]);
+                $ins->bindValue(1, (int) $userId, PDO::PARAM_INT);
+                $ins->bindValue(2, $safeUser, PDO::PARAM_STR);
+                $ins->bindValue(3, $pageNo, PDO::PARAM_INT);
+                $ins->bindValue(4, $pageName, PDO::PARAM_STR);
+                $ins->bindValue(5, $pageRoute, PDO::PARAM_STR);
+                $ins->bindValue(6, (int) $flags['can_add'], PDO::PARAM_INT);
+                $ins->bindValue(7, (int) $flags['can_view'], PDO::PARAM_INT);
+                $ins->bindValue(8, (int) $flags['can_edit'], PDO::PARAM_INT);
+                $ins->bindValue(9, (int) $flags['can_approve'], PDO::PARAM_INT);
+                $ins->bindValue(10, (int) $flags['can_copy'], PDO::PARAM_INT);
+                $ins->bindValue(11, (int) $flags['can_assign'], PDO::PARAM_INT);
+                $ins->bindValue(12, (int) $flags['can_validate'], PDO::PARAM_INT);
+                $ins->execute();
                 $savedCount++;
 
                 if ($pageNo === 12 || $pageRoute === 'zcost') {
@@ -468,6 +509,11 @@ class UserAccessControlController extends Controller
                 $pdo->rollBack();
             }
             throw $e;
+        } finally {
+            try {
+                $pdo->exec('SET ANSI_WARNINGS ON');
+            } catch (Throwable $ignored) {
+            }
         }
 
         if (is_array($zcostSync)) {
@@ -482,6 +528,55 @@ class UserAccessControlController extends Controller
         }
 
         return $savedCount;
+    }
+
+    private function isStringTruncation(Throwable $e): bool
+    {
+        $msg = $e->getMessage();
+        return str_contains($msg, '22001')
+            || stripos($msg, 'String data, right truncated') !== false
+            || stripos($msg, 'right truncation') !== false;
+    }
+
+    /**
+     * Widen username / page_name / page_route to NVARCHAR(100).
+     * Names like "PO Costing Validation" (21 chars) fail on NVARCHAR(20).
+     * Rebuilds the table when ALTER is blocked.
+     */
+    private function ensureStringColumnsWide(PDO $pdo, bool $forceRebuild = false): void
+    {
+        $table = self::ACCESS_TABLE;
+
+        if ($forceRebuild) {
+            $this->rebuildAccessTable($pdo);
+            return;
+        }
+
+        $limits = $this->stringColumnLimits($pdo, $table);
+        $alterFailed = false;
+        $targets = ['username' => 255, 'page_name' => 255, 'page_route' => 255];
+        foreach (['username' => 'NULL', 'page_name' => 'NOT NULL', 'page_route' => 'NULL'] as $col => $nullability) {
+            $cur = (int) ($limits[$col] ?? 0);
+            $want = (int) $targets[$col];
+            if ($cur <= 0 || $cur >= $want) {
+                continue;
+            }
+            try {
+                $pdo->exec("ALTER TABLE [dbo].[{$table}] ALTER COLUMN [{$col}] NVARCHAR({$want}) {$nullability}");
+            } catch (Throwable $e) {
+                error_log("UAC ALTER {$col}: " . $e->getMessage());
+                $alterFailed = true;
+            }
+        }
+
+        $limits = $this->stringColumnLimits($pdo, $table);
+        $stillNarrow = (($limits['username'] ?? 255) < 40)
+            || (($limits['page_name'] ?? 255) < 40)
+            || (($limits['page_route'] ?? 255) < 40);
+
+        if ($alterFailed || $stillNarrow) {
+            $this->rebuildAccessTable($pdo);
+        }
     }
 
     /**
@@ -580,7 +675,7 @@ class UserAccessControlController extends Controller
      */
     private function stringColumnLimits(PDO $pdo, string $table): array
     {
-        $defaults = ['username' => 100, 'page_name' => 100, 'page_route' => 100];
+        $defaults = ['username' => 255, 'page_name' => 255, 'page_route' => 255];
         try {
             $stmt = $pdo->prepare("
                 SELECT COLUMN_NAME, CHARACTER_MAXIMUM_LENGTH
@@ -594,11 +689,10 @@ class UserAccessControlController extends Controller
                 $name = strtolower((string) ($row['COLUMN_NAME'] ?? ''));
                 $len = (int) ($row['CHARACTER_MAXIMUM_LENGTH'] ?? 0);
                 if ($name !== '' && $len > 0) {
-                    // Never trust a reported width above 100 for clipping (prevents ODBC false-wide)
-                    $defaults[$name] = min(100, $len);
+                    $defaults[$name] = min(255, $len);
                 } elseif ($name !== '' && $len < 0) {
                     // NVARCHAR(MAX)
-                    $defaults[$name] = 100;
+                    $defaults[$name] = 255;
                 }
             }
         } catch (Throwable $e) {
@@ -633,40 +727,25 @@ class UserAccessControlController extends Controller
     }
 
     /**
-     * Drop + recreate access table (keeps a backup copy), used when ALTER cannot widen columns.
+     * Recreate access table with wide string columns.
+     * Copies into a temp table, drops the live table, renames temp — no leftover _bak tables.
      */
     private function rebuildAccessTable(PDO $pdo): void
     {
         $table = self::ACCESS_TABLE;
-        $suffix = date('YmdHis');
-        $backup = $table . '_bak_' . $suffix;
-        $hasBackup = false;
+        $suffix = date('YmdHis') . substr(sha1((string) microtime(true)), 0, 4);
+        $temp = 'uac_tmp_' . $suffix;
 
-        try {
-            $exists = $pdo->query("SELECT OBJECT_ID(N'[dbo].[{$table}]', N'U')")->fetchColumn();
-            if ($exists) {
-                // SELECT INTO + DROP frees constraint names (sp_rename keeps them and blocks recreate)
-                $pdo->exec("SELECT * INTO [dbo].[{$backup}] FROM [dbo].[{$table}]");
-                $pdo->exec("DROP TABLE [dbo].[{$table}]");
-                $hasBackup = true;
-            }
-        } catch (Throwable $e) {
-            error_log('rebuildAccessTable copy/drop: ' . $e->getMessage());
-            try {
-                $pdo->exec("IF OBJECT_ID(N'[dbo].[{$table}]', N'U') IS NOT NULL DROP TABLE [dbo].[{$table}]");
-            } catch (Throwable $e2) {
-                error_log('rebuildAccessTable drop: ' . $e2->getMessage());
-            }
-        }
+        $pdo->exec("IF OBJECT_ID(N'[dbo].[{$temp}]', N'U') IS NOT NULL DROP TABLE [dbo].[{$temp}]");
 
         $pdo->exec("
-            CREATE TABLE [dbo].[{$table}] (
+            CREATE TABLE [dbo].[{$temp}] (
                 [id] INT IDENTITY(1,1) NOT NULL,
                 [user_id] INT NOT NULL,
-                [username] NVARCHAR(100) NULL,
+                [username] NVARCHAR(255) NULL,
                 [page_no] INT NOT NULL,
-                [page_name] NVARCHAR(100) NOT NULL,
-                [page_route] NVARCHAR(100) NULL,
+                [page_name] NVARCHAR(255) NOT NULL,
+                [page_route] NVARCHAR(255) NULL,
                 [can_add] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_add] DEFAULT 0,
                 [can_view] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_view] DEFAULT 0,
                 [can_edit] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_edit] DEFAULT 0,
@@ -681,30 +760,108 @@ class UserAccessControlController extends Controller
             )
         ");
 
-        if (!$hasBackup) {
-            return;
+        $exists = (bool) $pdo->query("SELECT OBJECT_ID(N'[dbo].[{$table}]', N'U')")->fetchColumn();
+        if ($exists) {
+            try {
+                $pdo->exec("
+                    INSERT INTO [dbo].[{$temp}]
+                    (user_id, username, page_no, page_name, page_route,
+                     can_add, can_view, can_edit, can_approve, can_copy, can_assign, can_validate,
+                     created_at, updated_at)
+                    SELECT
+                        user_id,
+                        LEFT(CAST(ISNULL(username,'') AS NVARCHAR(255)), 255),
+                        page_no,
+                        LEFT(CAST(ISNULL(page_name,'Page') AS NVARCHAR(255)), 255),
+                        LEFT(CAST(ISNULL(page_route,'') AS NVARCHAR(255)), 255),
+                        CAST(ISNULL(can_add,0) AS BIT),
+                        CAST(ISNULL(can_view,0) AS BIT),
+                        CAST(ISNULL(can_edit,0) AS BIT),
+                        CAST(ISNULL(can_approve,0) AS BIT),
+                        CAST(ISNULL(can_copy,0) AS BIT),
+                        CAST(ISNULL(can_assign,0) AS BIT),
+                        CAST(ISNULL(can_validate,0) AS BIT),
+                        ISNULL(created_at, GETDATE()),
+                        ISNULL(updated_at, GETDATE())
+                    FROM [dbo].[{$table}]
+                ");
+            } catch (Throwable $e) {
+                try {
+                    $pdo->exec("
+                        INSERT INTO [dbo].[{$temp}]
+                        (user_id, username, page_no, page_name, page_route,
+                         can_add, can_view, can_edit, can_approve, created_at, updated_at)
+                        SELECT
+                            user_id,
+                            LEFT(CAST(ISNULL(username,'') AS NVARCHAR(255)), 255),
+                            page_no,
+                            LEFT(CAST(ISNULL(page_name,'Page') AS NVARCHAR(255)), 255),
+                            LEFT(CAST(ISNULL(page_route,'') AS NVARCHAR(255)), 255),
+                            CAST(ISNULL(can_add,0) AS BIT),
+                            CAST(ISNULL(can_view,0) AS BIT),
+                            CAST(ISNULL(can_edit,0) AS BIT),
+                            CAST(ISNULL(can_approve,0) AS BIT),
+                            ISNULL(created_at, GETDATE()),
+                            ISNULL(updated_at, GETDATE())
+                        FROM [dbo].[{$table}]
+                    ");
+                } catch (Throwable $e2) {
+                    error_log('rebuildAccessTable copy: ' . $e2->getMessage());
+                }
+            }
+
+            $pdo->exec("DROP TABLE [dbo].[{$table}]");
         }
 
         try {
-            $pdo->exec("
-                INSERT INTO [dbo].[{$table}]
-                (user_id, username, page_no, page_name, page_route, can_add, can_view, can_edit, can_approve, created_at, updated_at)
-                SELECT
-                    user_id,
-                    LEFT(CAST(ISNULL(username,'') AS NVARCHAR(100)), 100),
-                    page_no,
-                    LEFT(CAST(ISNULL(page_name,'Page') AS NVARCHAR(100)), 100),
-                    LEFT(CAST(ISNULL(page_route,'') AS NVARCHAR(100)), 100),
-                    CAST(ISNULL(can_add,0) AS BIT),
-                    CAST(ISNULL(can_view,0) AS BIT),
-                    CAST(ISNULL(can_edit,0) AS BIT),
-                    CAST(ISNULL(can_approve,0) AS BIT),
-                    ISNULL(created_at, GETDATE()),
-                    ISNULL(updated_at, GETDATE())
-                FROM [dbo].[{$backup}]
-            ");
+            $pdo->exec("EXEC sp_rename N'[dbo].[{$temp}]', N'{$table}'");
         } catch (Throwable $e) {
-            error_log('rebuildAccessTable restore: ' . $e->getMessage());
+            $pdo->exec("IF OBJECT_ID(N'[dbo].[{$table}]', N'U') IS NOT NULL DROP TABLE [dbo].[{$table}]");
+            $pdo->exec("EXEC sp_rename N'[dbo].[{$temp}]', N'{$table}'");
+        }
+
+        $this->dropLegacyAccessTables($pdo);
+    }
+
+    /**
+     * Keep only dbo.sap_report_userascesscontrol — drop old names and any _bak / _new leftovers.
+     */
+    private function dropLegacyAccessTables(PDO $pdo): void
+    {
+        $keep = strtolower(self::ACCESS_TABLE);
+        try {
+            $rows = $pdo->query("
+                SELECT name
+                FROM sys.tables
+                WHERE schema_id = SCHEMA_ID(N'dbo')
+                  AND (
+                        name IN (
+                            N'sap_report_userAccessControl',
+                            N'tblSapUseracessControl',
+                            N'tblSapUserAccessControl'
+                        )
+                     OR name LIKE N'sap_report_userAccessControl_bak_%'
+                     OR name LIKE N'sap_report_userAccessControl_new_%'
+                     OR name LIKE N'sap_report_userascesscontrol_bak_%'
+                     OR name LIKE N'sap_report_userascesscontrol_new_%'
+                     OR name LIKE N'uac_tmp_%'
+                  )
+            ")->fetchAll(PDO::FETCH_COLUMN);
+        } catch (Throwable $e) {
+            error_log('dropLegacyAccessTables list: ' . $e->getMessage());
+            return;
+        }
+
+        foreach ($rows as $name) {
+            $name = (string) $name;
+            if ($name === '' || strtolower($name) === $keep) {
+                continue;
+            }
+            try {
+                $pdo->exec('DROP TABLE [dbo].[' . str_replace([']', '['], '', $name) . ']');
+            } catch (Throwable $e) {
+                error_log("dropLegacyAccessTables {$name}: " . $e->getMessage());
+            }
         }
     }
 
@@ -733,7 +890,7 @@ class UserAccessControlController extends Controller
     }
 
     /**
-     * Create/migrate dbo.sap_report_userAccessControl (single source of truth).
+     * Create/migrate dbo.sap_report_userascesscontrol (single source of truth).
      */
     private function ensureTableExists(): void
     {
@@ -745,57 +902,90 @@ class UserAccessControlController extends Controller
                 IF OBJECT_ID(N'[dbo].[{$table}]', N'U') IS NULL
                 BEGIN
                     CREATE TABLE [dbo].[{$table}] (
-                        [id] INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                        [id] INT IDENTITY(1,1) NOT NULL,
                         [user_id] INT NOT NULL,
                         [username] NVARCHAR(255) NULL,
                         [page_no] INT NOT NULL,
                         [page_name] NVARCHAR(255) NOT NULL,
                         [page_route] NVARCHAR(255) NULL,
-                        [can_add] BIT NOT NULL CONSTRAINT [DF_uac_can_add] DEFAULT 0,
-                        [can_view] BIT NOT NULL CONSTRAINT [DF_uac_can_view] DEFAULT 0,
-                        [can_edit] BIT NOT NULL CONSTRAINT [DF_uac_can_edit] DEFAULT 0,
-                        [can_approve] BIT NOT NULL CONSTRAINT [DF_uac_can_approve] DEFAULT 0,
-                        [can_copy] BIT NOT NULL CONSTRAINT [DF_uac_can_copy] DEFAULT 0,
-                        [can_assign] BIT NOT NULL CONSTRAINT [DF_uac_can_assign] DEFAULT 0,
-                        [can_validate] BIT NOT NULL CONSTRAINT [DF_uac_can_validate] DEFAULT 0,
-                        [created_at] DATETIME NOT NULL CONSTRAINT [DF_uac_created_at] DEFAULT GETDATE(),
-                        [updated_at] DATETIME NOT NULL CONSTRAINT [DF_uac_updated_at] DEFAULT GETDATE(),
-                        CONSTRAINT [uq_uac_user_page] UNIQUE ([user_id], [page_no])
+                        [can_add] BIT NOT NULL CONSTRAINT [DF_{$table}_add] DEFAULT 0,
+                        [can_view] BIT NOT NULL CONSTRAINT [DF_{$table}_view] DEFAULT 0,
+                        [can_edit] BIT NOT NULL CONSTRAINT [DF_{$table}_edit] DEFAULT 0,
+                        [can_approve] BIT NOT NULL CONSTRAINT [DF_{$table}_approve] DEFAULT 0,
+                        [can_copy] BIT NOT NULL CONSTRAINT [DF_{$table}_copy] DEFAULT 0,
+                        [can_assign] BIT NOT NULL CONSTRAINT [DF_{$table}_assign] DEFAULT 0,
+                        [can_validate] BIT NOT NULL CONSTRAINT [DF_{$table}_validate] DEFAULT 0,
+                        [created_at] DATETIME NOT NULL CONSTRAINT [DF_{$table}_created] DEFAULT GETDATE(),
+                        [updated_at] DATETIME NOT NULL CONSTRAINT [DF_{$table}_updated] DEFAULT GETDATE(),
+                        CONSTRAINT [PK_{$table}] PRIMARY KEY ([id]),
+                        CONSTRAINT [uq_{$table}_user_page] UNIQUE ([user_id], [page_no])
                     );
                 END
             ");
 
             $this->repairAccessTableSchema($pdo);
+            $this->ensureStringColumnsWide($pdo);
 
-            // One-time migrate from legacy misspelled table if new table is empty
+            // One-time migrate from older tables when the canonical table is empty, then drop them
             try {
                 $count = (int) $pdo->query("SELECT COUNT(*) FROM [dbo].[{$table}]")->fetchColumn();
                 if ($count === 0) {
-                    $legacy = $pdo->query("SELECT OBJECT_ID(N'[dbo].[tblSapUseracessControl]')")->fetchColumn();
-                    if ($legacy) {
-                        $pdo->exec("
-                            INSERT INTO [dbo].[{$table}]
-                            (user_id, username, page_no, page_name, page_route, can_add, can_view, can_edit, can_approve, can_copy, can_assign, can_validate, created_at, updated_at)
-                            SELECT
-                                user_id,
-                                LEFT(CAST(ISNULL(username, '') AS NVARCHAR(40)), 40),
-                                page_no,
-                                LEFT(CAST(ISNULL(page_name, 'Page') AS NVARCHAR(40)), 40),
-                                LEFT(CAST(ISNULL(page_route, '') AS NVARCHAR(40)), 40),
-                                CAST(ISNULL(can_add, 0) AS BIT),
-                                CAST(ISNULL(can_view, 0) AS BIT),
-                                CAST(ISNULL(can_edit, 0) AS BIT),
-                                CAST(ISNULL(can_approve, 0) AS BIT),
-                                CAST(0 AS BIT), CAST(0 AS BIT), CAST(0 AS BIT),
-                                ISNULL(created_at, GETDATE()),
-                                ISNULL(updated_at, GETDATE())
-                            FROM [dbo].[tblSapUseracessControl]
-                        ");
+                    foreach (['sap_report_userAccessControl', 'tblSapUseracessControl'] as $src) {
+                        $legacy = $pdo->query("SELECT OBJECT_ID(N'[dbo].[{$src}]', N'U')")->fetchColumn();
+                        if (!$legacy) {
+                            continue;
+                        }
+                        try {
+                            $pdo->exec("
+                                INSERT INTO [dbo].[{$table}]
+                                (user_id, username, page_no, page_name, page_route,
+                                 can_add, can_view, can_edit, can_approve, can_copy, can_assign, can_validate,
+                                 created_at, updated_at)
+                                SELECT
+                                    user_id,
+                                    LEFT(CAST(ISNULL(username, '') AS NVARCHAR(100)), 100),
+                                    page_no,
+                                    LEFT(CAST(ISNULL(page_name, 'Page') AS NVARCHAR(150)), 150),
+                                    LEFT(CAST(ISNULL(page_route, '') AS NVARCHAR(100)), 100),
+                                    CAST(ISNULL(can_add, 0) AS BIT),
+                                    CAST(ISNULL(can_view, 0) AS BIT),
+                                    CAST(ISNULL(can_edit, 0) AS BIT),
+                                    CAST(ISNULL(can_approve, 0) AS BIT),
+                                    CAST(ISNULL(can_copy, 0) AS BIT),
+                                    CAST(ISNULL(can_assign, 0) AS BIT),
+                                    CAST(ISNULL(can_validate, 0) AS BIT),
+                                    ISNULL(created_at, GETDATE()),
+                                    ISNULL(updated_at, GETDATE())
+                                FROM [dbo].[{$src}]
+                            ");
+                        } catch (Throwable $eFull) {
+                            $pdo->exec("
+                                INSERT INTO [dbo].[{$table}]
+                                (user_id, username, page_no, page_name, page_route,
+                                 can_add, can_view, can_edit, can_approve, created_at, updated_at)
+                                SELECT
+                                    user_id,
+                                    LEFT(CAST(ISNULL(username, '') AS NVARCHAR(100)), 100),
+                                    page_no,
+                                    LEFT(CAST(ISNULL(page_name, 'Page') AS NVARCHAR(150)), 150),
+                                    LEFT(CAST(ISNULL(page_route, '') AS NVARCHAR(100)), 100),
+                                    CAST(ISNULL(can_add, 0) AS BIT),
+                                    CAST(ISNULL(can_view, 0) AS BIT),
+                                    CAST(ISNULL(can_edit, 0) AS BIT),
+                                    CAST(ISNULL(can_approve, 0) AS BIT),
+                                    ISNULL(created_at, GETDATE()),
+                                    ISNULL(updated_at, GETDATE())
+                                FROM [dbo].[{$src}]
+                            ");
+                        }
+                        break;
                     }
                 }
             } catch (Throwable $e) {
                 error_log('migrate legacy access table: ' . $e->getMessage());
             }
+
+            $this->dropLegacyAccessTables($pdo);
         } catch (Throwable $e) {
             error_log('ensureTableExists ' . self::ACCESS_TABLE . ' error: ' . $e->getMessage());
         }

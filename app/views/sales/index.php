@@ -36,7 +36,6 @@ window.SALES_PAGE = {
     pageSize: 8000
 };
 </script>
-<script src="<?= e(asset('js/loader.js')) ?>"></script>
 <script src="<?= e(asset('js/excel-export.js')) ?>"></script>
 <script src="<?= e(asset('js/sales.js')) ?>?v=<?= time() ?>"></script>
 <?php
@@ -165,7 +164,6 @@ $extraScripts = ob_get_clean();
     $loaderIcon = 'request_quote';
     $loaderVisible = true;
     $loaderSteps = ['Connecting to SAP…', 'Fetching quotations…', 'Preparing the table…'];
-    require base_path('app/views/partials/loader.php');
     ?>
     <script>
     (function () {

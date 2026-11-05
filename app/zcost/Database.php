@@ -176,7 +176,7 @@ class Database
                             CAST(can_edit AS INT) AS can_edit,
                             CAST(can_approve AS INT) AS can_approve,
                             CAST(ISNULL(can_copy, 0) AS INT) AS can_copy
-                        FROM sap_report_userAccessControl
+                        FROM sap_report_userascesscontrol
                         WHERE (user_id = ? OR LOWER(LTRIM(RTRIM(username))) = ?)
                           AND (LOWER(LTRIM(RTRIM(page_route))) IN ('zcost', 'zcost costing sheet', 'zcost-costing-sheet')
                                OR page_no = 12)
@@ -184,23 +184,7 @@ class Database
                     ");
                     $sapStmt->execute([$userId ?? 0, $userKey]);
                     $sapRow = $sapStmt->fetch(PDO::FETCH_ASSOC);
-                    if (!$sapRow) {
-                        $sapStmt = $pdo->prepare("
-                            SELECT TOP 1
-                                CAST(can_view AS INT) AS can_view,
-                                CAST(can_add AS INT) AS can_add,
-                                CAST(can_edit AS INT) AS can_edit,
-                                CAST(can_approve AS INT) AS can_approve,
-                                CAST(ISNULL(can_copy, 0) AS INT) AS can_copy
-                            FROM tblSapUseracessControl
-                            WHERE (user_id = ? OR LOWER(LTRIM(RTRIM(username))) = ?)
-                              AND (LOWER(LTRIM(RTRIM(page_route))) IN ('zcost', 'zcost costing sheet', 'zcost-costing-sheet')
-                                   OR page_no = 12)
-                            ORDER BY CAST(can_view AS INT) DESC
-                        ");
-                        $sapStmt->execute([$userId ?? 0, $userKey]);
-                        $sapRow = $sapStmt->fetch(PDO::FETCH_ASSOC);
-                    }
+                    // Only sap_report_userascesscontrol — no legacy duplicate tables
                     if ($sapRow) {
                         $add = (int) $sapRow['can_add'] === 1;
                         $edit = (int) $sapRow['can_edit'] === 1;

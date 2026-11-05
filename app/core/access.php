@@ -103,15 +103,31 @@ function sap_reports_user_can_access(string $module, ?array $user = null): bool
 }
 
 /**
+ * Open zCOST sheet from a quotation link (PO Costing workbench / bulk).
+ * Full zCOST module access, or PO Costing access with an explicit quotation + view mode.
+ */
+function sap_reports_can_open_zcost_sheet(?array $user = null, ?string $vbeln = null, bool $viewMode = false): bool
+{
+    if (sap_reports_user_can_access('zcost', $user)) {
+        return true;
+    }
+    $quote = trim((string) $vbeln);
+    if ($quote === '' || !$viewMode) {
+        return false;
+    }
+    return sap_reports_user_can_access('po-costing', $user);
+}
+
+/**
  * Canonical SAP Reports access table.
  */
 function sap_reports_access_table(): string
 {
-    return 'sap_report_userAccessControl';
+    return 'sap_report_userascesscontrol';
 }
 
 /**
- * Route aliases stored in sap_report_userAccessControl.page_route vs live app routes.
+ * Route aliases stored in sap_report_userascesscontrol.page_route vs live app routes.
  *
  * @return list<string>
  */
@@ -154,7 +170,7 @@ function sap_reports_access_route_aliases(string $module): array
 }
 
 /**
- * Granular right from dbo.sap_report_userAccessControl.
+ * Granular right from dbo.sap_report_userascesscontrol.
  */
 function sap_reports_user_can(string $module, string $action = 'view', ?array $user = null): bool
 {
@@ -233,25 +249,22 @@ function sap_reports_user_can(string $module, string $action = 'view', ?array $u
             $params[] = $alias;
         }
 
-        $tables = [$table, 'tblSapUseracessControl'];
-        foreach ($tables as $tbl) {
-            try {
-                $sql = "
-                    SELECT TOP 1 CAST({$col} AS INT) AS allowed
-                    FROM [dbo].[{$tbl}]
-                    WHERE (user_id = ? OR (username IS NOT NULL AND LOWER(LTRIM(RTRIM(username))) = ?))
-                      AND (" . implode(' OR ', $routeHolders) . ")
-                    ORDER BY CAST({$col} AS INT) DESC
-                ";
-                $stmt = $pdo->prepare($sql);
-                $stmt->execute($params);
-                $val = $stmt->fetchColumn();
-                if ($val !== false && $val !== null) {
-                    return (int) $val === 1;
-                }
-            } catch (Throwable $inner) {
-                continue;
+        try {
+            $sql = "
+                SELECT TOP 1 CAST({$col} AS INT) AS allowed
+                FROM [dbo].[{$table}]
+                WHERE (user_id = ? OR (username IS NOT NULL AND LOWER(LTRIM(RTRIM(username))) = ?))
+                  AND (" . implode(' OR ', $routeHolders) . ")
+                ORDER BY CAST({$col} AS INT) DESC
+            ";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+            $val = $stmt->fetchColumn();
+            if ($val !== false && $val !== null) {
+                return (int) $val === 1;
             }
+        } catch (Throwable $inner) {
+            error_log('sap_reports_user_can query: ' . $inner->getMessage());
         }
     } catch (Throwable $e) {
         error_log('sap_reports_user_can error: ' . $e->getMessage());

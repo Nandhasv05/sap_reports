@@ -24,9 +24,17 @@ $bodyClass = $appShell ? 'rpt-body' : '';
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="<?= e(asset('css/app.css')) ?>">
+    <link rel="stylesheet" href="<?= e(asset('css/loader.css')) ?>">
     <?php if (!empty($extraHead)) echo $extraHead; ?>
 </head>
 <body class="<?= e($bodyClass) ?>">
+    <?php
+        // Single app-wide loading spinner (pages may set $loaderIcon / $loaderSteps / $loaderVisible).
+        if (empty($loaderRendered)) {
+            $loaderRendered = true;
+            require base_path('app/views/partials/loader.php');
+        }
+    ?>
     <?php if ($appShell): ?>
         <?= $content ?>
     <?php else: ?>
@@ -34,6 +42,7 @@ $bodyClass = $appShell ? 'rpt-body' : '';
             <?= $content ?>
         </div>
     <?php endif; ?>
+    <script src="<?= e(asset('js/loader.js')) ?>"></script>
     <?php if (!empty($extraScripts)) echo $extraScripts; ?>
 </body>
 </html>

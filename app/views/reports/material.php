@@ -102,7 +102,6 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
     <?php
         $loaderIcon = $isFabric ? 'texture' : 'sell';
         $loaderSteps = ['Connecting to SAP…', 'Fetching ' . strtolower($kindLabel) . ' utilization…', 'Matching BOM, PO & GRN…', 'Preparing report…'];
-        require base_path('app/views/partials/loader.php');
     ?>
 
     <?php if (!$isEmbedded): ?>
@@ -927,7 +926,6 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
     'dataUrl' => url('purchase-order/data'),
     'pageUrl' => url('purchase-order'),
 ], JSON_UNESCAPED_SLASHES) ?></script>
-<script src="<?= e(asset('js/loader.js')) ?>"></script>
 <script src="<?= e(asset('js/po-report.js')) ?>"></script>
 <?php $prefTableKey = $isFabric ? 'fabric_utilization_table' : 'trims_utilization_table'; require base_path('app/views/partials/table_preferences.php'); ?>
 <script src="<?= e(asset('js/table-columns.js')) ?>"></script>

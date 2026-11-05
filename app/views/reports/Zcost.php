@@ -19,6 +19,8 @@ $userRole = !empty($user['role']) ? $user['role'] : 'ADMIN';
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+  <link rel="stylesheet" href="<?= e(asset('css/loader.css')) ?>">
   <link rel="stylesheet" href="<?= e(asset('css/zcost/sap_theme.css')) ?>">
   <link rel="stylesheet" href="<?= e(asset('css/zcost/sap_initial.css')) ?>">
   <link rel="stylesheet" href="<?= e(asset('css/zcost/evolv_landing.css')) ?>">
@@ -40,6 +42,11 @@ $userRole = !empty($user['role']) ? $user['role'] : 'ADMIN';
 </head>
 
 <body class="sap-body">
+  <?php
+    $loaderIcon = 'request_quote';
+    $loaderSteps = ['Connecting to SAP…', 'Loading costing sheet…', 'Preparing workspace…'];
+    require base_path('app/views/partials/loader.php');
+  ?>
   <div class="sap-window" id="sap-window" style="display:none;">
 
     <!-- Top Studio Navigation Bar -->
@@ -1134,19 +1141,12 @@ $userRole = !empty($user['role']) ? $user['role'] : 'ADMIN';
   </div>
   </div>
 
-<!-- Loading Overlay -->
-  <div class="load-overlay" id="load-overlay" hidden>
-  <div class="load-card" role="status" aria-live="polite">
-    <div class="load-spinner" aria-hidden="true"><span></span><span></span><span></span></div>
-    <p id="load-overlay-text">Loading costing sheet</p>
-  </div>
-  </div>
-
 <!-- Interactive Engine -->
 <script>
   window.ZCOST_API_URL = "<?= e(url('zcost/api')) ?>";
 </script>
-<script src="<?= e(asset('js/zcost/sap_costing.js')) ?>?v=61"></script>
+<script src="<?= e(asset('js/loader.js')) ?>"></script>
+<script src="<?= e(asset('js/zcost/sap_costing.js')) ?>?v=62"></script>
 
 </body>
 </html>

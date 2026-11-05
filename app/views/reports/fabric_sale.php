@@ -32,7 +32,6 @@ $extraHead = '<link rel="stylesheet" href="' . e(asset('css/fabricSale.css')) . 
     <?php
         $loaderIcon = 'checkroom';
         $loaderSteps = ['Connecting to SAP…', 'Loading sale orders…', 'Preparing dashboard…'];
-        require base_path('app/views/partials/loader.php');
     ?>
 
     <header class="rpt-bar">

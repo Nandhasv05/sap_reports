@@ -80,7 +80,9 @@ class TablePreferencesController extends Controller
         if (!str_contains(strtolower((string) ($_SERVER['CONTENT_TYPE'] ?? '')), 'application/json')) {
             throw new TablePreferenceException(415, 'unsupported_media_type', 'Content-Type must be application/json.');
         }
-        $raw = (string) file_get_contents('php://input', false, null, 0, self::MAX_BODY_BYTES + 1);
+        $raw = function_exists('sap_reports_request_raw_body')
+            ? sap_reports_request_raw_body()
+            : (string) file_get_contents('php://input', false, null, 0, self::MAX_BODY_BYTES + 1);
         if (strlen($raw) > self::MAX_BODY_BYTES) {
             throw new TablePreferenceException(413, 'payload_too_large', 'The request body is too large.');
         }

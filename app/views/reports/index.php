@@ -1007,8 +1007,8 @@ html, body {
 
 .hub-cards-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 14px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
     width: 100%;
     align-items: stretch;
 }
@@ -1018,13 +1018,13 @@ html, body {
    ========================================================================== */
 .hub-bento-card {
     position: relative;
-    border-radius: 14px;
+    border-radius: 12px;
     background: #ffffff;
     border: 1px solid rgba(226, 232, 240, 0.95);
-    padding: 14px 14px 12px;
+    padding: 12px 12px 10px;
     display: flex;
     flex-direction: column;
-    min-height: 198px;
+    min-height: 168px;
     text-decoration: none;
     color: inherit;
     cursor: pointer;
@@ -1078,21 +1078,21 @@ html, body {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 10px;
+    gap: 8px;
     position: relative;
     z-index: 2;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
     flex-shrink: 0;
 }
 
 .hub-bento-icon-medallion {
-    width: 34px;
-    height: 34px;
-    border-radius: 10px;
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
     display: inline-flex !important;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
+    font-size: 13px;
     background: var(--card-gradient);
     color: #ffffff;
     box-shadow: 0 6px 14px -4px var(--card-glow);
@@ -1156,16 +1156,16 @@ html, body {
     flex-direction: column;
     position: relative;
     z-index: 2;
-    margin: 0 0 10px;
+    margin: 0 0 8px;
     min-width: 0;
 }
 
 .hub-bento-title {
     font-family: Outfit, sans-serif;
-    font-size: 15px;
+    font-size: 13.5px;
     font-weight: 700;
     color: #0f172a;
-    margin: 0 0 5px;
+    margin: 0 0 4px;
     letter-spacing: -0.02em;
     line-height: 1.25;
     transition: color 0.2s ease;
@@ -1176,10 +1176,10 @@ html, body {
 }
 
 .hub-bento-desc {
-    font-size: 11px;
+    font-size: 10.5px;
     color: #64748b;
-    line-height: 1.45;
-    margin: 0 0 10px;
+    line-height: 1.4;
+    margin: 0 0 8px;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -1229,8 +1229,8 @@ html, body {
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 8px 10px;
-    border-radius: 10px;
+    padding: 6px 8px;
+    border-radius: 9px;
     background: #f8fafc;
     border: 1px solid #f1f5f9;
     margin-top: auto;
@@ -1246,15 +1246,18 @@ html, body {
 }
 
 .hub-bento-action-label {
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 700;
     color: var(--card-color);
     letter-spacing: -0.01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .hub-bento-arrow {
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
     border-radius: 50%;
     background: #ffffff;
     border: 1px solid #e2e8f0;
@@ -1809,8 +1812,15 @@ html, body {
    ========================================================================== */
 @media (max-width: 1100px) {
     .hub-cards-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+    }
+}
+
+@media (max-width: 820px) {
+    .hub-cards-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 12px;
+        gap: 10px;
     }
     .hub-main-container {
         padding: 14px 14px 20px;
@@ -1857,10 +1867,10 @@ html, body {
     }
 }
 
-@media (max-width: 680px) {
+@media (max-width: 560px) {
     .hub-cards-grid {
         grid-template-columns: 1fr;
-        gap: 12px;
+        gap: 10px;
     }
     .hub-modal-grid {
         grid-template-columns: 1fr;

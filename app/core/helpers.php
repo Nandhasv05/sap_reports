@@ -91,7 +91,19 @@ function sap_reports_wants_json(): bool
 }
 
 /*
- * Persist API audit row (url, status, username, user_id, datetime, ip, response_payload only)
+ * Cache php://input once so audit logging can still read the request body.
+ */
+function sap_reports_request_raw_body(): string
+{
+    if (!array_key_exists('sap_reports_raw_request_body', $GLOBALS) || !is_string($GLOBALS['sap_reports_raw_request_body'])) {
+        $raw = file_get_contents('php://input');
+        $GLOBALS['sap_reports_raw_request_body'] = is_string($raw) ? $raw : '';
+    }
+    return (string) $GLOBALS['sap_reports_raw_request_body'];
+}
+
+/*
+ * Persist full API activity row into dbo.sap_report_auditLog
  */
 function sap_reports_audit_api_response(array|string|null $payload, int $status = 200, ?string $url = null): void
 {
@@ -120,6 +132,22 @@ function sap_reports_json_error(int $status, string $message, string $code): voi
     http_response_code($status);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode($payload, JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
+/*
+ * JSON success/error helper for controllers that do not extend Controller::jsonResponse.
+ */
+function sap_reports_json_out(array $payload, int $status = 200): void
+{
+    while (ob_get_level() > 0) {
+        @ob_end_clean();
+    }
+    sap_reports_audit_api_response($payload, $status);
+    http_response_code($status);
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate');
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR);
     exit;
 }
 

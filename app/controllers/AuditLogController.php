@@ -22,9 +22,9 @@ class AuditLogController extends Controller
             return;
         }
 
-        $records = ApiAuditLogService::latest(200);
+        $records = ApiAuditLogService::latest(300);
         $this->view('reports/audit_log', [
-            'pageTitle' => 'Audit Log',
+            'pageTitle' => 'API Activity Log',
             'appShell'  => true,
             'records'   => $records,
             'total'     => count($records),

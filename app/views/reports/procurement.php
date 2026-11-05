@@ -28,7 +28,6 @@ $cards = [
     <?php
         $loaderIcon = 'shopping_cart';
         $loaderSteps = ['Connecting to SAP…', 'Fetching component requirements…', 'Fetching PR & PO lines…', 'Calculating balances & stock…', 'Preparing report…'];
-        require base_path('app/views/partials/loader.php');
     ?>
 
     <header class="rpt-bar">
@@ -277,7 +276,6 @@ $cards = [
     'prDetailsUrl'  => url('procurement/pr-details'),
     'columns'       => $columns,
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
-<script src="<?= e(asset('js/loader.js')) ?>"></script>
 <?php if (!$isLookup): ?>
 <?php $prefTableKey = 'procurement_table_v2'; require base_path('app/views/partials/table_preferences.php'); ?>
 <script src="<?= e(asset('js/table-columns.js')) ?>"></script>

@@ -89,7 +89,6 @@ $cards = [
         $loaderIcon = 'precision_manufacturing';
         $loaderSteps = ['Connecting to SAP…', 'Fetching production records…', 'Preparing report…'];
         $loaderVisible = !$isLookup;
-        require base_path('app/views/partials/loader.php');
     ?>
 
     <header class="rpt-bar">
@@ -417,7 +416,6 @@ $cards = [
     'pageUrl'       => url('production'),
     'columns'       => $columns,
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG) ?></script>
-<script src="<?= e(asset('js/loader.js')) ?>"></script>
 <?php if (!$isLookup): ?>
 <?php $prefTableKey = $isRange ? 'production_range_table' : 'production_table'; require base_path('app/views/partials/table_preferences.php'); ?>
 <script src="<?= e(asset('js/table-columns.js')) ?>"></script>

@@ -88,7 +88,6 @@ $listCards = $isCostingView
                 : ($isCostingWorkbench
                     ? ['Connecting to SAP…', 'Fetching purchase order…', 'Loading ZCOST sheet…', 'Validating costs…']
                     : ['Connecting to SAP…', 'Fetching purchase order ' . ($purchaseOrder ?: '…'), 'Reading items & sales orders…', 'Preparing report…']));
-        require base_path('app/views/partials/loader.php');
     ?>
 
     <header class="rpt-bar<?= $isCostingWorkbench ? ' is-pcw-top' : '' ?>">
@@ -103,10 +102,6 @@ $listCards = $isCostingView
                 <span class="material-icons-round">home</span>
             </a>
             <?php if ($isCostingWorkbench): ?>
-                <a href="<?= e($pageUrl . '?view=costing') ?>" class="po-back-nav" title="Back to Bulk Validation">
-                    <span class="material-icons-round">arrow_back</span>
-                    <span>Bulk List</span>
-                </a>
                 <?php
                     $wbMatBar = in_array((string) ($matCat ?? ''), ['fabric', 'trims'], true)
                         ? (string) $matCat
@@ -701,7 +696,6 @@ $pcbCurrentUser = trim((string) (
     'canAssign'          => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'assign') : true,
     'canValidate'        => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'validate') : true,
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
-<script src="<?= e(asset('js/loader.js')) ?>"></script>
 <?php if ($isCostingWorkbench): ?>
 <?php
     $prefTableKey = 'purchase_order_costing_workbench_table';

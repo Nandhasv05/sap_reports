@@ -257,6 +257,14 @@ let loaderStarted = 0;
  */
 function showLoader(msg) {
   loaderStarted = Date.now();
+  if (window.rptLoader && typeof window.rptLoader.show === 'function') {
+    window.rptLoader.show({
+      solid: true,
+      title: 'Loading from SAP',
+      steps: [msg || 'Loading costing sheet…', 'Fetching SAP data…', 'Preparing sheet…'],
+    });
+    return;
+  }
   const el = document.getElementById('load-overlay');
   const text = document.getElementById('load-overlay-text');
   if (text) text.textContent = msg || 'Loading costing sheet';
@@ -269,6 +277,10 @@ function showLoader(msg) {
 async function hideLoader() {
   const wait = 500 - (Date.now() - loaderStarted);
   if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+  if (window.rptLoader && typeof window.rptLoader.hide === 'function') {
+    window.rptLoader.hide(true);
+    return;
+  }
   const el = document.getElementById('load-overlay');
   if (el) el.hidden = true;
 }

@@ -2,38 +2,13 @@
 /*
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 03/09/2026
- * DESCRIPTION : Header right user profile dropdown (Avatar with dropdown: Back to Card, Back to Portal, Logout)
+ * DESCRIPTION : Header right user profile dropdown (avatar + logout)
 */
 $user = function_exists('portal_user') ? portal_user() : null;
 $userName = !empty($user['username']) ? $user['username'] : 'admin';
 $userRole = !empty($user['role']) ? $user['role'] : (!empty($user['department']) ? $user['department'] : 'Administrator');
 $userEmail = $user['email'] ?? '';
-$cardsUrl = function_exists('url') ? url('/') : '/sap_reports/';
-$homeUrl = function_exists('sap_reports_evol_url') ? sap_reports_evol_url('portal_dashboard.php') : '/EVOL/portal_dashboard.php';
 $logoutUrl = function_exists('url') ? url('logout.php') : '/sap_reports/logout.php';
-$accessUrl = function_exists('sap_reports_evol_url') ? sap_reports_evol_url('user_management.php') : '/EVOL/user_management.php';
-$auditPageUrl = function_exists('url') ? url('audit-log') : '/sap_reports/audit-log';
-$roleLower = strtolower(trim((string) $userRole));
-$userLower = strtolower(trim((string) $userName));
-$isAdminMenu = !empty($user['is_admin'])
-    || in_array($roleLower, ['admin', 'it_admin', 'super_admin', 'administrator', 'director', 'management'], true);
-if ($userLower === 'kayal') {
-    $isAdminMenu = false;
-}
-
-$accessModules = [
-    'utilization'    => 'Utilization Report',
-    'fabric'         => 'Fabric Utilization',
-    'trims'          => 'Trims Utilization',
-    'production'     => 'Production Report',
-    'procurement'    => 'Procurement Report',
-    'purchase-order' => 'Purchase Order Report',
-    'po-costing'     => 'PO Costing Validation',
-    'sales'          => 'Sales Dashboard',
-    'fabric-sale'    => 'Fabric Sale Order',
-    'zcost'          => 'Zcost Costing Sheet',
-    'audit-log'      => 'Audit Log',
-];
 ?>
 <div class="rpt-bar-right hub-header-right">
     <div class="hub-profile-dropdown" id="hubProfileDropdown">
@@ -85,44 +60,6 @@ $accessModules = [
 
             <div class="hub-profile-divider"></div>
 
-            <div class="hub-profile-items">
-                <a href="<?= e($cardsUrl) ?>" class="hub-profile-item" role="menuitem">
-                    <span class="material-icons-round hub-profile-item-icon">dashboard</span>
-                    <span class="hub-profile-item-text">
-                        <span class="hub-profile-item-title">Back to Card</span>
-                        <span class="hub-profile-item-sub">Reports catalog hub</span>
-                    </span>
-                </a>
-
-                <a href="<?= e($homeUrl) ?>" class="hub-profile-item" role="menuitem">
-                    <span class="material-icons-round hub-profile-item-icon">home</span>
-                    <span class="hub-profile-item-text">
-                        <span class="hub-profile-item-title">Back to Portal</span>
-                        <span class="hub-profile-item-sub">EVOLV main portal</span>
-                    </span>
-                </a>
-
-                <?php if ($isAdminMenu): ?>
-                <button type="button" class="hub-profile-item" role="menuitem" id="hubOpenAccessBtn" data-hub-modal="hubAccessModal">
-                    <span class="material-icons-round hub-profile-item-icon">admin_panel_settings</span>
-                    <span class="hub-profile-item-text">
-                        <span class="hub-profile-item-title">User Access Control</span>
-                        <span class="hub-profile-item-sub">Manage module permissions</span>
-                    </span>
-                </button>
-
-                <a href="<?= e($auditPageUrl) ?>" class="hub-profile-item" role="menuitem" id="hubOpenAuditBtn">
-                    <span class="material-icons-round hub-profile-item-icon">history</span>
-                    <span class="hub-profile-item-text">
-                        <span class="hub-profile-item-title">Audit Log</span>
-                        <span class="hub-profile-item-sub">Full-screen API activity</span>
-                    </span>
-                </a>
-                <?php endif; ?>
-            </div>
-
-            <div class="hub-profile-divider"></div>
-
             <div class="hub-profile-footer">
                 <a href="<?= e($logoutUrl) ?>" class="hub-profile-item hub-profile-item-danger" role="menuitem">
                     <span class="material-icons-round hub-profile-item-icon">logout</span>
@@ -136,62 +73,8 @@ $accessModules = [
     </div>
 </div>
 
-<div class="hub-modal-backdrop" id="hubAccessModal" hidden role="dialog" aria-modal="true" aria-labelledby="hubAccessTitle">
-    <div class="hub-modal-card hub-admin-modal">
-        <div class="hub-modal-header">
-            <div>
-                <span class="hub-modal-kicker">Security & Access</span>
-                <h3 id="hubAccessTitle">User Access Control</h3>
-            </div>
-            <button type="button" class="hub-modal-close" data-hub-close="hubAccessModal" aria-label="Close modal">
-                <span class="material-icons-round">close</span>
-            </button>
-        </div>
-        <div class="hub-modal-body">
-            <p class="hub-admin-lead">Review SAP Reports module access for <strong><?= e(ucfirst($userName)) ?></strong> (<?= e(strtoupper($userRole)) ?>).</p>
-            <div class="hub-access-grid">
-                <?php foreach ($accessModules as $modKey => $modLabel):
-                    $allowed = function_exists('sap_reports_user_can_access') ? sap_reports_user_can_access($modKey, $user) : true;
-                ?>
-                <div class="hub-access-chip <?= $allowed ? 'is-on' : 'is-off' ?>">
-                    <span class="material-icons-round"><?= $allowed ? 'check_circle' : 'cancel' ?></span>
-                    <span><?= e($modLabel) ?></span>
-                    <em><?= $allowed ? 'Allowed' : 'Denied' ?></em>
-                </div>
-                <?php endforeach; ?>
-            </div>
-            <?php if ($isAdminMenu): ?>
-            <div class="hub-admin-actions">
-                <a class="hub-admin-btn hub-admin-btn-primary" href="<?= e($accessUrl) ?>" target="_blank" rel="noopener">
-                    <span class="material-icons-round">open_in_new</span>
-                    Manage Permissions in Portal Console
-                </a>
-            </div>
-            <?php endif; ?>
-        </div>
-    </div>
-</div>
-
 <script>
 (function() {
-    function closeHubModalEl(el) {
-        if (!el) return;
-        el.classList.remove('is-open');
-        el.hidden = true;
-        el.style.display = 'none';
-        if (!document.querySelector('.hub-modal-backdrop.is-open')) {
-            document.body.classList.remove('hub-modal-open');
-        }
-    }
-
-    function openHubModalEl(el) {
-        if (!el) return;
-        el.hidden = false;
-        el.classList.add('is-open');
-        el.style.display = 'flex';
-        document.body.classList.add('hub-modal-open');
-    }
-
     function initProfileDropdown() {
         var trigger = document.getElementById('hubProfileTrigger');
         var dropdown = document.getElementById('hubProfileDropdown');
@@ -216,45 +99,14 @@ $accessModules = [
             if (e.key === 'Escape') {
                 dropdown.classList.remove('is-open');
                 trigger.setAttribute('aria-expanded', 'false');
-                document.querySelectorAll('.hub-modal-backdrop.is-open').forEach(closeHubModalEl);
             }
         });
     }
 
-    function initHubAdminModals() {
-        document.querySelectorAll('[data-hub-modal]').forEach(function(btn) {
-            btn.addEventListener('click', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                var dropdown = document.getElementById('hubProfileDropdown');
-                var trigger = document.getElementById('hubProfileTrigger');
-                if (dropdown) dropdown.classList.remove('is-open');
-                if (trigger) trigger.setAttribute('aria-expanded', 'false');
-                openHubModalEl(document.getElementById(btn.getAttribute('data-hub-modal')));
-            });
-        });
-
-        document.querySelectorAll('[data-hub-close]').forEach(function(btn) {
-            btn.addEventListener('click', function() {
-                closeHubModalEl(document.getElementById(btn.getAttribute('data-hub-close')));
-            });
-        });
-
-        document.querySelectorAll('.hub-modal-backdrop').forEach(function(modal) {
-            modal.addEventListener('click', function(e) {
-                if (e.target === modal) closeHubModalEl(modal);
-            });
-        });
-    }
-
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function() {
-            initProfileDropdown();
-            initHubAdminModals();
-        });
+        document.addEventListener('DOMContentLoaded', initProfileDropdown);
     } else {
         initProfileDropdown();
-        initHubAdminModals();
     }
 })();
 </script>

@@ -44,11 +44,18 @@ if (!function_exists('statusLabel')) {
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+  <link rel="stylesheet" href="<?= e(asset('css/loader.css')) ?>">
   <link rel="stylesheet" href="<?= e(asset('css/zcost/sap_theme.css')) ?>">
   <link rel="stylesheet" href="<?= e(asset('css/zcost/evolv_landing.css')) ?>">
   <link rel="stylesheet" href="<?= e(asset('css/zcost/audit_page.css')) ?>">
 </head>
 <body class="sap-body audit-page-body">
+  <?php
+    $loaderIcon = 'history';
+    $loaderSteps = ['Loading audit entries…', 'Preparing table…'];
+    require base_path('app/views/partials/loader.php');
+  ?>
   <div class="sap-window audit-page-window">
     <header class="studio-navbar">
       <div class="studio-nav-left">
@@ -214,5 +221,6 @@ if (!function_exists('statusLabel')) {
       </section>
     </main>
   </div>
+<script src="<?= e(asset('js/loader.js')) ?>"></script>
 </body>
 </html>

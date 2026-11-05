@@ -15,7 +15,27 @@ class ZcostController extends Controller
 {
     public function page(): void
     {
-        if (function_exists('sap_reports_user_can_access') && !sap_reports_user_can_access('zcost')) {
+        $vbeln = trim((string) ($_GET['vbeln'] ?? ''));
+        $viewMode = ((string) ($_GET['view'] ?? '') === '1')
+            || (strtolower((string) ($_GET['mode'] ?? '')) === 'view');
+
+        // Quotation links from PO Costing must open the sheet in view mode — not the reports hub.
+        if (
+            function_exists('sap_reports_can_open_zcost_sheet')
+            && !sap_reports_can_open_zcost_sheet(null, $vbeln, $viewMode)
+        ) {
+            // Has PO Costing but missing view=1 → force read-only sheet URL
+            if (
+                $vbeln !== ''
+                && function_exists('sap_reports_user_can_access')
+                && sap_reports_user_can_access('po-costing')
+                && !sap_reports_user_can_access('zcost')
+            ) {
+                $qs = $_GET;
+                $qs['view'] = '1';
+                $this->redirect(url('zcost') . '?' . http_build_query($qs));
+                return;
+            }
             $_SESSION['flash_error'] = 'Access restricted: You do not have permission to view the Zcost Sales Costing Sheet.';
             $this->redirect(url('/'));
             return;
@@ -76,7 +96,9 @@ class ZcostController extends Controller
         $audit = new \App\AuditLog();
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            $raw = file_get_contents('php://input');
+            $raw = function_exists('sap_reports_request_raw_body')
+                ? sap_reports_request_raw_body()
+                : (string) file_get_contents('php://input');
             $payload = json_decode($raw, true);
 
             if (!$payload || !is_array($payload)) {
@@ -197,16 +219,41 @@ class ZcostController extends Controller
 
         if ($action === 'session') {
             $user = \App\PortalAuth::currentUser();
+            $canView = !empty($user['can_view'])
+                || (function_exists('sap_reports_user_can_access') && sap_reports_user_can_access('po-costing'));
+            $hasFullZcost = function_exists('sap_reports_user_can_access')
+                ? sap_reports_user_can_access('zcost')
+                : !empty($user['can_view']);
+            // PO Costing drill-through without P12: view sheet only (no add/edit/approve/copy)
+            $canAdd = $hasFullZcost && !empty($user['can_add']);
+            $canEdit = $hasFullZcost && !empty($user['can_edit']);
+            $canDelete = $hasFullZcost && !empty($user['can_delete']);
+            $canApprove = $hasFullZcost && !empty($user['can_approve']);
+            $canCopy = $hasFullZcost && !empty($user['can_copy']);
+            $user['can_view'] = $canView;
+            $user['can_add'] = $canAdd;
+            $user['can_edit'] = $canEdit;
+            $user['can_delete'] = $canDelete;
+            $user['can_approve'] = $canApprove;
+            $user['can_copy'] = $canCopy;
+            $user['permissions'] = [
+                'view' => $canView,
+                'add' => $canAdd,
+                'edit' => $canEdit,
+                'delete' => $canDelete,
+                'approve' => $canApprove,
+                'copy' => $canCopy,
+            ];
             echo json_encode([
                 'success' => true,
                 'user' => $user,
                 'permissions' => $user['permissions'],
-                'can_view' => $user['can_view'],
-                'can_add' => $user['can_add'],
-                'can_edit' => $user['can_edit'],
-                'can_delete' => $user['can_delete'],
-                'can_approve' => $user['can_approve'],
-                'can_copy' => $user['can_copy'] ?? false,
+                'can_view' => $canView,
+                'can_add' => $canAdd,
+                'can_edit' => $canEdit,
+                'can_delete' => $canDelete,
+                'can_approve' => $canApprove,
+                'can_copy' => $canCopy,
             ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             exit;
         }
@@ -312,7 +359,9 @@ class ZcostController extends Controller
             }
             $result = $client->createQuotationMaster((string) $vbeln, (string) $posnr);
         } else {
-            if (!\App\PortalAuth::canView()) {
+            $canViewSheet = \App\PortalAuth::canView()
+                || (function_exists('sap_reports_user_can_access') && sap_reports_user_can_access('po-costing'));
+            if (!$canViewSheet) {
                 http_response_code(403);
                 echo json_encode([
                     'success' => false,

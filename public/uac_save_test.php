@@ -57,13 +57,13 @@ try {
     $n = $method->invoke($ctrl, $pdo, UserAccessControlController::ACCESS_TABLE, $uid, 'admin', $perms, $map);
     echo "Saved {$n} pages OK\n";
 
-    $rows = $pdo->query("SELECT page_no, page_name, page_route, can_view, can_approve, can_copy FROM [dbo].[sap_report_userAccessControl] WHERE user_id = {$uid} ORDER BY page_no")->fetchAll(PDO::FETCH_ASSOC);
+    $rows = $pdo->query("SELECT page_no, page_name, page_route, can_view, can_approve, can_copy FROM [dbo].[sap_report_userascesscontrol] WHERE user_id = {$uid} ORDER BY page_no")->fetchAll(PDO::FETCH_ASSOC);
     foreach ($rows as $r) {
         echo "P{$r['page_no']} {$r['page_name']} /{$r['page_route']} v={$r['can_view']} a={$r['can_approve']} c={$r['can_copy']}\n";
     }
-    $pdo->exec("DELETE FROM [dbo].[sap_report_userAccessControl] WHERE user_id = {$uid}");
+    $pdo->exec("DELETE FROM [dbo].[sap_report_userascesscontrol] WHERE user_id = {$uid}");
     echo "CLEANED\n";
-    echo "CODE_VERSION=persist-v5-prepared\n";
+    echo "CODE_VERSION=persist-v6-userascesscontrol\n";
 } catch (Throwable $e) {
     echo "FAIL: " . $e->getMessage() . "\n";
     echo $e->getTraceAsString() . "\n";

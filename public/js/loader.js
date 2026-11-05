@@ -1,53 +1,39 @@
 /*
  * AUTHOR : NANDHAKUMAR S V
- * DATE : 28/09/2026
- * DESCRIPTION : Cycles the SAP loading overlay status text and elapsed time while #rptSpinner is visible
+ * DATE : 05/11/2026
+ * DESCRIPTION : Minimal app-wide spinner + percent (#rptSpinner)
  */
 (function () {
+    if (window.rptLoader && window.rptLoader.__bound) return;
+
     const overlay = document.getElementById('rptSpinner');
-    const stepEl = document.getElementById('rptLoaderStep');
-    const timeEl = document.getElementById('rptLoaderTime');
-    const barEl = document.getElementById('rptLoaderBar');
-    const countEl = document.getElementById('rptLoaderCount');
-    if (!overlay || !stepEl) return;
+    const pctEl = document.getElementById('rptLoaderPct');
+    if (!overlay || !pctEl) return;
 
-    let steps = [];
-    try { steps = JSON.parse(stepEl.getAttribute('data-steps') || '[]'); } catch (e) { steps = []; }
-    if (!steps.length) steps = [stepEl.textContent];
-
-    const STEP_MS = 1700;
     let timer = null;
-    let startedAt = 0;
-    let progressText = '';
+    let showCount = 0;
+    let pct = 0;
+    let determinate = false;
 
-    function setStep(text, force) {
-        if (!force && stepEl.textContent === text) return;
-        stepEl.classList.remove('is-in');
-        void stepEl.offsetWidth;
-        stepEl.textContent = text;
-        stepEl.classList.add('is-in');
+    function setPct(value) {
+        pct = Math.max(0, Math.min(100, Math.round(value)));
+        pctEl.textContent = pct + '%';
     }
 
     function tick() {
-        const elapsed = Date.now() - startedAt;
-        // Walk through the steps once, then stay on the last one ("Preparing report…").
-        setStep(progressText || steps[Math.min(steps.length - 1, Math.floor(elapsed / STEP_MS))]);
-        if (timeEl) {
-            const secs = Math.floor(elapsed / 1000);
-            timeEl.textContent = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : secs + 's';
+        if (determinate) return;
+        // Ease toward ~90% while waiting; finish to 100% on hide.
+        if (pct < 90) {
+            const step = pct < 40 ? 3.2 : (pct < 70 ? 1.6 : 0.55);
+            setPct(pct + step);
         }
     }
 
     function start() {
         if (timer) return;
-        startedAt = Date.now();
-        progressText = '';
-        overlay.classList.remove('is-progress');
-        if (barEl) barEl.style.width = '';
-        if (countEl) countEl.textContent = '';
-        setStep(steps[0], true);
-        if (timeEl) timeEl.textContent = '0s';
-        timer = setInterval(tick, 500);
+        determinate = false;
+        setPct(0);
+        timer = setInterval(tick, 180);
     }
 
     function stop() {
@@ -55,34 +41,76 @@
         timer = null;
     }
 
-    // Determinate progress for multi-request loads, e.g. rptLoader.progress(17, 102, 'Fetching production…', 'sales orders')
+    function show(options) {
+        showCount += 1;
+        if (options && options.solid) overlay.classList.add('is-solid');
+        overlay.hidden = false;
+        document.body.classList.add('rpt-loading');
+        if (!(options && typeof options.percent === 'number')) {
+            start();
+        } else {
+            determinate = true;
+            setPct(options.percent);
+        }
+    }
+
+    function hide(force) {
+        showCount = force ? 0 : Math.max(0, showCount - 1);
+        if (showCount > 0) return;
+        setPct(100);
+        stop();
+        window.setTimeout(function () {
+            if (showCount > 0) return;
+            overlay.hidden = true;
+            overlay.classList.remove('is-solid', 'is-progress');
+            document.body.classList.remove('rpt-loading');
+            setPct(0);
+        }, 120);
+    }
+
     window.rptLoader = {
-        progress(done, total, text, unit) {
-            const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 100;
-            progressText = text || progressText;
+        __bound: true,
+        show: show,
+        hide: hide,
+        progress(done, total) {
+            if (overlay.hidden) show();
+            determinate = true;
             overlay.classList.add('is-progress');
-            if (barEl) barEl.style.width = pct + '%';
-            if (countEl) countEl.textContent = `${done.toLocaleString('en-US')} of ${total.toLocaleString('en-US')} ${unit || ''} · ${pct}%`.replace(/\s+·/, ' ·');
-            setStep(progressText);
+            const next = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 100;
+            setPct(next);
         },
     };
 
-    new MutationObserver(() => (overlay.hidden ? stop() : start()))
-        .observe(overlay, { attributes: true, attributeFilter: ['hidden'] });
+    new MutationObserver(function () {
+        if (overlay.hidden) stop();
+        else if (!timer && !determinate) start();
+    }).observe(overlay, { attributes: true, attributeFilter: ['hidden'] });
+
     if (!overlay.hidden) start();
 
-    document.querySelectorAll('#rptFilterForm, [data-date-filter]').forEach((form) => {
-        form.addEventListener('submit', () => {
-            overlay.hidden = false;
-            document.body.classList.add('rpt-loading');
+    document.querySelectorAll('#rptFilterForm, [data-date-filter]').forEach(function (form) {
+        form.addEventListener('submit', function () {
+            show({ solid: true });
         });
     });
 
-    // Coming back with the browser Back button can restore the page with the overlay still open.
-    window.addEventListener('pageshow', (e) => {
-        if (e.persisted) {
-            overlay.hidden = true;
-            document.body.classList.remove('rpt-loading');
-        }
+    document.addEventListener('click', function (e) {
+        const a = e.target.closest && e.target.closest('a[href]');
+        if (!a || e.defaultPrevented || e.button !== 0) return;
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        if (a.target && a.target !== '_self') return;
+        const href = a.getAttribute('href') || '';
+        if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
+        try {
+            const url = new URL(a.href, window.location.href);
+            if (url.origin !== window.location.origin) return;
+            if (!/\/sap_reports(\/|$)/i.test(url.pathname)) return;
+            if (url.href.split('#')[0] === window.location.href.split('#')[0]) return;
+            show({ solid: true });
+        } catch (err) { /* ignore */ }
+    }, true);
+
+    window.addEventListener('pageshow', function (e) {
+        if (e.persisted) hide(true);
     });
 })();
