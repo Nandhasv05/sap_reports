@@ -15,6 +15,7 @@ $home = sap_reports_evol_url('portal_dashboard.php');
 $logoUrl = sap_reports_logo_url();
 $catalogHome = url('/');
 $pageUrl = url('purchase-order');
+$costingHomeUrl = url('po-costing');
 $isCostingView = !empty($isCostingView);
 $pageHeading = $isCostingView
     ? ($isList ? 'PO Validation' : ('PO Costing Workbench · ' . e($purchaseOrder)))
@@ -33,6 +34,7 @@ $salesOrder = (string) ($salesOrder ?? '');
 $poType = (string) ($poType ?? '');
 $poTypes = is_array($poTypes ?? null) ? $poTypes : array_values(array_filter(array_map('trim', explode(',', $poType))));
 $matCat = (string) ($matCat ?? 'all');
+$approvedStatus = (string) ($approvedStatus ?? '');
 $matCategories = is_array($matCategories ?? null) ? $matCategories : SapPurchaseOrderService::materialCategories();
 $docTypes = is_array($docTypes ?? null) ? $docTypes : SapPurchaseOrderService::documentTypes();
 $columns = is_array($columns ?? null) ? $columns : [];
@@ -107,6 +109,10 @@ $listCards = $isCostingView
                         ? (string) $matCat
                         : 'trims';
                 ?>
+                <a href="<?= e($costingHomeUrl) ?>" class="po-back-nav" id="pcwBackBtn" title="Back to PO Costing">
+                    <span class="material-icons-round">arrow_back</span>
+                    <span>Back</span>
+                </a>
                 <form class="pcw-control-bar" id="pcwControlBar" method="get" action="<?= e($pageUrl) ?>" autocomplete="off">
                     <input type="hidden" name="view" value="costing">
                     <div class="pcw-cb-type" role="radiogroup" aria-label="Material Type">
@@ -129,10 +135,14 @@ $listCards = $isCostingView
                         <i class="fas fa-search"></i> SEARCH
                     </button>
                     <button type="button" class="pcw-cb-btn" id="pcwResetBtn" title="Reset">RESET</button>
-                    <button type="button" class="pcw-cb-btn is-pass" id="pcwPassPoBtn" disabled title="Pass PO">PASS PO</button>
-                    <div class="pcw-cb-status" id="pcwPassStatus">STATUS : <?= $purchaseOrder !== '' ? 'NOT PASSED' : 'PENDING' ?></div>
+                    <button type="button" class="pcw-cb-btn is-pass" id="pcwPassPoBtn" disabled title="Pass PO (Value = X)">PASS PO</button>
+                    <div class="pcw-cb-status" id="pcwPassStatus">STATUS : NotApproved</div>
                 </form>
             <?php elseif ($isCostingBulk): ?>
+                <a href="<?= e($costingHomeUrl) ?>" class="po-back-nav" id="pcbBackBtn" title="Back to PO Costing">
+                    <span class="material-icons-round">arrow_back</span>
+                    <span>Back</span>
+                </a>
                 <div class="rpt-name pcb-bar-title">
                     <strong><?= e($pageHeading) ?></strong>
                 </div>
@@ -151,11 +161,26 @@ $listCards = $isCostingView
                     $bulkRangePreset = 'today';
                 }
                 $bulkMatHeader = (string) ($matCat ?? 'all');
+                $bulkApprovedHeader = (string) ($approvedStatus ?? '');
+                if (!in_array($bulkApprovedHeader, ['Approved', 'NotApproved'], true)) {
+                    $bulkApprovedHeader = 'Approved';
+                }
                 $dateMin = date('Y-m-d', strtotime('-' . SapPurchaseOrderService::MAX_RANGE_DAYS . ' days'));
                 $dateMax = date('Y-m-d');
             ?>
             <form class="rpt-search prod-filters po-filters pcb-header-filters" id="pcbFilterForm" autocomplete="off" novalidate>
                 <input type="hidden" name="view" value="costing">
+                <div class="pcb-mat-seg pcb-approved-seg" role="radiogroup" aria-label="Approved status">
+                    <label class="pcb-mat-opt">
+                        <input type="radio" name="pcb_approved" value="Approved"<?= $bulkApprovedHeader === 'Approved' ? ' checked' : '' ?>>
+                        <span>Approved</span>
+                    </label>
+                    <label class="pcb-mat-opt">
+                        <input type="radio" name="pcb_approved" value="NotApproved"<?= $bulkApprovedHeader === 'NotApproved' ? ' checked' : '' ?>>
+                        <span>Unapproved</span>
+                    </label>
+                </div>
+                <input type="hidden" id="pcbApproved" name="approved_status" value="<?= e($bulkApprovedHeader) ?>">
                 <div class="pcb-mat-seg" role="radiogroup" aria-label="Material type">
                     <label class="pcb-mat-opt">
                         <input type="radio" name="pcb_mat" value="all"<?= !in_array($bulkMatHeader, ['fabric', 'trims'], true) ? ' checked' : '' ?>>
@@ -658,10 +683,17 @@ $listCards = $isCostingView
 </div>
 
 <?php
+$pcbPortalUser = function_exists('portal_user') ? portal_user() : null;
 $pcbCurrentUser = trim((string) (
-    $_SESSION['username']
+    ($pcbPortalUser['username'] ?? null)
+    ?? $_SESSION['username']
     ?? $_SESSION['user_name']
     ?? $_SESSION['name']
+    ?? $_SESSION['email']
+    ?? ''
+));
+$pcbCurrentUserEmail = trim((string) (
+    ($pcbPortalUser['email'] ?? null)
     ?? $_SESSION['email']
     ?? ''
 ));
@@ -677,10 +709,16 @@ $pcbCurrentUser = trim((string) (
     'salesOrder'         => $salesOrder,
     'poType'             => $poType,
     'matCat'             => $matCat,
+    'approvedStatus'     => $approvedStatus ?? '',
     'presetDates'        => $presetDates,
     'dataUrl'            => url('purchase-order/data'),
     'validateUrl'        => url('purchase-order/validate'),
+    'manualMapUrl'       => url('purchase-order/manual-map'),
     'pdfUrl'             => url('purchase-order/pdf'),
+    'passPoUrl'          => url('purchase-order/pass'),
+    'esignSaveUrl'       => url('purchase-order/esign-save'),
+    'esignSignatureUrl'  => url('purchase-order/esign-signature'),
+    'passLogUrl'         => url('purchase-order/pass-log'),
     'zcostUrl'           => url('zcost'),
     'zcostAppUrl'        => url('zcost'),
     'usersUrl'           => url('purchase-order/users'),
@@ -692,9 +730,11 @@ $pcbCurrentUser = trim((string) (
     'isCostingBulk'      => $isCostingBulk,
     'columns'            => $columns,
     'currentUser'        => $pcbCurrentUser,
+    'currentUserEmail'   => $pcbCurrentUserEmail,
     'canPassPo'          => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'approve') : true,
     'canAssign'          => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'assign') : true,
     'canValidate'        => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'validate') : true,
+    'canEsign'           => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'esign') : true,
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
 <?php if ($isCostingWorkbench): ?>
 <?php
@@ -702,6 +742,12 @@ $pcbCurrentUser = trim((string) (
     require base_path('app/views/partials/table_preferences.php');
 ?>
 <script src="<?= e(asset('js/table-columns.js')) ?>"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script>
+window.pdfjsLib && (pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js');
+</script>
 <script src="<?= e(asset('js/po-costing-workbench.js')) ?>"></script>
 <?php elseif ($isCostingBulk): ?>
 <?php

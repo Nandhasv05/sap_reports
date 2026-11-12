@@ -180,4 +180,57 @@ function evolv_boot_app_base(): void
         $GLOBALS['app_base'] = '/sap_reports';
     }
 }
+
+/**
+ * App display timezone — Mumbai / India Standard Time.
+ */
+function sap_reports_app_timezone(): string
+{
+    return 'Asia/Kolkata';
+}
+
+/**
+ * Normalize a DB datetime (stored as UTC via SYSUTCDATETIME) to Mumbai local wall time.
+ * Returns Y-m-d H:i:s or empty string.
+ */
+function sap_reports_to_mumbai($value): string
+{
+    if ($value === null || $value === '') {
+        return '';
+    }
+    try {
+        if ($value instanceof DateTimeInterface) {
+            $utc = DateTimeImmutable::createFromInterface($value)->setTimezone(new DateTimeZone('UTC'));
+        } else {
+            $s = trim((string) $value);
+            if ($s === '') {
+                return '';
+            }
+            if (preg_match('/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(\.\d+)?/', $s, $m)) {
+                $s = $m[1] . ' ' . $m[2];
+            }
+            $utc = new DateTimeImmutable($s, new DateTimeZone('UTC'));
+        }
+        return $utc->setTimezone(new DateTimeZone(sap_reports_app_timezone()))->format('Y-m-d H:i:s');
+    } catch (Throwable $e) {
+        return is_string($value) ? trim($value) : '';
+    }
+}
+
+/**
+ * Format Mumbai local datetime for UI (e.g. 06/11/2026, 12:18:49 pm IST).
+ */
+function sap_reports_format_mumbai($value): string
+{
+    $s = sap_reports_to_mumbai($value);
+    if ($s === '') {
+        return '—';
+    }
+    try {
+        $dt = new DateTimeImmutable($s, new DateTimeZone(sap_reports_app_timezone()));
+        return $dt->format('d/m/Y, h:i:s a') . ' IST';
+    } catch (Throwable $e) {
+        return $s;
+    }
+}
 ?>

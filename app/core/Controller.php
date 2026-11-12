@@ -62,12 +62,29 @@ class Controller
             @ob_end_clean();
         }
         if (function_exists('sap_reports_audit_api_response')) {
-            sap_reports_audit_api_response($payload, $status);
+            try {
+                sap_reports_audit_api_response($payload, $status);
+            } catch (Throwable $ignored) {
+                // Audit must never blank the API response
+            }
         }
         http_response_code($status);
         header('Content-Type: application/json; charset=utf-8');
         header('Cache-Control: no-store, no-cache, must-revalidate');
-        echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR);
+        $flags = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE;
+        if (defined('JSON_PARTIAL_OUTPUT_ON_ERROR')) {
+            $flags |= JSON_PARTIAL_OUTPUT_ON_ERROR;
+        }
+        $json = json_encode($payload, $flags);
+        if ($json === false) {
+            $json = json_encode([
+                'success' => $status >= 200 && $status < 300,
+                'message' => 'Response encoding failed',
+                'error'   => function_exists('json_last_error_msg') ? json_last_error_msg() : 'json_encode failed',
+                'data'    => null,
+            ], JSON_UNESCAPED_SLASHES);
+        }
+        echo is_string($json) && $json !== '' ? $json : '{"success":false,"message":"Empty JSON response","error":"Empty JSON response"}';
         exit;
     }
 }

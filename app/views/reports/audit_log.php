@@ -9,13 +9,17 @@ $catalogHome = url('/');
 $auditApiUrl = url('api/audit-log');
 $logoUrl = sap_reports_logo_url();
 $total = (int) ($total ?? count($records));
+$todayMax = (new DateTimeImmutable('now', new DateTimeZone('Asia/Kolkata')))->format('Y-m-d');
 
+// Rows from ApiAuditLogService are already converted to Mumbai (IST).
 $normalizeCreated = static function ($v): string {
     if ($v === null || $v === '') {
         return '';
     }
     if ($v instanceof DateTimeInterface) {
-        return $v->format('Y-m-d H:i:s');
+        return function_exists('sap_reports_to_mumbai')
+            ? sap_reports_to_mumbai($v)
+            : $v->format('Y-m-d H:i:s');
     }
     $s = trim((string) $v);
     if (preg_match('/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/', $s, $m)) {
@@ -30,9 +34,10 @@ $fmtWhen = static function ($v) use ($normalizeCreated): string {
         return '—';
     }
     try {
-        return (new DateTimeImmutable($s))->format('d/m/Y, h:i:s a');
+        $dt = new DateTimeImmutable($s, new DateTimeZone('Asia/Kolkata'));
+        return $dt->format('d/m/Y, h:i:s a') . ' IST';
     } catch (Throwable $e) {
-        return $s;
+        return $s . ' IST';
     }
 };
 
@@ -104,7 +109,7 @@ $encodeAuditRow = static function (array $row) use ($normalizeCreated, $utf8, $c
     return $json !== false ? $json : '{}';
 };
 ?>
-<div class="audit-page">
+<div class="audit-page" id="auditPageRoot" data-tz="Asia/Kolkata">
     <header class="audit-topbar">
         <div class="rpt-brand">
             <a class="rpt-brand-link" href="<?= e($catalogHome) ?>" title="Back to reports catalog">
@@ -116,6 +121,10 @@ $encodeAuditRow = static function (array $row) use ($normalizeCreated, $utf8, $c
             </div>
         </div>
         <div class="audit-topbar-actions">
+            <label class="audit-header-search" title="Search">
+                <span class="material-icons-round">search</span>
+                <input type="search" id="auditPageSearch" placeholder="Page, URL, status, IP…" autocomplete="off" aria-label="Search">
+            </label>
             <a class="hub-admin-btn hub-admin-btn-ghost" href="<?= e($catalogHome) ?>">
                 <span class="material-icons-round">arrow_back</span>
                 Back
@@ -129,35 +138,14 @@ $encodeAuditRow = static function (array $row) use ($normalizeCreated, $utf8, $c
     </header>
 
     <main class="audit-main">
-        <section class="audit-stats" id="auditStats">
-            <article class="audit-stat">
-                <span class="audit-stat-label">Total</span>
-                <strong class="audit-stat-value" id="auditStatTotal"><?= e((string) $total) ?></strong>
-            </article>
-            <article class="audit-stat is-ok">
-                <span class="audit-stat-label">Success</span>
-                <strong class="audit-stat-value" id="auditStatOk">—</strong>
-            </article>
-            <article class="audit-stat is-bad">
-                <span class="audit-stat-label">Errors</span>
-                <strong class="audit-stat-value" id="auditStatBad">—</strong>
-            </article>
-            <article class="audit-stat is-method">
-                <span class="audit-stat-label">Methods</span>
-                <strong class="audit-stat-value" id="auditStatMethods">—</strong>
-            </article>
-        </section>
-
-        <div class="audit-filter-bar" id="auditFilters">
+        <div class="audit-filter-bar is-compact" id="auditFilters">
             <label class="audit-filter-field">
-                <span>Date</span>
-                <select id="auditDateFilter" aria-label="Date filter">
-                    <option value="all" selected>All dates</option>
-                    <option value="today">Today</option>
-                    <option value="yesterday">Yesterday</option>
-                    <option value="last7">Last 7 days</option>
-                    <option value="last30">Last 30 days</option>
-                </select>
+                <span>From (IST)</span>
+                <input type="date" id="auditFromFilter" max="<?= e($todayMax) ?>" aria-label="From date IST">
+            </label>
+            <label class="audit-filter-field">
+                <span>To (IST)</span>
+                <input type="date" id="auditToFilter" max="<?= e($todayMax) ?>" aria-label="To date IST">
             </label>
             <label class="audit-filter-field">
                 <span>Method</span>
@@ -179,19 +167,8 @@ $encodeAuditRow = static function (array $row) use ($normalizeCreated, $utf8, $c
                     <?php endforeach; ?>
                 </select>
             </label>
-            <label class="audit-filter-field is-search">
-                <span>Search</span>
-                <span class="audit-search">
-                    <span class="material-icons-round">search</span>
-                    <input type="search" id="auditPageSearch" placeholder="Page, URL, status, IP…" autocomplete="off" aria-label="Search">
-                </span>
-            </label>
-            <button type="button" class="hub-admin-btn hub-admin-btn-ghost audit-filter-clear" id="auditClearFilters" title="Clear filters">
-                <span class="material-icons-round">filter_alt_off</span>
-                Clear
-            </button>
             <div class="audit-filter-meta" id="auditFilterMeta">
-                Showing <b id="auditVisibleCount"><?= e((string) count($records)) ?></b> of <b id="auditTotalCount"><?= e((string) count($records)) ?></b> records
+                Showing <b id="auditVisibleCount"><?= e((string) count($records)) ?></b> of <b id="auditTotalCount"><?= e((string) count($records)) ?></b> · <b>Mumbai IST</b>
             </div>
         </div>
 
@@ -200,7 +177,7 @@ $encodeAuditRow = static function (array $row) use ($normalizeCreated, $utf8, $c
                 <table class="audit-page-table is-activity" id="auditPageTable">
                     <thead>
                         <tr>
-                            <th>Date / Time</th>
+                            <th>Date / Time (IST)</th>
                             <th>User ID</th>
                             <th>Username</th>
                             <th>Method</th>
@@ -314,7 +291,8 @@ $encodeAuditRow = static function (array $row) use ($normalizeCreated, $utf8, $c
     var body = document.getElementById('auditPageBody');
     var search = document.getElementById('auditPageSearch');
     var methodFilter = document.getElementById('auditMethodFilter');
-    var dateFilter = document.getElementById('auditDateFilter');
+    var fromFilter = document.getElementById('auditFromFilter');
+    var toFilter = document.getElementById('auditToFilter');
     var userFilter = document.getElementById('auditUserFilter');
     var modal = document.getElementById('auditDetailModal');
     var metaEl = document.getElementById('auditDetailMeta');
@@ -331,22 +309,13 @@ $encodeAuditRow = static function (array $row) use ($normalizeCreated, $utf8, $c
             .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
+    // created_at from API is already Mumbai (IST) wall time.
     function normalizeCreated(raw) {
         if (raw == null || raw === '') return '';
         if (typeof raw === 'object' && raw.date) raw = raw.date;
         var s = String(raw).trim();
         var m = s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/);
         if (m) return m[1] + ' ' + m[2];
-        var d = new Date(s);
-        if (!isNaN(d.getTime())) {
-            var y = d.getFullYear();
-            var mo = String(d.getMonth() + 1).padStart(2, '0');
-            var da = String(d.getDate()).padStart(2, '0');
-            var h = String(d.getHours()).padStart(2, '0');
-            var mi = String(d.getMinutes()).padStart(2, '0');
-            var se = String(d.getSeconds()).padStart(2, '0');
-            return y + '-' + mo + '-' + da + ' ' + h + ':' + mi + ':' + se;
-        }
         return s;
     }
 
@@ -355,27 +324,12 @@ $encodeAuditRow = static function (array $row) use ($normalizeCreated, $utf8, $c
         return s ? s.slice(0, 10) : '';
     }
 
-    function localDateKey(offsetDays) {
-        var d = new Date();
-        d.setHours(0, 0, 0, 0);
-        if (offsetDays) d.setDate(d.getDate() + offsetDays);
-        var y = d.getFullYear();
-        var mo = String(d.getMonth() + 1).padStart(2, '0');
-        var da = String(d.getDate()).padStart(2, '0');
-        return y + '-' + mo + '-' + da;
-    }
-
-    function inDateRange(dateKey, preset) {
-        if (!preset || preset === 'all') return true;
-        if (!dateKey) return false;
-        var today = localDateKey(0);
-        if (preset === 'today') return dateKey === today;
-        if (preset === 'yesterday') return dateKey === localDateKey(-1);
-        if (preset === 'last7' || preset === 'last30') {
-            var days = preset === 'last7' ? 6 : 29;
-            var from = localDateKey(-days);
-            return dateKey >= from && dateKey <= today;
-        }
+    function inDateRange(dateKey) {
+        if (!dateKey) return !(fromFilter && fromFilter.value) && !(toFilter && toFilter.value);
+        var from = String((fromFilter && fromFilter.value) || '');
+        var to = String((toFilter && toFilter.value) || '');
+        if (from && dateKey < from) return false;
+        if (to && dateKey > to) return false;
         return true;
     }
 
@@ -383,11 +337,16 @@ $encodeAuditRow = static function (array $row) use ($normalizeCreated, $utf8, $c
         var s = normalizeCreated(raw);
         if (!s) return '—';
         try {
-            var d = new Date(s.replace(' ', 'T'));
-            if (isNaN(d.getTime())) return s;
-            return d.toLocaleString('en-IN');
+            var parts = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+            if (!parts) return s + ' IST';
+            var y = +parts[1], mo = +parts[2], da = +parts[3];
+            var h = +parts[4], mi = +parts[5], se = +parts[6];
+            var ampm = h >= 12 ? 'pm' : 'am';
+            var h12 = h % 12; if (h12 === 0) h12 = 12;
+            var pad = function (n) { return String(n).padStart(2, '0'); };
+            return pad(da) + '/' + pad(mo) + '/' + y + ', ' + pad(h12) + ':' + pad(mi) + ':' + pad(se) + ' ' + ampm + ' IST';
         } catch (e) {
-            return s;
+            return s + ' IST';
         }
     }
 
@@ -418,24 +377,6 @@ $encodeAuditRow = static function (array $row) use ($normalizeCreated, $utf8, $c
         if (!text) return '—';
         try { return JSON.stringify(JSON.parse(text), null, 2); }
         catch (e) { return text; }
-    }
-
-    function updateStats(rows) {
-        var total = rows.length, ok = 0, bad = 0, methods = {};
-        rows.forEach(function (r) {
-            var s = Number(r.status || 0);
-            if (s >= 200 && s < 300) ok++;
-            else if (s >= 400) bad++;
-            methods[normalizeMethod(r.method)] = true;
-        });
-        var elT = document.getElementById('auditStatTotal');
-        var elO = document.getElementById('auditStatOk');
-        var elB = document.getElementById('auditStatBad');
-        var elM = document.getElementById('auditStatMethods');
-        if (elT) elT.textContent = String(total);
-        if (elO) elO.textContent = String(ok);
-        if (elB) elB.textContent = String(bad);
-        if (elM) elM.textContent = Object.keys(methods).sort().join(' · ') || '—';
     }
 
     function fillUserFilter(rows) {
@@ -556,7 +497,6 @@ $encodeAuditRow = static function (array $row) use ($normalizeCreated, $utf8, $c
         if (!body) return;
         if (!cachedRows.length) {
             body.innerHTML = '<tr id="auditEmptyState"><td colspan="10" class="hub-audit-empty">No API activity yet. Use any report API to create entries.</td></tr>';
-            updateStats([]);
             var visEl = document.getElementById('auditVisibleCount');
             var totEl = document.getElementById('auditTotalCount');
             if (visEl) visEl.textContent = '0';
@@ -596,16 +536,15 @@ $encodeAuditRow = static function (array $row) use ($normalizeCreated, $utf8, $c
         var q = String((search && search.value) || '').trim().toLowerCase();
         var method = String((methodFilter && methodFilter.value) || '').toUpperCase();
         var user = String((userFilter && userFilter.value) || '').toLowerCase();
-        var datePreset = String((dateFilter && dateFilter.value) || 'all');
-        var allRows = body.querySelectorAll('tr.audit-row');
-        var visibleRows = [];
+            var allRows = body.querySelectorAll('tr.audit-row');
+            var visibleRows = [];
 
-        allRows.forEach(function (tr) {
-            var hayOk = !q || (tr.getAttribute('data-hay') || '').indexOf(q) !== -1;
-            var rowMethod = normalizeMethod(tr.getAttribute('data-method') || '');
-            var methodOk = !method || rowMethod === method;
-            var userOk = !user || String(tr.getAttribute('data-user') || '') === user;
-            var dateOk = inDateRange(tr.getAttribute('data-date') || dateKeyFromCreated(tr.getAttribute('data-created') || ''), datePreset);
+            allRows.forEach(function (tr) {
+                var hayOk = !q || (tr.getAttribute('data-hay') || '').indexOf(q) !== -1;
+                var rowMethod = normalizeMethod(tr.getAttribute('data-method') || '');
+                var methodOk = !method || rowMethod === method;
+                var userOk = !user || String(tr.getAttribute('data-user') || '') === user;
+                var dateOk = inDateRange(tr.getAttribute('data-date') || dateKeyFromCreated(tr.getAttribute('data-created') || ''));
             var show = hayOk && methodOk && userOk && dateOk;
             tr.classList.toggle('is-filtered-out', !show);
             tr.hidden = !show;
@@ -614,7 +553,6 @@ $encodeAuditRow = static function (array $row) use ($normalizeCreated, $utf8, $c
                 if (row) visibleRows.push(normalizeRow(row));
             }
         });
-        updateStats(visibleRows);
         var visEl = document.getElementById('auditVisibleCount');
         var totEl = document.getElementById('auditTotalCount');
         if (visEl) visEl.textContent = String(visibleRows.length);
@@ -627,14 +565,6 @@ $encodeAuditRow = static function (array $row) use ($normalizeCreated, $utf8, $c
         }
     }
 
-    function clearFilters() {
-        if (dateFilter) dateFilter.value = 'all';
-        if (methodFilter) methodFilter.value = '';
-        if (userFilter) userFilter.value = '';
-        if (search) search.value = '';
-        applyFilter();
-    }
-
     function load() {
         if (!body || !apiUrl) return;
         if (window.rptLoader && window.rptLoader.show) {
@@ -643,7 +573,7 @@ $encodeAuditRow = static function (array $row) use ($normalizeCreated, $utf8, $c
                 steps: ['Connecting…', 'Fetching API activity…', 'Preparing table…']
             });
         }
-        fetch(apiUrl + (apiUrl.indexOf('?') >= 0 ? '&' : '?') + 'limit=300&_=' + Date.now(), {
+        fetch(apiUrl + (apiUrl.indexOf('?') >= 0 ? '&' : '?') + 'limit=2000&_=' + Date.now(), {
             headers: { Accept: 'application/json' },
             credentials: 'same-origin',
             cache: 'no-store'
@@ -672,15 +602,14 @@ $encodeAuditRow = static function (array $row) use ($normalizeCreated, $utf8, $c
     }
 
     var refreshBtn = document.getElementById('auditPageRefreshBtn');
-    var clearBtn = document.getElementById('auditClearFilters');
     var closeBtn = document.getElementById('auditDetailClose');
     var copyResBtn = document.getElementById('auditCopyPayloadBtn');
     var copyReqBtn = document.getElementById('auditCopyRequestBtn');
     if (refreshBtn) refreshBtn.addEventListener('click', load);
-    if (clearBtn) clearBtn.addEventListener('click', clearFilters);
     if (search) search.addEventListener('input', applyFilter);
     if (methodFilter) methodFilter.addEventListener('change', applyFilter);
-    if (dateFilter) dateFilter.addEventListener('change', applyFilter);
+    if (fromFilter) fromFilter.addEventListener('change', applyFilter);
+    if (toFilter) toFilter.addEventListener('change', applyFilter);
     if (userFilter) userFilter.addEventListener('change', applyFilter);
     if (closeBtn) closeBtn.addEventListener('click', closeDetail);
     if (modal) modal.addEventListener('click', function (e) { if (e.target === modal) closeDetail(); });

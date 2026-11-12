@@ -305,6 +305,11 @@ class SapPurchaseOrderService
             $matCat = 'all';
         }
 
+        $approvedStatus = trim((string) ($filters['approved_status'] ?? $filters['APPROVEDSTATUS'] ?? ''));
+        if (!in_array($approvedStatus, ['Approved', 'NotApproved'], true)) {
+            $approvedStatus = '';
+        }
+
         $emptyTotals = [
             'pos_count'       => 0,
             'items_count'     => 0,
@@ -330,16 +335,33 @@ class SapPurchaseOrderService
         sort($typesKey);
         $supKey = $suppliers;
         sort($supKey);
-        $cacheKey = 'po_list_' . md5(json_encode([$range['preset'], $range['from'], $range['to'], $plant, implode(',', $supKey), $so, implode(',', $typesKey), $matCat]));
+        // Paginate only when the client asks (UI list). CSV / internal callers get the full set.
+        $paginate = array_key_exists('page', $filters)
+            || array_key_exists('page_size', $filters)
+            || array_key_exists('limit', $filters);
+        $pageSize = (int) ($filters['page_size'] ?? $filters['limit'] ?? 25);
+        $page = (int) ($filters['page'] ?? 1);
+        if ($pageSize < 1) {
+            $pageSize = 25;
+        }
+        if ($pageSize > 100) {
+            $pageSize = 100;
+        }
+        if ($page < 1) {
+            $page = 1;
+        }
+
+        $cacheKey = 'po_list_' . md5(json_encode([$range['preset'], $range['from'], $range['to'], $plant, implode(',', $supKey), $so, implode(',', $typesKey), $matCat, $approvedStatus]));
         $cached = $this->cacheRead($cacheKey, (int) ($this->cfg['cache_ttl'] ?? 300));
         if ($cached !== null) {
-            return $cached;
+            return $paginate ? $this->paginateListPayload($cached, $page, $pageSize) : $cached;
         }
 
         $filterParts = [];
         if ($range['preset'] !== 'all' && $range['from'] !== '' && $range['to'] !== '') {
             $filterParts[] = "PurchaseOrderDate ge datetime'{$range['from']}T00:00:00' and PurchaseOrderDate le datetime'{$range['to']}T23:59:59'";
         }
+        // APPROVEDSTATUS is not on ZI_PurchaseOrderAPI_HUB — filter locally after fetch.
         if ($plant !== '') {
             $filterParts[] = "Plant eq '{$plant}'";
         }
@@ -444,6 +466,7 @@ class SapPurchaseOrderService
                         'created_by'             => trim((string) ($row['CreatedByUser'] ?? '')),
                         'plant'                  => trim((string) ($row['Plant'] ?? '')),
                         'plants'                 => [],
+                        'approved_status'        => '',
                         'items_count'            => 0,
                         'materials'              => [],
                         'material_types'         => [],
@@ -537,6 +560,28 @@ class SapPurchaseOrderService
         }
         unset($r);
 
+        // Local APPROVEDSTATUS (Pass / Approve log) — SAP hub has no APPROVEDSTATUS property
+        $approvedSet = $this->approvedPurchaseOrderKeys(array_column($records, 'purchase_order'));
+        foreach ($records as &$r) {
+            $key = $this->poLookupKey((string) ($r['purchase_order'] ?? ''));
+            $isApproved = $key !== '' && isset($approvedSet[$key]);
+            $r['approved_status'] = $isApproved ? 'Approved' : 'NotApproved';
+        }
+        unset($r);
+        if ($approvedStatus === 'Approved' || $approvedStatus === 'NotApproved') {
+            $records = array_values(array_filter(
+                $records,
+                static fn (array $r): bool => (($r['approved_status'] ?? '') === $approvedStatus)
+            ));
+            $currencies = [];
+            foreach ($records as $r) {
+                $cur = trim((string) ($r['currency'] ?? ''));
+                if ($cur !== '') {
+                    $currencies[$cur] = ($currencies[$cur] ?? 0) + 1;
+                }
+            }
+        }
+
         arsort($currencies);
         $primaryCurrency = key($currencies) ?: 'INR';
 
@@ -574,6 +619,7 @@ class SapPurchaseOrderService
             ],
             'suppliers' => array_values($uniqueSuppliers),
             'mat_cat' => $matCat,
+            'approved_status' => $approvedStatus,
             'range'   => $range,
             'truncated' => $truncated,
             'items_fetched' => $itemsFetched,
@@ -585,7 +631,39 @@ class SapPurchaseOrderService
             $this->cacheWrite($cacheKey, $out);
         }
 
-        return $out;
+        return $paginate ? $this->paginateListPayload($out, $page, $pageSize) : $out;
+    }
+
+    /**
+     * Slice aggregated PO list into a page for server-side pagination.
+     *
+     * @param array<string,mixed> $payload
+     * @return array<string,mixed>
+     */
+    private function paginateListPayload(array $payload, int $page, int $pageSize): array
+    {
+        $records = array_values($payload['records'] ?? []);
+        $total = isset($payload['total']) ? (int) $payload['total'] : count($records);
+        if ($total < count($records)) {
+            $total = count($records);
+        }
+        if ($pageSize < 1) {
+            $pageSize = 25;
+        }
+        $pageCount = max(1, (int) ceil(max(0, $total) / $pageSize));
+        if ($page < 1) {
+            $page = 1;
+        }
+        if ($page > $pageCount) {
+            $page = $pageCount;
+        }
+        $offset = ($page - 1) * $pageSize;
+        $payload['records'] = array_slice($records, $offset, $pageSize);
+        $payload['total'] = $total;
+        $payload['page'] = $page;
+        $payload['page_size'] = $pageSize;
+        $payload['page_count'] = $pageCount;
+        return $payload;
     }
 
     /*
@@ -704,6 +782,13 @@ class SapPurchaseOrderService
             'net_value'               => round($qty * $price, 2),
             'currency'                => trim((string) ($row['DocumentCurrency'] ?? '')),
             'sales_orders'            => $salesOrders,
+            // SAP pricing conditions (when exposed on ZI_PurchaseOrderAPI_HUB)
+            'cond_othr'               => $this->sapNumber($row['CondOTHR'] ?? $row['CONDOTHR'] ?? ''),
+            'cond_frb1'               => $this->sapNumber($row['CondFRB1'] ?? $row['CONDFRB1'] ?? ''),
+            'cond_frb2'               => $this->sapNumber($row['CondFRB2'] ?? $row['CONDFRB2'] ?? ''),
+            'cond_zb00'               => $this->sapNumber($row['CondZB00'] ?? $row['CONDZB00'] ?? ''),
+            'cond_zsci'               => $this->sapNumber($row['CondZSCI'] ?? $row['CONDZSCI'] ?? ''),
+            'cond_zbcr'               => $this->sapNumber($row['CondZBCR'] ?? $row['CONDZBCR'] ?? ''),
         ];
     }
 
@@ -727,6 +812,91 @@ class SapPurchaseOrderService
     private function distinct(array $rows, string $key): array
     {
         return array_values(array_unique(array_filter(array_column($rows, $key), static fn ($v): bool => $v !== '')));
+    }
+
+    private function poLookupKey(string $po): string
+    {
+        $digits = preg_replace('/\D/', '', $po) ?? '';
+        $trimmed = ltrim($digits, '0');
+        return $trimmed !== '' ? $trimmed : $digits;
+    }
+
+    /**
+     * APPROVEDSTATUS for a single PO: "Approved" | "NotApproved".
+     */
+    public function approvedStatusFor(string $purchaseOrder): string
+    {
+        $key = $this->poLookupKey($purchaseOrder);
+        if ($key === '') {
+            return 'NotApproved';
+        }
+        $set = $this->approvedPurchaseOrderKeys([$purchaseOrder]);
+        return isset($set[$key]) ? 'Approved' : 'NotApproved';
+    }
+
+    /**
+     * POs successfully passed/approved in local Pass_po_validtion (latest row Value = X).
+     *
+     * @param list<string|int> $purchaseOrders
+     * @return array<string, true>
+     */
+    private function approvedPurchaseOrderKeys(array $purchaseOrders): array
+    {
+        $keys = [];
+        foreach ($purchaseOrders as $po) {
+            $k = $this->poLookupKey((string) $po);
+            if ($k !== '') {
+                $keys[$k] = true;
+            }
+        }
+        if ($keys === []) {
+            return [];
+        }
+
+        try {
+            require_once base_path('app/core/Database.php');
+            require_once base_path('app/services/PassPoValidationLogService.php');
+            $log = new PassPoValidationLogService();
+            $log->ensureTable();
+            $pdo = Database::connection();
+
+            // Match both padded and unpadded PO numbers stored in the log
+            $candidates = [];
+            foreach (array_keys($keys) as $k) {
+                $candidates[$k] = true;
+                $candidates[str_pad($k, 10, '0', STR_PAD_LEFT)] = true;
+            }
+            $params = array_keys($candidates);
+            $placeholders = implode(',', array_fill(0, count($params), '?'));
+            $stmt = $pdo->prepare("
+                SELECT l.purchase_order, l.value_flag, l.action, l.success
+                FROM [dbo].[Pass_po_validtion] l
+                INNER JOIN (
+                    SELECT purchase_order, MAX(id) AS max_id
+                    FROM [dbo].[Pass_po_validtion]
+                    WHERE purchase_order IN ({$placeholders})
+                    GROUP BY purchase_order
+                ) latest ON latest.max_id = l.id
+            ");
+            $stmt->execute($params);
+            $approved = [];
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+                $k = $this->poLookupKey((string) ($row['purchase_order'] ?? ''));
+                if ($k === '' || !isset($keys[$k])) {
+                    continue;
+                }
+                $ok = !empty($row['success']);
+                $flag = strtoupper(trim((string) ($row['value_flag'] ?? '')));
+                $action = strtolower(trim((string) ($row['action'] ?? '')));
+                if ($ok && ($flag === 'X' || in_array($action, ['pass', 'approve', 'approved'], true))) {
+                    $approved[$k] = true;
+                }
+            }
+            return $approved;
+        } catch (Throwable $e) {
+            error_log('SapPurchaseOrderService approvedPurchaseOrderKeys: ' . $e->getMessage());
+            return [];
+        }
     }
 
     /*

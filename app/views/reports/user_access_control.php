@@ -3,7 +3,7 @@
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 04/11/2026
  * DESCRIPTION : SAP Reports User Access Control — Access Studio
- *               Reports: View · PO Costing: Pass PO · ZCOST: Add/Update/Copy/Approve
+ *               Reports: View · PO Costing: Pass PO / Assign / Validate / eSign · ZCOST: Add/Update/Copy/Approve
  */
 
 $catalogHome = url('/');
@@ -123,7 +123,7 @@ $extraHead = '
                 </div>
                 <div class="uac-legend">
                     <span><i class="uac-dot is-view"></i> Reports · View</span>
-                    <span><i class="uac-dot is-pass"></i> PO Costing · View / Pass PO / Assign / Validate</span>
+                    <span><i class="uac-dot is-pass"></i> PO Costing · View / Pass PO / Assign / Validate / eSign</span>
                     <span><i class="uac-dot is-zcost"></i> ZCOST · Add / Update / Copy / Approve</span>
                 </div>
             </header>

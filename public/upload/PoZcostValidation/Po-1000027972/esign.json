@@ -1,0 +1,31 @@
+{
+    "po": "1000027972",
+    "ebeln": "1000027972",
+    "signed_at": "2026-11-10T04:53:36+00:00",
+    "signed_by": "admin",
+    "signature_file": "signature_20261110_045332.png",
+    "placement": {
+        "x_pct": 38.9694332414938315878316643647849559783935546875,
+        "y_pct": 27.4901969760071978043924900703132152557373046875,
+        "w_pct": 13.318534961154274043337863986380398273468017578125,
+        "h_pct": 5.97467340207567421117573758237995207309722900390625
+    },
+    "request_id": "286371802",
+    "pdf_file": "po-1000027972.pdf",
+    "signed_pdf": true,
+    "signed_local": "C:\\MAMP\\htdocs\\sap_reports\\public\\upload\\PoZcostValidation\\Po-1000027972\\po-1000027972.pdf",
+    "signed_network": null,
+    "esign_network_folder": "\\\\10.103.10.26\\server32\\2026-11-10\\po_esign",
+    "approval_payload": {
+        "RequestId": "286371802",
+        "ApprovalToItems": [
+            {
+                "RequestId": "286371802",
+                "Ebeln": "1000027972",
+                "Value": "X"
+            }
+        ]
+    },
+    "approval_http": 201,
+    "esign_network_error": "Network share unreachable or po_esign folder could not be created."
+}

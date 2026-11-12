@@ -220,11 +220,15 @@ final class ApiAuditLogService
     }
 
     /**
+     * Full history from sap_report_auditLog (no day-based purge / retention cut).
+     * Timestamps are converted to Mumbai (IST) for display.
+     *
      * @return list<array<string, mixed>>
      */
-    public static function latest(int $limit = 200): array
+    public static function latest(int $limit = 2000): array
     {
-        $limit = max(1, min(500, $limit));
+        // Keep entire table history available — only cap for UI payload size.
+        $limit = max(1, min(5000, $limit));
         try {
             require_once base_path('app/core/Database.php');
             $pdo = Database::connection();
@@ -238,11 +242,114 @@ final class ApiAuditLogService
                  ORDER BY id DESC'
             );
             $rows = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
-            return is_array($rows) ? $rows : [];
+            if (!is_array($rows)) {
+                return [];
+            }
+            return array_map([self::class, 'mapRow'], $rows);
         } catch (Throwable $e) {
             error_log('ApiAuditLogService::latest failed: ' . $e->getMessage());
             return [];
         }
+    }
+
+    /**
+     * Chart + KPI aggregates for the current row set (already Mumbai-local).
+     *
+     * @param list<array<string, mixed>> $rows
+     * @return array<string, mixed>
+     */
+    public static function buildStats(array $rows): array
+    {
+        $ok = 0;
+        $bad = 0;
+        $methods = [];
+        $byDay = [];
+        $byMethod = [];
+        $byPage = [];
+        foreach ($rows as $row) {
+            $status = (int) ($row['status'] ?? 0);
+            if ($status >= 200 && $status < 300) {
+                $ok++;
+            } elseif ($status >= 400) {
+                $bad++;
+            }
+            $method = strtoupper(trim((string) ($row['method'] ?? 'GET'))) ?: 'GET';
+            $methods[$method] = true;
+            $byMethod[$method] = ($byMethod[$method] ?? 0) + 1;
+            $day = substr((string) ($row['created_at'] ?? ''), 0, 10);
+            if ($day !== '') {
+                $byDay[$day] = ($byDay[$day] ?? 0) + 1;
+            }
+            $page = trim((string) ($row['page_name'] ?? '')) ?: 'Unknown';
+            $byPage[$page] = ($byPage[$page] ?? 0) + 1;
+        }
+        ksort($byDay);
+        arsort($byMethod);
+        arsort($byPage);
+        return [
+            'total' => count($rows),
+            'success' => $ok,
+            'errors' => $bad,
+            'methods' => array_keys($methods),
+            'by_day' => array_map(
+                static fn ($day, $count) => ['day' => $day, 'count' => (int) $count],
+                array_keys($byDay),
+                array_values($byDay)
+            ),
+            'by_method' => array_map(
+                static fn ($method, $count) => ['method' => $method, 'count' => (int) $count],
+                array_keys($byMethod),
+                array_values($byMethod)
+            ),
+            'by_page' => array_map(
+                static fn ($page, $count) => ['page' => $page, 'count' => (int) $count],
+                array_keys(array_slice($byPage, 0, 8, true)),
+                array_values(array_slice($byPage, 0, 8, true))
+            ),
+            'timezone' => function_exists('sap_reports_app_timezone') ? sap_reports_app_timezone() : 'Asia/Kolkata',
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private static function mapRow(array $row): array
+    {
+        $createdRaw = $row['created_at'] ?? null;
+        $created = function_exists('sap_reports_to_mumbai')
+            ? sap_reports_to_mumbai($createdRaw)
+            : (string) ($createdRaw ?? '');
+        return [
+            'id' => isset($row['id']) ? (int) $row['id'] : null,
+            'url' => (string) ($row['url'] ?? ''),
+            'status' => (int) ($row['status'] ?? 0),
+            'status_message' => $row['status_message'] !== null ? (string) $row['status_message'] : null,
+            'method' => strtoupper(trim((string) ($row['method'] ?? 'GET'))) ?: 'GET',
+            'page_name' => $row['page_name'] !== null ? (string) $row['page_name'] : null,
+            'username' => $row['username'] !== null ? (string) $row['username'] : null,
+            'user_id' => $row['user_id'] !== null ? (string) $row['user_id'] : null,
+            'created_at' => $created !== '' ? $created : null,
+            'created_at_utc' => self::normalizeUtcStamp($createdRaw),
+            'ip' => $row['ip'] !== null ? (string) $row['ip'] : null,
+            'request_payload' => $row['request_payload'] !== null ? (string) $row['request_payload'] : null,
+            'response_payload' => $row['response_payload'] !== null ? (string) $row['response_payload'] : null,
+        ];
+    }
+
+    private static function normalizeUtcStamp($value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if ($value instanceof DateTimeInterface) {
+            return $value->format('Y-m-d H:i:s');
+        }
+        $s = trim((string) $value);
+        if (preg_match('/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/', $s, $m)) {
+            return $m[1] . ' ' . $m[2];
+        }
+        return $s !== '' ? $s : null;
     }
 
     private static function encodePayload(array|string|null $payload): ?string

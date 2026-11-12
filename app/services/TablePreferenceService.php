@@ -163,6 +163,12 @@ final class TablePreferenceService
             }
             array_splice($columnOrder, $at, 0, [$id]);
         }
+        // Actions column always last (Map Costing / View)
+        $actionsPos = array_search('actions', $columnOrder, true);
+        if ($actionsPos !== false) {
+            array_splice($columnOrder, $actionsPos, 1);
+            $columnOrder[] = 'actions';
+        }
         $hiddenColumns = array_values(array_diff(array_intersect($known, array_filter($hidden, 'is_string')), $locked));
 
         return [

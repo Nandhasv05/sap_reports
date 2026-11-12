@@ -16,6 +16,22 @@ final class PoTempfinCostingService
         'SO_WISE_POQTY', 'SO_WISE_PO_VAL', 'OUOM', 'PORATE', 'TOTVALUE',
         'MAT_DESC', 'PO_CURRENCY', 'BUDGETED_CONS', 'BUDGET_INR', 'BUDGET_CURRENCY',
         'BUDGET_CONV_RT', 'BUDGET_COST_PER_GMT', 'CONV', 'BUOM', 'ACTUAL_COST',
+        // SAP pricing conditions (per PO line) — summed into PDF-style charges
+        'CONDOTHR', 'CONDFRB1', 'CONDFRB2', 'CONDZB00', 'CONDZSCI', 'CONDZBCR',
+    ];
+
+    /**
+     * SAP condition columns on each PO line → pricing charge labels (classic PDF / PASSPO).
+     * CondFRB1 + CondFRB2 both roll into Freight.
+     *
+     * @var array<string, array{label:string, keys:list<string>}>
+     */
+    public const SAP_CONDITION_CHARGES = [
+        'other'  => ['label' => 'Other Charges',  'keys' => ['CONDOTHR', 'COND_OTHR', 'OTHR']],
+        'freight'=> ['label' => 'Freight',        'keys' => ['CONDFRB1', 'CONDFRB2', 'COND_FRB1', 'COND_FRB2', 'FRB1', 'FRB2']],
+        'moq'    => ['label' => 'MOQ Charges',    'keys' => ['CONDZB00', 'COND_ZB00', 'ZB00']],
+        'screen' => ['label' => 'Screen Charges', 'keys' => ['CONDZSCI', 'COND_ZSCI', 'ZSCI']],
+        'bank'   => ['label' => 'Bank Charges',   'keys' => ['CONDZBCR', 'COND_ZBCR', 'ZBCR']],
     ];
 
     private ?PDO $pdo = null;
@@ -107,10 +123,20 @@ final class PoTempfinCostingService
             static fn (array $r): bool => ($r['row_kind'] ?? 'detail') === 'detail'
         ));
 
+        $summary = $this->summarize($detailOnly);
+        $charges = $this->summarizeCharges($allRows);
+        $summary['charges'] = $charges;
+        $summary['sub_total'] = (float) ($summary['total_po_value'] ?? 0);
+        $summary['charges_total'] = (float) ($charges['total'] ?? 0);
+        $summary['grand_total'] = round(
+            (float) ($summary['sub_total'] ?? 0) + (float) ($summary['charges_total'] ?? 0),
+            2
+        );
+
         return [
             'success'  => true,
             'records'  => $allRows,
-            'summary'  => $this->summarize($detailOnly),
+            'summary'  => $summary,
             'mat_type' => $isFabric ? 'fabric' : 'trims',
             'error'    => null,
         ];
@@ -312,19 +338,18 @@ final class PoTempfinCostingService
                 $fixedBadCons = true;
             }
 
-            if ($conv === null && $budgetConv !== null) {
-                $conv = $budgetConv;
-            }
+            // Unit CONV must not copy FX rate (BUDGET_CONV_RT) — that double-converts / inflates
             if ($conv === null || $conv <= 0) {
+                $aconv = 1.0;
+            }
+            if ($budgetConv !== null && $budgetConv > 0 && abs((float) $conv - (float) $budgetConv) < 0.0001) {
+                $conv = 1.0;
+            } elseif ($poCurrency === 'INR' && (float) $conv > 20) {
                 $conv = 1.0;
             }
 
-            // Classic portal: trust PASSPO ACTUAL_COST / BUDGET_COST_PER_GMT as returned.
-            // Only recompute when blank, or when we just fixed a bad PO÷SO consumption
-            // (classic then sets ACTUAL = PORATE × cons, with button GRO / FX rules).
-            $consForActual = ($consumption !== null && $consumption > 0)
-                ? $consumption
-                : (($budgetedCons !== null && $budgetedCons > 0) ? $budgetedCons : 1.0);
+            // Classic: ACTUAL = PORATE × Curr Rate (BUDGET_CONV_RT) × PO consumption
+            $consForActual = ($consumption !== null && $consumption > 0) ? $consumption : 1.0;
             $classicActual = $this->computeClassicActualCost(
                 $porate,
                 $conv,
@@ -336,13 +361,27 @@ final class PoTempfinCostingService
                 $matDesc,
                 $poCurrency
             );
-            if ($tempfinActual !== null && $tempfinActual > 0 && !$fixedBadCons) {
-                // Keep PASSPO value — same as classic grid ($shown = ACTUAL_COST from SP)
+            // ACTUAL in INR: PORATE × Curr Rate (BUDGET_CONV_RT) with classic unit rules.
+            // Prefer classic computation so USD/EUR lines compare fairly to BUDGET_COST_PER_GMT.
+            $fx = ($budgetConv !== null && $budgetConv > 0) ? $budgetConv : 1.0;
+            $foreign = $poCurrency !== '' && $poCurrency !== 'INR';
+            $passpoLooksLikeRawPorate = $tempfinActual !== null && $porate !== null
+                && abs((float) $tempfinActual - (float) $porate) < 0.0001;
+
+            if ($classicActual !== null && ($foreign || $fixedBadCons || $passpoLooksLikeRawPorate || $tempfinActual === null)) {
+                $actual = $classicActual;
+            } elseif ($tempfinActual !== null && $tempfinActual > 0 && !$fixedBadCons) {
+                // Keep PASSPO ACTUAL when it already looks like a converted value
                 $actual = $tempfinActual;
+                // Still apply FX when PASSPO left ACTUAL in foreign currency
+                if ($foreign && $fx > 1.0 && $porate !== null
+                    && abs((float) $tempfinActual - (float) $porate) < 0.0001) {
+                    $actual = $classicActual ?? round((float) $porate * $fx, 4);
+                }
             } elseif ($classicActual !== null) {
                 $actual = $classicActual;
-            } elseif ($tempfinActual !== null && $tempfinActual > 0) {
-                $actual = $tempfinActual;
+            } elseif ($porate !== null) {
+                $actual = $foreign ? round((float) $porate * $fx, 4) : $porate;
             }
 
             // Trust PASSPO BUDGET_COST_PER_GMT — never invent from zCOST RATE.
@@ -366,6 +405,9 @@ final class PoTempfinCostingService
             }
         }
 
+        // ACTUAL_COST is always INR (PORATE × Rate when Curr ≠ INR)
+        $shownActual = $actual ?? $porate;
+
         $status = 'EXCEPTION';
         $result = 'No budget / actual cost';
         $variancePct = null;
@@ -374,16 +416,16 @@ final class PoTempfinCostingService
         if ($rowKind !== 'detail') {
             $status = 'FOOTER';
             $result = $ponoUpper !== '' ? $ponoUpper : ($matgroupUpper !== '' ? $matgroupUpper : 'FOOTER');
-        } elseif ($budget !== null && $budget > 0 && $actual !== null) {
-            $variancePct = round((($actual - $budget) / $budget) * 100, 2);
-            if ($actual <= $budget + $tol) {
+        } elseif ($budget !== null && $budget > 0 && $shownActual !== null) {
+            $variancePct = round((($shownActual - $budget) / $budget) * 100, 2);
+            if ($shownActual <= $budget + $tol) {
                 $status = 'PASS';
                 $result = 'PASS — actual cost within budget';
             } else {
                 $status = 'EXCEPTION';
                 $result = 'EXCEPTION — actual cost exceeds budget';
             }
-        } elseif ($rowKind === 'detail' && ($budget === null || $budget <= 0) && $actual !== null) {
+        } elseif ($rowKind === 'detail' && ($budget === null || $budget <= 0) && $shownActual !== null) {
             $status = 'NEEDS_REVIEW';
             $result = 'No budget RATE — Needs Review';
         }
@@ -395,8 +437,62 @@ final class PoTempfinCostingService
         $costMismatch = $rowKind === 'detail'
             && $budget !== null
             && (float) $budget > 0
-            && $actual !== null
-            && (float) $actual > ((float) $budget + 0.005);
+            && $shownActual !== null
+            && (float) $shownActual > ((float) $budget + 0.005);
+
+        $matDescRaw = (string) $get($row, 'MAT_DESC', 'mat_desc');
+        $materialCode = (string) $get($row, 'MATERIAL');
+        $costItem = trim((string) $get($row, 'ITEM', 'CostingItemNo', 'COSTING_ITEM_NO'));
+        $maktx = trim((string) $get($row, 'MAKTX', 'maktx', 'COST_DESC', 'COSTING_DESC'));
+        $zsection = trim((string) $get($row, 'ZSECTION', 'SECTION'));
+        $quoteNo = trim((string) $get($row, 'CostingQuotationNo', 'COSTING_QUOTATION_NO', 'QUOTATIONNO'));
+
+        // PASSPO sometimes links wrong zCOST ITEM
+        // (BUTTON→ELASTIC, HANGTAG→CARE & CONTENT, drawcord→STICKER). Reject and force rematch.
+        $familyMismatch = false;
+        $poText = $matgroupUpper . ' ' . $matDescRaw . ' ' . $materialCode;
+        $costText = $costItem . ' ' . $maktx . ' ' . $zsection;
+        $poFamily = $this->trimFamily($poText);
+        $costFamily = $this->trimFamily($costText);
+        $poKind = $this->labelKind($poText);
+        $costKind = $this->labelKind($costText);
+        $tokenOk = $this->poCostTokensOverlap($poText, $costText);
+        $kindClash = $poKind !== '' && $costKind !== ''
+            && $poKind !== $costKind
+            && $poKind !== 'LABEL'
+            && $costKind !== 'LABEL';
+        $hasCostLink = $costItem !== '' || $maktx !== '';
+        // Same LABEL family is not enough — HANGTAG must not keep CARE & CONTENT
+        $sameFamilyNoProof = $poFamily !== '' && $costFamily !== '' && $poFamily === $costFamily
+            && !$tokenOk
+            && ($poKind === '' || $costKind === '' || $poKind !== $costKind);
+        if ($rowKind === 'detail' && $hasCostLink && (
+            ($poFamily !== '' && $costFamily !== '' && $poFamily !== $costFamily)
+            || $kindClash
+            || $sameFamilyNoProof
+            || ($costFamily !== '' && $poFamily === '' && !$tokenOk)
+            || ($poFamily !== '' && $costFamily === '' && !$tokenOk)
+            || ($poFamily === '' && $costFamily === '' && !$tokenOk && strlen($costItem) >= 4)
+        )) {
+            $familyMismatch = true;
+            $status = 'NEEDS_REVIEW';
+            $result = 'NEEDS REVIEW — zCOST "'
+                . ($costKind !== '' ? $costKind : ($costFamily !== '' ? $costFamily : $maktx))
+                . '" does not match PO MATGROUP/MAT_DESC "'
+                . trim((string) $get($row, 'MATGROUP')) . ' / ' . $materialCode
+                . '" (' . ($poKind !== '' ? $poKind : ($poFamily !== '' ? $poFamily : 'unclassified')) . ') — select matching line';
+            $costItem = '';
+            $maktx = '';
+            $zsection = '';
+        }
+
+        $needsManual = $rowKind === 'detail' && (
+            $familyMismatch
+            || $budget === null
+            || $budget <= 0
+            || $shownActual === null
+            || ($hasCostLink === false && $poFamily !== '')
+        );
 
         return [
             'pono'                 => $pono,
@@ -416,7 +512,7 @@ final class PoTempfinCostingService
             'ouom'                 => $ouom !== '' ? $ouom : (string) $get($row, 'OUOM'),
             'porate'               => $porate,
             'totvalue'             => $this->num($get($row, 'TOTVALUE')),
-            'mat_desc'             => (string) $get($row, 'MAT_DESC', 'mat_desc'),
+            'mat_desc'             => $matDescRaw,
             'po_currency'          => $poCurrency !== '' ? $poCurrency : (string) $get($row, 'PO_CURRENCY'),
             'budgeted_cons'        => $budgetedCons,
             'budget_inr'           => $budgetInr,
@@ -425,21 +521,31 @@ final class PoTempfinCostingService
             'budget_cost_per_gmt'  => $budget,
             'conv'                 => $conv,
             'buom'                 => $buom !== '' ? $buom : (string) $get($row, 'BUOM'),
-            'actual_cost'          => $actual,
+            'actual_cost'          => $shownActual,
+            // SAP pricing conditions (CondOTHR / CondFRB* / CondZB00 / CondZSCI / CondZBCR)
+            'cond_othr'            => $this->num($get($row, 'CONDOTHR', 'COND_OTHR', 'OTHR')),
+            'cond_frb1'            => $this->num($get($row, 'CONDFRB1', 'COND_FRB1', 'FRB1')),
+            'cond_frb2'            => $this->num($get($row, 'CONDFRB2', 'COND_FRB2', 'FRB2')),
+            'cond_zb00'            => $this->num($get($row, 'CONDZB00', 'COND_ZB00', 'ZB00')),
+            'cond_zsci'            => $this->num($get($row, 'CONDZSCI', 'COND_ZSCI', 'ZSCI')),
+            'cond_zbcr'            => $this->num($get($row, 'CONDZBCR', 'COND_ZBCR', 'ZBCR')),
             // Lock TEMPFIN budget/actual/consumption so zCOST match cannot overwrite Excel values
             // Lock whenever PASSPO supplied a real value — zCOST match must not overwrite
             'tempfin_budget_locked'=> $rowKind === 'detail' && $budget !== null && (float) $budget > 0,
-            'tempfin_actual_locked'=> $rowKind === 'detail' && $actual !== null && (float) $actual > 0,
+            'tempfin_actual_locked'=> $rowKind === 'detail' && $shownActual !== null && (float) $shownActual > 0,
             'tempfin_cons_locked'  => $rowKind === 'detail' && $consumption !== null && $consumption > 0,
-            'cost_item'            => (string) $get($row, 'ITEM', 'CostingItemNo', 'COSTING_ITEM_NO'),
-            'zcost_item'           => (string) $get($row, 'ITEM', 'CostingItemNo', 'COSTING_ITEM_NO'),
-            'costing_quotation_no' => (string) $get($row, 'CostingQuotationNo', 'COSTING_QUOTATION_NO', 'QUOTATIONNO'),
-            'costing_item_no'      => (string) $get($row, 'ITEM', 'CostingItemNo', 'COSTING_ITEM_NO'),
-            'maktx'                => '',
-            'cost_matrix'          => ($budget !== null || $actual !== null)
+            'cost_item'            => $costItem,
+            'zcost_item'           => $costItem,
+            'costing_quotation_no' => $quoteNo,
+            'costing_item_no'      => $costItem,
+            'zsection'             => $zsection,
+            'maktx'                => $maktx,
+            'cost_description'     => $maktx,
+            'family_mismatch'      => $familyMismatch,
+            'cost_matrix'          => ($budget !== null || $shownActual !== null)
                 ? [
                     'budget' => $budget,
-                    'actual' => $actual,
+                    'actual' => $shownActual,
                     'status' => $status,
                 ]
                 : null,
@@ -450,22 +556,142 @@ final class PoTempfinCostingService
             'purchase_order'       => $pono,
             'po_item'              => $poitem,
             'sales_order'          => $salord,
-            'material_desc'        => (string) $get($row, 'MAT_DESC', 'mat_desc'),
+            'material_desc'        => $matDescRaw,
             'material_group'       => (string) $get($row, 'MATGROUP'),
             'order_qty'            => $this->num($get($row, 'TOT_POQTY', 'SO_WISE_POQTY')),
             'po_qty'               => $this->num($get($row, 'TOT_POQTY', 'SO_WISE_POQTY')),
             'unit'                 => (string) $get($row, 'OUOM', 'BUOM'),
             'net_value'            => $this->num($get($row, 'TOTVALUE', 'SO_WISE_PO_VAL')),
             'currency'             => (string) $get($row, 'PO_CURRENCY') ?: 'INR',
-            'po_unit_cost'         => $actual,
+            'po_unit_cost'         => $shownActual,
             'expected_unit_cost'   => $budget,
             'status'               => $status,
             'validation_result'    => $result,
-            // TEMPFIN budget+actual is enough to PASS/FAIL — empty zCOST ITEM is not "needs review"
-            'needs_manual_match'   => $rowKind === 'detail'
-                && ($budget === null || $budget <= 0 || $actual === null),
+            'needs_manual_match'   => $needsManual,
             'selected'             => false,
         ];
+    }
+
+    /**
+     * Coarse trim family for mismatch checks (BUTTON vs ELASTIC, CORD vs STICKER, etc.).
+     * Also reads embedded material-code tokens (e.g. 20DRCCTNDRANTL → CORD).
+     */
+    private function trimFamily(string $text): string
+    {
+        $t = strtoupper(preg_replace('/[^A-Z0-9]+/', ' ', trim($text)) ?? '');
+        $t = trim(preg_replace('/\s+/', ' ', $t) ?? $t);
+        if ($t === '') {
+            return '';
+        }
+        // Material-code shortcuts first (20DRCCTNDRANTL… = drawcord)
+        if (preg_match('/DRC[A-Z0-9]*/', $t) || str_contains($t, 'DRAWCORD') || str_contains($t, 'DRAW CORD')) {
+            return 'CORD';
+        }
+        if (preg_match('/\b(BUTTON|BTN|PEARLBTN|HOOK\s*EYE|SNAP)\b/', $t) || str_contains($t, 'BUTTON')) {
+            return 'BUTTON';
+        }
+        if (preg_match('/\b(ELASTIC|ELASTANE|RUBBERTAPE)\b/', $t) || str_contains($t, 'ELASTIC')) {
+            return 'ELASTIC';
+        }
+        if (preg_match('/\b(THREAD|THREADS)\b/', $t) || str_contains($t, 'THREAD')) {
+            return 'THREAD';
+        }
+        if (preg_match('/\b(ZIPPER|ZIP)\b/', $t) || str_contains($t, 'ZIPPER')) {
+            return 'ZIPPER';
+        }
+        if (preg_match('/\b(STICKER|STICKERS|RFID)\b/', $t) || str_contains($t, 'STICKER') || str_contains($t, 'RFID')) {
+            return 'STICKER';
+        }
+        if (
+            preg_match('/\b(LABEL|LBL|HANGTAG|MAINLBL|CARELBL|SIZELBL)\b/', $t)
+            || str_contains($t, 'LABEL')
+            || str_contains($t, 'HANGTAG')
+            || preg_match('/CARE\s*&?\s*CONTENT|WASH\s*CARE/', $t)
+        ) {
+            return 'LABEL';
+        }
+        if (preg_match('/\b(DRAWCORD|CORD)\b/', $t) || str_contains($t, 'CORD')) {
+            return 'CORD';
+        }
+        if (preg_match('/\b(RIBBON|TAPE|WEBBING)\b/', $t)) {
+            return 'TAPE';
+        }
+        if (preg_match('/\b(POLYBAG|POLY\s*BAG|BAG)\b/', $t) || str_contains($t, 'POLYBAG')) {
+            return 'BAG';
+        }
+        return '';
+    }
+
+    /**
+     * Finer LABEL kinds so HANGTAG never auto-matches CARE & CONTENT / WASH CARE.
+     */
+    private function labelKind(string $text): string
+    {
+        $t = strtoupper(preg_replace('/[^A-Z0-9&]+/', ' ', trim($text)) ?? '');
+        $t = trim(preg_replace('/\s+/', ' ', $t) ?? $t);
+        if ($t === '') {
+            return '';
+        }
+        if (preg_match('/HANG\s*TAG|HANGTAG|\bLHT\b|T[\s\-]?LHT/', $t)) {
+            return 'HANGTAG';
+        }
+        if (preg_match('/CARE\s*&?\s*CONTENT|WASH\s*CARE|CARE\s*LBL|CARELBL|CARE\s*LABEL|\bLCC\b|T[\s\-]?LCC/', $t)) {
+            return 'CARE';
+        }
+        if (preg_match('/MAIN\s*LBL|MAINLBL|MAIN\s*LABEL|\bLML\b|T[\s\-]?LML/', $t)) {
+            return 'MAIN';
+        }
+        if (preg_match('/SIZE\s*LBL|SIZELBL|SIZE\s*LABEL|\bLSL\b|T[\s\-]?LSL/', $t)) {
+            return 'SIZE';
+        }
+        if (preg_match('/WOVEN\s*LABEL/', $t)) {
+            return 'WOVEN';
+        }
+        if (preg_match('/LABEL|LBL/', $t)) {
+            return 'LABEL';
+        }
+        return '';
+    }
+
+    /**
+     * True when PO material/desc and zCOST item/desc share a meaningful token.
+     */
+    private function poCostTokensOverlap(string $poText, string $costText): bool
+    {
+        $norm = static function (string $s): array {
+            $s = strtoupper(preg_replace('/[^A-Z0-9]+/', ' ', $s) ?? '');
+            $parts = preg_split('/\s+/', trim($s)) ?: [];
+            $out = [];
+            foreach ($parts as $p) {
+                $p = trim($p);
+                if (strlen($p) < 3) {
+                    continue;
+                }
+                // Skip generic noise
+                if (in_array($p, ['THE', 'AND', 'FOR', 'WITH', 'PCS', 'YDS', 'USD', 'INR', 'ACCESSOR', 'TRIM', 'TRIMS', 'PACKING', 'OTHERS'], true)) {
+                    continue;
+                }
+                $out[] = $p;
+            }
+            return array_values(array_unique($out));
+        };
+        $a = $norm($poText);
+        $b = $norm($costText);
+        if ($a === [] || $b === []) {
+            return false;
+        }
+        if (array_intersect($a, $b) !== []) {
+            return true;
+        }
+        // Partial contains (e.g. DRCCTNDRANTL vs DRC)
+        foreach ($a as $pa) {
+            foreach ($b as $pb) {
+                if (strlen($pa) >= 4 && strlen($pb) >= 4 && (str_contains($pa, $pb) || str_contains($pb, $pa))) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private function detectRowKind(string $ponoUpper, string $matgroupUpper): string
@@ -487,6 +713,132 @@ final class PoTempfinCostingService
             return 'charge';
         }
         return 'detail';
+    }
+
+    /**
+     * Roll SAP Cond* line amounts (and classic PASSPO charge footer rows) into PDF-style charges.
+     *
+     * @param list<array<string,mixed>> $records
+     * @return array{
+     *   other:float,freight:float,moq:float,screen:float,bank:float,
+     *   discount:float,sgst:float,cgst:float,igst:float,
+     *   total:float,lines:list<array{key:string,label:string,amount:float,sap:string}>
+     * }
+     */
+    private function summarizeCharges(array $records): array
+    {
+        $out = [
+            'other' => 0.0,
+            'freight' => 0.0,
+            'moq' => 0.0,
+            'screen' => 0.0,
+            'bank' => 0.0,
+            'discount' => 0.0,
+            'sgst' => 0.0,
+            'cgst' => 0.0,
+            'igst' => 0.0,
+            'total' => 0.0,
+            'lines' => [],
+        ];
+        $seenItem = [];
+        $cond = ['other' => 0.0, 'freight' => 0.0, 'moq' => 0.0, 'screen' => 0.0, 'bank' => 0.0];
+        $footer = [
+            'other' => 0.0, 'freight' => 0.0, 'moq' => 0.0, 'screen' => 0.0, 'bank' => 0.0,
+            'discount' => 0.0, 'sgst' => 0.0, 'cgst' => 0.0, 'igst' => 0.0,
+        ];
+
+        foreach ($records as $r) {
+            $kind = (string) ($r['row_kind'] ?? 'detail');
+            if ($kind === 'detail') {
+                $item = trim((string) ($r['poitem'] ?? $r['po_item'] ?? ''));
+                $seenKey = $item !== ''
+                    ? $item
+                    : ('__' . trim((string) ($r['material'] ?? '')) . '|' . trim((string) ($r['salordno'] ?? '')));
+                if (isset($seenItem[$seenKey])) {
+                    continue;
+                }
+                $seenItem[$seenKey] = true;
+
+                $cond['other'] += $this->num($r['cond_othr'] ?? null) ?? 0.0;
+                $cond['freight'] += ($this->num($r['cond_frb1'] ?? null) ?? 0.0)
+                    + ($this->num($r['cond_frb2'] ?? null) ?? 0.0);
+                $cond['moq'] += $this->num($r['cond_zb00'] ?? null) ?? 0.0;
+                $cond['screen'] += $this->num($r['cond_zsci'] ?? null) ?? 0.0;
+                $cond['bank'] += $this->num($r['cond_zbcr'] ?? null) ?? 0.0;
+                continue;
+            }
+
+            // Classic PASSPO charge / tax footer rows (fallback when Cond* blank)
+            $label = strtoupper(trim(preg_replace(
+                '/\s+/',
+                ' ',
+                (string) ($r['pono'] ?? $r['matgroup'] ?? $r['validation_result'] ?? '')
+            ) ?? ''));
+            $amt = $this->num(
+                $r['so_wise_po_val']
+                ?? $r['totvalue']
+                ?? $r['net_value']
+                ?? $r['budget_inr']
+                ?? $r['actual_cost']
+                ?? $r['po_unit_cost']
+                ?? $r['porate']
+                ?? null
+            ) ?? 0.0;
+            if ($amt == 0.0 || $label === '') {
+                continue;
+            }
+            if (str_contains($label, 'OTHER')) {
+                $footer['other'] += $amt;
+            } elseif (str_contains($label, 'FREIGHT')) {
+                $footer['freight'] += $amt;
+            } elseif (str_contains($label, 'MOQ')) {
+                $footer['moq'] += $amt;
+            } elseif (str_contains($label, 'SCREEN')) {
+                $footer['screen'] += $amt;
+            } elseif (str_contains($label, 'BANK')) {
+                $footer['bank'] += $amt;
+            } elseif (str_contains($label, 'SGST')) {
+                $footer['sgst'] += $amt;
+            } elseif (str_contains($label, 'CGST')) {
+                $footer['cgst'] += $amt;
+            } elseif (str_contains($label, 'IGST')) {
+                $footer['igst'] += $amt;
+            } elseif (str_contains($label, 'DISCOUNT')) {
+                $footer['discount'] += $amt;
+            }
+        }
+
+        $condSum = array_sum($cond);
+        $src = $condSum > 0.0001 ? $cond : $footer;
+        foreach (['other', 'freight', 'moq', 'screen', 'bank'] as $k) {
+            $out[$k] = (float) ($src[$k] ?? 0);
+        }
+        // Tax / discount always from footer labels when present
+        foreach (['discount', 'sgst', 'cgst', 'igst'] as $k) {
+            $out[$k] = (float) ($footer[$k] ?? 0);
+        }
+
+        foreach (['other', 'freight', 'moq', 'screen', 'bank', 'discount', 'sgst', 'cgst', 'igst'] as $k) {
+            $out[$k] = round((float) $out[$k], 2);
+        }
+        $out['total'] = round(
+            $out['other'] + $out['freight'] + $out['moq'] + $out['screen'] + $out['bank']
+            + $out['sgst'] + $out['cgst'] + $out['igst'] - $out['discount'],
+            2
+        );
+        $out['lines'] = [
+            ['key' => 'other',   'label' => 'Other Charges',  'amount' => $out['other'],   'sap' => 'CondOTHR'],
+            ['key' => 'freight', 'label' => 'Freight',        'amount' => $out['freight'], 'sap' => 'CondFRB1 / CondFRB2'],
+            ['key' => 'moq',     'label' => 'MOQ Charges',    'amount' => $out['moq'],     'sap' => 'CondZB00'],
+            ['key' => 'screen',  'label' => 'Screen Charges', 'amount' => $out['screen'],  'sap' => 'CondZSCI'],
+            ['key' => 'bank',    'label' => 'Bank Charges',   'amount' => $out['bank'],    'sap' => 'CondZBCR'],
+            ['key' => 'discount','label' => 'Discount',       'amount' => $out['discount'],'sap' => ''],
+            ['key' => 'sgst',    'label' => 'SGST',           'amount' => $out['sgst'],    'sap' => ''],
+            ['key' => 'cgst',    'label' => 'CGST',           'amount' => $out['cgst'],    'sap' => ''],
+            ['key' => 'igst',    'label' => 'IGST',           'amount' => $out['igst'],    'sap' => ''],
+        ];
+
+        return $out;
     }
 
     /**
@@ -538,23 +890,35 @@ final class PoTempfinCostingService
                 $items[$item] = true;
             }
             // TOTVALUE / TOT_POQTY repeat on every SO row — count once per PO item
+            $poQty = (float) ($r['tot_poqty'] ?? $r['order_qty'] ?? $r['po_qty'] ?? 0);
+            $soQty = (float) ($r['so_qty'] ?? $r['prwise_so_qty'] ?? 0);
+            $poRate = $r['porate'] ?? $r['po_unit_cost'] ?? $r['net_price'] ?? null;
+            $poRate = ($poRate !== null && $poRate !== '') ? (float) $poRate : null;
+            $poLineNet = ($poRate !== null && $poQty > 0)
+                ? ($poRate * $poQty)
+                : (float) ($r['totvalue'] ?? $r['net_value'] ?? $r['so_wise_po_val'] ?? 0);
+            $budget = $r['budget_cost_per_gmt'] ?? $r['expected_unit_cost'] ?? null;
+            $actual = $r['porate'] ?? $r['actual_cost'] ?? $r['po_unit_cost'] ?? null;
+            $garmentQty = $soQty > 0 ? $soQty : ($poQty > 0 ? $poQty : 1.0);
             if ($item !== '' && !isset($seenValueItems[$item])) {
                 $seenValueItems[$item] = true;
-                $totalValue += (float) ($r['totvalue'] ?? $r['net_value'] ?? 0);
-                $totalOrderQty += (float) ($r['tot_poqty'] ?? $r['order_qty'] ?? $r['po_qty'] ?? 0);
+                $totalValue += $poLineNet;
+                $totalOrderQty += $poQty;
+                if ($budget !== null && $budget !== '') {
+                    $totalExpected += (float) $budget * $garmentQty;
+                }
+                if ($actual !== null && $actual !== '') {
+                    $totalActual += (float) $actual * $garmentQty;
+                }
             } elseif ($item === '') {
-                $totalValue += (float) ($r['totvalue'] ?? $r['net_value'] ?? 0);
-                $totalOrderQty += (float) ($r['tot_poqty'] ?? $r['order_qty'] ?? 0);
-            }
-            $budget = $r['budget_cost_per_gmt'] ?? $r['expected_unit_cost'] ?? null;
-            $actual = $r['actual_cost'] ?? $r['po_unit_cost'] ?? null;
-            $soQty = (float) ($r['so_qty'] ?? $r['prwise_so_qty'] ?? 0);
-            $costQty = $soQty > 0 ? $soQty : 1.0;
-            if ($budget !== null && $budget !== '') {
-                $totalExpected += (float) $budget * $costQty;
-            }
-            if ($actual !== null && $actual !== '') {
-                $totalActual += (float) $actual * $costQty;
+                $totalValue += $poLineNet;
+                $totalOrderQty += $poQty;
+                if ($budget !== null && $budget !== '') {
+                    $totalExpected += (float) $budget * $garmentQty;
+                }
+                if ($actual !== null && $actual !== '') {
+                    $totalActual += (float) $actual * $garmentQty;
+                }
             }
             $u = trim((string) ($r['ouom'] ?? $r['buom'] ?? $r['unit'] ?? ''));
             if ($u !== '' && $unit === '') {
@@ -607,6 +971,12 @@ final class PoTempfinCostingService
         $buom = strtoupper(trim($buom));
         $matDesc = strtoupper(trim($matDesc));
         $currency = strtoupper(trim($currency) ?: 'INR');
+        // CONV must never carry FX rate
+        if ($currency !== 'INR' && abs($conv - $fx) < 0.0001) {
+            $conv = 1.0;
+        } elseif ($currency === 'INR' && $conv > 20) {
+            $conv = 1.0;
+        }
 
         if ($mg === 'THREADS1' && $buom === 'CPS') {
             return round(($porate / 1000.0) * $conv, 4);

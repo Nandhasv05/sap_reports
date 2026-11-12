@@ -6,7 +6,7 @@ declare(strict_types=1);
  * DATE : 03/11/2026
  * DESCRIPTION : SAP Reports User Access Control Controller
  *               Restricted to: admin, saravan, nandhakumar
- *               Reports: View · PO Costing: View/Pass PO/Assign/Validate · ZCOST: Add/Update/Copy/Approve
+ *               Reports: View · PO Costing: View/Pass PO/Assign/Validate/eSign · ZCOST: Add/Update/Copy/Approve
  *               Persisted to dbo.sap_report_userascesscontrol
 */
 
@@ -82,6 +82,8 @@ class UserAccessControlController extends Controller
                     ['key' => 'pass_po', 'label' => 'Pass PO', 'column' => 'can_approve'],
                     ['key' => 'assign', 'label' => 'Assign', 'column' => 'can_assign'],
                     ['key' => 'validate', 'label' => 'Validate', 'column' => 'can_validate'],
+                    // Stored in can_copy (unused for PO Costing otherwise)
+                    ['key' => 'esign', 'label' => 'eSign', 'column' => 'can_copy'],
                 ],
             ],
             $report([
@@ -295,7 +297,7 @@ class UserAccessControlController extends Controller
                     $permissions[$pNo] = [
                         'add' => 0, 'view' => 0, 'edit' => 0, 'approve' => 0,
                         'copy' => 0, 'pass_po' => 0, 'update' => 0,
-                        'assign' => 0, 'validate' => 0,
+                        'assign' => 0, 'validate' => 0, 'esign' => 0,
                     ];
                 }
                 $permissions[$pNo]['add'] = max($permissions[$pNo]['add'], (int) $row['can_add']);
@@ -304,6 +306,7 @@ class UserAccessControlController extends Controller
                 $permissions[$pNo]['update'] = $permissions[$pNo]['edit'];
                 $permissions[$pNo]['approve'] = max($permissions[$pNo]['approve'], (int) $row['can_approve']);
                 $permissions[$pNo]['copy'] = max($permissions[$pNo]['copy'], (int) ($row['can_copy'] ?? 0));
+                $permissions[$pNo]['esign'] = $permissions[$pNo]['copy']; // PO Costing eSign uses can_copy
                 $permissions[$pNo]['pass_po'] = $permissions[$pNo]['approve'];
                 $permissions[$pNo]['assign'] = max($permissions[$pNo]['assign'], (int) ($row['can_assign'] ?? 0));
                 $permissions[$pNo]['validate'] = max($permissions[$pNo]['validate'], (int) ($row['can_validate'] ?? 0));
@@ -641,9 +644,9 @@ class UserAccessControlController extends Controller
         } elseif ($kind === 'po-costing') {
             $flags['can_add'] = 0;
             $flags['can_edit'] = 0;
-            $flags['can_copy'] = 0;
-            // View can stand alone; Pass PO / Assign / Validate keep their own bits
-            if ($flags['can_approve'] === 1 || $flags['can_assign'] === 1 || $flags['can_validate'] === 1) {
+            // can_copy stores eSign for PO Costing
+            // View can stand alone; Pass PO / Assign / Validate / eSign keep their own bits
+            if ($flags['can_approve'] === 1 || $flags['can_assign'] === 1 || $flags['can_validate'] === 1 || $flags['can_copy'] === 1) {
                 $flags['can_view'] = 1;
             }
         } elseif ($kind === 'zcost') {

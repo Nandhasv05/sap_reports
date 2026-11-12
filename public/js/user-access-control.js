@@ -171,6 +171,7 @@
                     || !!Number(row[column])
                     || !!Number(row[colKey])
                     || (action === 'pass_po' && !!Number(row.approve))
+                    || (action === 'esign' && (!!Number(row.esign) || !!Number(row.copy)))
                     || (action === 'update' && !!Number(row.edit))
                     || (action === 'assign' && !!Number(row.assign))
                     || (action === 'validate' && !!Number(row.validate));

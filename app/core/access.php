@@ -89,7 +89,8 @@ function sap_reports_user_can_access(string $module, ?array $user = null): bool
         return sap_reports_user_can($mod, 'view', $user)
             || sap_reports_user_can($mod, 'approve', $user)
             || sap_reports_user_can($mod, 'assign', $user)
-            || sap_reports_user_can($mod, 'validate', $user);
+            || sap_reports_user_can($mod, 'validate', $user)
+            || sap_reports_user_can($mod, 'esign', $user);
     }
     if ($mod === 'zcost') {
         return sap_reports_user_can($mod, 'view', $user)
@@ -177,6 +178,7 @@ function sap_reports_user_can(string $module, string $action = 'view', ?array $u
     $action = strtolower(trim($action));
     $actionMap = [
         'pass_po' => 'approve',
+        'esign' => 'copy', // PO Costing eSign stored in can_copy
         'update' => 'edit',
     ];
     if (isset($actionMap[$action])) {

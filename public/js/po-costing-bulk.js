@@ -68,55 +68,42 @@
     let filtered = [];
     let page = 1;
     const pageSize = 25;
+    let serverTotal = 0;
+    let serverPageCount = 1;
+    let listTotals = null;
     let activePo = null;
     let itemCache = {};
     let toastTimer = null;
     let runtimeToken = 0;
     let runtimeRunning = false;
     let validateQueue = [];
+    let autoValidatePage = true;
+    let listFetching = false;
 
     const COL_DEFS = [
-        { key: 'check', label: 'Select', locked: true },
         { key: 'sno', label: 'S.No', locked: true },
-        { key: 'po', label: 'PONO' },
+        { key: 'status', label: 'Validation Status' },
+        { key: 'po', label: 'PO Number' },
         { key: 'date', label: 'PO Date' },
         { key: 'material', label: 'Material Type' },
         { key: 'items', label: 'No. of Items' },
         { key: 'vendor_name', label: 'Vendor Name' },
         { key: 'vendor_code', label: 'Vendor Code' },
         { key: 'passed', label: 'Passed' },
-        { key: 'exceptions', label: 'Exceptions' },
+        { key: 'exceptions', label: 'Unmatched' },
         { key: 'pending', label: 'Pending' },
-        { key: 'status', label: 'Validation Status' },
-        { key: 'so_qty', label: 'Total SO Qty' },
-        { key: 'prwise_so_qty', label: 'Total PRWISE_SO_QTY' },
-        { key: 'consumption', label: 'Total Consumption' },
-        { key: 'reqqty', label: 'Total Req Qty' },
-        { key: 'tot_poqty', label: 'Total PO Qty' },
-        { key: 'so_wise_poqty', label: 'Total SO Wise PO Qty' },
-        { key: 'so_wise_po_val', label: 'Total SO Wise PO Val' },
-        { key: 'totvalue', label: 'Total Value' },
-        { key: 'po_currency', label: 'PO Currency' },
-        { key: 'budgeted_cons', label: 'Total BUDGETED_CONS' },
-        { key: 'budget_inr', label: 'Total BUDGET_INR' },
-        { key: 'budget_cost_per_gmt', label: 'Total BUDGET_COST_PER_GMT' },
-        { key: 'conv', label: 'Total CONV' },
-        { key: 'actual_cost', label: 'Total ACTUAL_COST' },
-        { key: 'pdf', label: 'View PDF', locked: true },
-        { key: 'last', label: 'Last Validated' },
+        { key: 'totvalue', label: 'Total PO INR Value' },
+        { key: 'pdf', label: 'View PDF' },
     ];
     let hiddenCols = new Set();
     let pcbTablePrefManager = null;
     let pcbItemTablePrefManager = null;
     let currentSort = { key: null, dir: null };
     const NUMERIC_SORT_KEYS = new Set([
-        'sno', 'items', 'passed', 'exceptions', 'pending',
-        'so_qty', 'prwise_so_qty', 'consumption', 'reqqty', 'tot_poqty',
-        'so_wise_poqty', 'so_wise_po_val', 'totvalue',
-        'budgeted_cons', 'budget_inr', 'budget_cost_per_gmt', 'conv', 'actual_cost',
+        'sno', 'items', 'passed', 'exceptions', 'pending', 'totvalue',
     ]);
-    const MONEY_KEYS = new Set(['so_wise_po_val', 'totvalue', 'budget_inr']);
-    const RATE_KEYS = new Set(['consumption', 'budgeted_cons', 'budget_cost_per_gmt', 'conv', 'actual_cost']);
+    const MONEY_KEYS = new Set(['totvalue']);
+    const RATE_KEYS = new Set();
     const colFilterState = Object.create(null);
     let assignedUser = { id: '', username: '' };
     let validateTargetPos = [];
@@ -152,17 +139,14 @@
     }
 
     /*
-    * Handle Progress Bar Functionality
-    */
-    function setProgress(on, done = 0, total = 0, label = 'Validating…') {
-        const wrap = $('pcbProgress');
-        if (!wrap) return;
-        wrap.hidden = !on;
-        if (!on) return;
-        const pct = total ? Math.round((done / total) * 100) : 0;
-        if ($('pcbProgressLabel')) $('pcbProgressLabel').textContent = label;
-        if ($('pcbProgressPct')) $('pcbProgressPct').textContent = pct + '%';
-        if ($('pcbProgressBar')) $('pcbProgressBar').style.width = pct + '%';
+     * Full-screen spinner while page POs validate (progress bar removed).
+     */
+    function setProgress(on) {
+        if (on) {
+            showSpinner(true);
+            return;
+        }
+        if (!listFetching && !runtimeRunning) showSpinner(false);
     }
 
     /*************
@@ -173,6 +157,20 @@
         const val = radio?.value || $('pcbMat')?.value || 'all';
         if ($('pcbMat') && $('pcbMat').value !== val) $('pcbMat').value = val;
         return val || 'all';
+    }
+
+    function selectedApprovedStatus() {
+        const radio = document.querySelector('input[name="pcb_approved"]:checked');
+        const raw = radio != null
+            ? String(radio.value || '')
+            : String($('pcbApproved')?.value || cfg.approvedStatus || '');
+        const val = (raw === 'Approved' || raw === 'NotApproved') ? raw : 'Approved';
+        if ($('pcbApproved') && $('pcbApproved').value !== val) $('pcbApproved').value = val;
+        document.querySelectorAll('input[name="pcb_approved"]').forEach((el) => {
+            el.checked = el.value === val;
+        });
+        cfg.approvedStatus = val;
+        return val;
     }
 
     function workbenchUrl(po) {
@@ -195,12 +193,30 @@
         let cls = 'is-pending';
         let label = s;
         if (s === 'PASSED') cls = 'is-pass';
-        else if (s === 'EXCEPTION') cls = 'is-fail';
-        else if (s === 'NEEDS_REVIEW') {
+        else if (s === 'EXCEPTION' || s === 'UNMATCHED') {
+            cls = 'is-fail';
+            label = 'UNMATCHED';
+        } else if (s === 'NEEDS_REVIEW') {
             cls = 'is-review';
             label = 'NEEDS REVIEW';
         }
-        return `<span class="pcb-badge ${cls}">${esc(label)}</span>`;
+        return `<span class="pcb-badge ${cls}" title="Click Unmatched KPI for compare rules">${esc(label)}</span>`;
+    }
+
+    function openRulesPopover() {
+        const pop = $('pcbRulesPopover');
+        const kpi = $('pcbUnmatchedKpi');
+        if (!pop) return;
+        pop.hidden = false;
+        if (kpi) kpi.setAttribute('aria-expanded', 'true');
+    }
+
+    function closeRulesPopover() {
+        const pop = $('pcbRulesPopover');
+        const kpi = $('pcbUnmatchedKpi');
+        if (!pop) return;
+        pop.hidden = true;
+        if (kpi) kpi.setAttribute('aria-expanded', 'false');
     }
 
     /*****
@@ -311,7 +327,62 @@
 
     function isFooterLine(r) {
         const kind = String(r?.row_kind || '').toLowerCase();
-        return kind === 'footer' || kind === 'subtotal' || kind === 'total';
+        return kind === 'footer' || kind === 'subtotal' || kind === 'total' || kind === 'charge' || kind === 'tax';
+    }
+
+    const ITEM_FOOTER_SUM_KEYS = [
+        'so_qty', 'prwise_so_qty', 'consumption', 'reqqty', 'tot_poqty',
+        'so_wise_poqty', 'so_wise_po_val', 'totvalue', 'budgeted_cons', 'budget_inr',
+        'budget_cost_per_gmt', 'conv', 'actual_cost',
+    ];
+
+    function itemFooterLabel(r) {
+        return String(r?.pono || r?.purchase_order || r?.matgroup || r?.validation_result || '')
+            .toUpperCase()
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function hasItemClassicFooter(list) {
+        return (list || []).some((r) => {
+            const label = itemFooterLabel(r).replace(/-/g, '');
+            return label === 'SUBTOTAL' || label === 'TOTAL' || label.includes('SUB TOTAL');
+        });
+    }
+
+    function buildItemClassicFooter(detailRows) {
+        const sums = Object.fromEntries(ITEM_FOOTER_SUM_KEYS.map((k) => [k, 0]));
+        (detailRows || []).forEach((r) => {
+            ITEM_FOOTER_SUM_KEYS.forEach((k) => {
+                const n = Number(itemCellValue(k, r));
+                if (Number.isFinite(n)) sums[k] += n;
+            });
+        });
+        const mk = (label, kind, withSums) => {
+            const row = {
+                pono: label,
+                purchase_order: label,
+                matgroup: label,
+                row_kind: kind,
+                status: 'FOOTER',
+                validation_result: label,
+                needs_manual_match: false,
+                _synthetic_footer: true,
+            };
+            ITEM_FOOTER_SUM_KEYS.forEach((k) => {
+                row[k] = withSums ? Number(sums[k] || 0) : null;
+            });
+            return row;
+        };
+        return [
+            mk('SUB-TOTAL', 'footer', true),
+            mk('OTHER CHARGES', 'charge', false),
+            mk('MOQ CHARGES', 'charge', false),
+            mk('FREIGHT CHARGES', 'charge', false),
+            mk('SCREEN CHARGES', 'charge', false),
+            mk('BANK CHARGES', 'charge', false),
+            mk('TOTAL', 'total', true),
+        ];
     }
 
     function isMatchedLine(r) {
@@ -367,29 +438,35 @@
             if (item) seenItems.add(item);
             if (mat) poMats.add(mat);
 
+            const poRate = nNum(r.porate ?? r.po_unit_cost ?? r.net_price ?? r.actual_cost);
+            const poLineNet = (poRate > 0 && orderQty > 0)
+                ? (poRate * orderQty)
+                : nNum(r.totvalue ?? r.net_value ?? r.so_wise_po_val);
+
             if (item) {
                 if (!t._seenValue) t._seenValue = new Set();
                 if (!t._seenValue.has(item)) {
                     t._seenValue.add(item);
                     t.tot_poqty += orderQty;
-                    t.totvalue += nNum(r.totvalue ?? r.net_value);
+                    t.totvalue += poLineNet;
                 }
             } else {
                 t.tot_poqty += orderQty;
-                t.totvalue += nNum(r.totvalue ?? r.net_value);
+                t.totvalue += poLineNet;
             }
 
             if (isMatchedLine(r)) {
                 if (item) zItems.add(item);
                 if (mat) zMats.add(mat);
-                if (soQty > 0) t.z_so_qty += soQty;
-                else if (item && !seenZItem.has(item)) {
+                // Once per matched PO item — avoid double-count across SO lines
+                if (item && !seenZItem.has(item)) {
                     seenZItem.add(item);
-                    t.z_so_qty += orderQty;
+                    t.z_so_qty += orderQty > 0 ? orderQty : soQty;
+                    t.z_net_value += (budget > 0 ? budget : budgetInr) * (budget > 0 ? costQty : 1);
                 } else if (!item) {
-                    t.z_so_qty += orderQty;
+                    t.z_so_qty += orderQty > 0 ? orderQty : soQty;
+                    t.z_net_value += (budget > 0 ? budget : budgetInr) * (budget > 0 ? costQty : 1);
                 }
-                t.z_net_value += (budget > 0 ? budget : budgetInr) * (budget > 0 ? costQty : 1);
             }
 
             if (!t.po_currency) t.po_currency = String(r.po_currency || r.currency || 'INR');
@@ -430,6 +507,25 @@
                 return qty(r._pending);
             case 'status':
                 return statusBadge(r._validation_status);
+            case 'totvalue': {
+                const amt = Number(r.totvalue ?? r.total_value ?? r.net_value ?? 0) || 0;
+                return `<span class="pcb-inr-val">₹ ${money2(amt)}</span>`;
+            }
+            case 'validate': {
+                const po = String(r.purchase_order || '');
+                const done = !!itemCache[po];
+                const busy = runtimeRunning && validateQueue.includes(po);
+                if (done) {
+                    return `<button type="button" class="pcb-validate-btn is-done" data-po="${esc(po)}" title="Already validated" disabled>
+                        <span class="material-icons-round">check_circle</span>
+                        Validated
+                    </button>`;
+                }
+                return `<button type="button" class="pcb-validate-btn${busy ? ' is-busy' : ''}" data-po="${esc(po)}" title="Validate this PO" ${busy ? 'disabled' : ''}>
+                    <span class="material-icons-round">${busy ? 'hourglass_top' : 'verified'}</span>
+                    ${busy ? 'Validating…' : 'Validate'}
+                </button>`;
+            }
             case 'po_currency':
                 return dash(r.po_currency || 'INR');
             case 'pdf':
@@ -484,7 +580,7 @@
             case 'pending': return [r._pending, qty(r._pending)].join(' ');
             case 'status': {
                 const s = String(r._validation_status || '');
-                return s + (s === 'EXCEPTION' ? ' fail failed exception' : '') + (s === 'PASSED' ? ' pass ok' : '') + (s === 'PENDING' ? ' pending' : '');
+                return s + (s === 'EXCEPTION' || s === 'UNMATCHED' ? ' fail failed exception unmatched' : '') + (s === 'PASSED' ? ' pass ok' : '') + (s === 'PENDING' ? ' pending' : '');
             }
             case 'last': return String(r._last_validated || '');
             case 'po_currency': return String(r.po_currency || 'INR');
@@ -534,7 +630,7 @@
             return true;
         });
         applySort();
-        page = 1;
+        // Server page stays as-is; current page rows are already one API page.
         updateFilterUi();
         updateSortUi();
         renderTable();
@@ -966,22 +1062,47 @@
         if (label) label.textContent = enabled ? 'Scroll Body Only' : 'Expand Table';
     }
 
-    function fillKpis() {
-        const total = filtered.length;
-        let passed = 0, exc = 0, pend = 0, value = 0;
-        filtered.forEach((r) => {
-            value += Number(r.total_value || 0);
-            if (r._validation_status === 'PASSED') passed++;
-            else if (r._validation_status === 'EXCEPTION') exc++;
-            else pend++;
+    function listStatusFromCache(cached) {
+        if (!cached || !Array.isArray(cached.records)) return 'PENDING';
+        let passed = 0;
+        let exceptions = 0;
+        let needsReview = 0;
+        cached.records.forEach((r) => {
+            const st = String(r.status || '').toUpperCase();
+            if (st === 'PASS') passed++;
+            else if (st === 'NEEDS_REVIEW') needsReview++;
+            else exceptions++;
         });
+        if (exceptions > 0) return 'EXCEPTION';
+        if (needsReview > 0) return 'NEEDS_REVIEW';
+        if (passed > 0) return 'PASSED';
+        return 'PENDING';
+    }
+
+    function fillKpis() {
+        const total = serverTotal || filtered.length;
+        let passed = 0;
+        let exc = 0;
+        let value = 0;
+        Object.keys(itemCache).forEach((po) => {
+            const st = listStatusFromCache(itemCache[po]);
+            if (st === 'PASSED') passed++;
+            else if (st === 'EXCEPTION') exc++;
+        });
+        const pend = Math.max(0, total - passed - exc);
+        value = Number(listTotals?.total_value ?? 0);
+        if (!listTotals) {
+            filtered.forEach((r) => { value += Number(r.total_value || 0); });
+        }
         const barPct = (n) => (total ? Math.min(100, Math.round((n / total) * 100)) : 0);
         if ($('pcbKpiTotal')) $('pcbKpiTotal').textContent = qty(total);
         if ($('pcbKpiPassed')) $('pcbKpiPassed').textContent = qty(passed);
         if ($('pcbKpiExceptions')) $('pcbKpiExceptions').textContent = qty(exc);
         if ($('pcbKpiPending')) $('pcbKpiPending').textContent = qty(pend);
         if ($('pcbKpiPassedPct')) $('pcbKpiPassedPct').textContent = `Passed (${pctLabel(passed, total)})`;
-        if ($('pcbKpiExcPct')) $('pcbKpiExcPct').textContent = `Exceptions (${pctLabel(exc, total)})`;
+        if ($('pcbKpiExcPct')) {
+            $('pcbKpiExcPct').innerHTML = `Data Not Matched (${pctLabel(exc, total)}) <span class="material-icons-round pcb-kpi-help" aria-hidden="true">info</span>`;
+        }
         if ($('pcbKpiPendPct')) $('pcbKpiPendPct').textContent = `Pending (${pctLabel(pend, total)})`;
         if ($('pcbKpiValue')) $('pcbKpiValue').textContent = '₹ ' + money(value);
         if ($('pcbKpiPassedBar')) $('pcbKpiPassedBar').style.width = barPct(passed) + '%';
@@ -996,10 +1117,9 @@
             card.classList.add('is-pulse');
         });
 
-        const start = (page - 1) * pageSize;
-        const showing = Math.min(pageSize, Math.max(0, filtered.length - start));
-        if ($('pcbCount')) $('pcbCount').textContent = filtered.length
-            ? `Showing ${showing} of ${filtered.length} purchase orders`
+        const showing = filtered.length;
+        if ($('pcbCount')) $('pcbCount').textContent = total
+            ? `Showing ${showing} of ${total} purchase orders`
             : 'No purchase orders';
 
         let poItems = 0;
@@ -1015,11 +1135,16 @@
             poItems += hasLines ? Number(r._po_items) : Number(r.items_count || 0);
             poMats += Number(r._po_materials || 0);
             poSoQty += Number(r.tot_poqty || r.so_qty || 0);
-            poValue += Number(r.totvalue || r.total_value || 0);
+            // Prefer PORATE × TOT_POQTY when available (same as workbench)
+            const rate = Number(r.porate ?? r.po_unit_cost ?? 0) || 0;
+            const oq = Number(r.tot_poqty || 0) || 0;
+            poValue += (rate > 0 && oq > 0)
+                ? (rate * oq)
+                : Number(r.totvalue || r.total_value || 0);
             zItems += Number(r._z_items || 0);
             zMats += Number(r._z_materials || 0);
             zSoQty += Number(r._z_so_qty || 0);
-            zValue += Number(r._z_net_value || r.budget_inr || 0);
+            zValue += Number(r._z_net_value || 0);
         });
         const setCmp = (id, text) => {
             const el = document.getElementById(id);
@@ -1036,8 +1161,8 @@
     }
 
     function pageRows() {
-        const start = (page - 1) * pageSize;
-        return filtered.slice(start, start + pageSize);
+        // API returns the current page only — do not re-slice client-side.
+        return filtered;
     }
 
     function renderTable() {
@@ -1071,7 +1196,6 @@
                 const active = activePo === r.purchase_order ? ' is-active' : '';
                 return `<article class="pcb-card${active}" data-po="${esc(r.purchase_order)}">
                     <div class="pcb-card-top">
-                        <label class="pcb-card-check"><input type="checkbox" class="pcb-row-check" data-po="${esc(r.purchase_order)}" ${r._checked ? 'checked' : ''}></label>
                         <button type="button" class="pcb-po-link" data-po="${esc(r.purchase_order)}">${esc(r.purchase_order)}</button>
                         ${statusBadge(r._validation_status)}
                     </div>
@@ -1084,7 +1208,7 @@
                         <span><b>${qty(r.items_count)}</b> items</span>
                         <span><b>₹ ${money(r.total_value)}</b></span>
                         <span class="is-pass">${qty(r._passed)} pass</span>
-                        <span class="is-fail">${qty(r._exceptions)} exc</span>
+                        <span class="is-fail">${qty(r._exceptions)} unmatched</span>
                     </div>
                     <div class="pcb-card-meta">
                         <span>${dash(r._last_validated)}</span>
@@ -1100,12 +1224,12 @@
             }).join('');
         }
 
-        const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
+        const pages = Math.max(1, serverPageCount || 1);
         if ($('pcbPager')) {
             $('pcbPager').hidden = pages <= 1;
             if ($('pcbPageInfo')) $('pcbPageInfo').textContent = `Page ${page} of ${pages}`;
-            if ($('pcbPrev')) $('pcbPrev').disabled = page <= 1;
-            if ($('pcbNext')) $('pcbNext').disabled = page >= pages;
+            if ($('pcbPrev')) $('pcbPrev').disabled = page <= 1 || runtimeRunning || listFetching;
+            if ($('pcbNext')) $('pcbNext').disabled = page >= pages || runtimeRunning || listFetching;
         }
         applyColumnVisibility();
         updateSortUi();
@@ -1204,8 +1328,9 @@
         return String($('pcbRange')?.value || cfg.range?.preset || 'today');
     }
 
-    async function fetchPos(e) {
-        e?.preventDefault();
+    async function fetchPos(e, opts = {}) {
+        e?.preventDefault?.();
+        if (listFetching) return;
         const range = currentRange();
         applyRangePreset(range, { fillDates: range !== 'custom' });
         const from = $('pcbFrom')?.value || '';
@@ -1230,6 +1355,9 @@
         }
         const supplier = $('pcbSupplier')?.value || '';
         const mat = selectedMat();
+        const approvedStatus = selectedApprovedStatus();
+        const resetCache = opts.resetCache === true || (opts.resetCache !== false && opts.page == null);
+        const pageToLoad = Math.max(1, Number(opts.page != null ? opts.page : (resetCache ? 1 : page)) || 1);
         const params = new URLSearchParams({
             list: '1',
             range,
@@ -1238,11 +1366,19 @@
             supplier,
             mat_cat: mat,
             view: 'costing',
+            page: String(pageToLoad),
+            page_size: String(pageSize),
             _: String(Date.now()),
         });
+        if (approvedStatus === 'Approved' || approvedStatus === 'NotApproved') {
+            params.set('approved_status', approvedStatus);
+        }
         stopRuntimeValidation();
+        listFetching = true;
         showSpinner(true);
         setProgress(false);
+        if ($('pcbPrev')) $('pcbPrev').disabled = true;
+        if ($('pcbNext')) $('pcbNext').disabled = true;
         try {
             const res = await fetch(`${cfg.dataUrl}?${params}`, {
                 headers: { Accept: 'application/json' },
@@ -1251,31 +1387,90 @@
             });
             const json = await res.json();
             if (!res.ok || json.success === false) throw new Error(json.message || json.error || 'Fetch failed');
-            const records = Array.isArray(json.data?.records) ? json.data.records : [];
-            itemCache = {};
+            const data = json.data || {};
+            const records = Array.isArray(data.records) ? data.records : [];
+            if (resetCache) itemCache = {};
+            page = Number(data.page || pageToLoad) || 1;
+            serverTotal = Number(data.total || records.length) || 0;
+            serverPageCount = Number(data.page_count || Math.max(1, Math.ceil(serverTotal / pageSize))) || 1;
+            listTotals = data.totals && typeof data.totals === 'object' ? data.totals : null;
+            if (Array.isArray(data.suppliers) && data.suppliers.length) {
+                // Prefer full supplier list from API (all pages)
+                const sel = $('pcbSupplier');
+                if (sel) {
+                    const current = String(sel.value || '').trim();
+                    const keep = sel.querySelector('option[value=""]');
+                    sel.innerHTML = '';
+                    if (keep) sel.appendChild(keep);
+                    else {
+                        const opt = document.createElement('option');
+                        opt.value = '';
+                        opt.textContent = 'All suppliers';
+                        sel.appendChild(opt);
+                    }
+                    data.suppliers.forEach((s) => {
+                        const code = String(s.code || s.supplier || '').trim();
+                        if (!code) return;
+                        const opt = document.createElement('option');
+                        opt.value = code;
+                        opt.textContent = String(s.name || code);
+                        if (code === current) opt.selected = true;
+                        sel.appendChild(opt);
+                    });
+                }
+            }
             allRows = records.map((r) => normalizeRow(r));
-            refreshSupplierOptions(allRows);
+            if (!Array.isArray(data.suppliers) || !data.suppliers.length) {
+                refreshSupplierOptions(allRows);
+            }
             activePo = null;
             closeOffcanvas();
             applyFilter();
-            enqueueSelectedValidation(allRows.map((r) => String(r.purchase_order || '')).filter(Boolean));
+            updateValidatedBtn();
             const u = new URL(cfg.pageUrl || 'purchase-order', window.location.origin);
             u.searchParams.set('view', 'costing');
             u.searchParams.set('range', range);
+            u.searchParams.set('page', String(page));
             if (from) u.searchParams.set('from', from);
             if (to) u.searchParams.set('to', to);
             if (supplier) u.searchParams.set('supplier', supplier);
             if (mat !== 'all') u.searchParams.set('mat_cat', mat);
+            if (approvedStatus === 'Approved' || approvedStatus === 'NotApproved') {
+                u.searchParams.set('approved_status', approvedStatus);
+            }
             window.history.replaceState({}, '', u.pathname + u.search);
-            toast(`Loaded ${records.length.toLocaleString('en-IN')} purchase orders.`, 'ok');
+
+            // Validate only this page's POs (skip already cached from prior visits)
+            if (autoValidatePage && cfg.canValidate !== false) {
+                const pagePos = allRows
+                    .map((r) => String(r.purchase_order || ''))
+                    .filter((po) => po && !itemCache[po]);
+                if (pagePos.length) {
+                    runBulkValidation(pagePos);
+                }
+            }
         } catch (err) {
             stopRuntimeValidation();
             allRows = [];
+            serverTotal = 0;
+            serverPageCount = 1;
+            listTotals = null;
             applyFilter();
             toast(err.message || 'Unable to fetch POs', 'error');
         } finally {
-            showSpinner(false);
+            listFetching = false;
+            // Keep full-screen spinner if page validation is running
+            if (!runtimeRunning) showSpinner(false);
+            renderTable();
         }
+    }
+
+    async function goToPage(nextPage) {
+        const target = Math.max(1, Math.min(serverPageCount || 1, Number(nextPage) || 1));
+        if (listFetching) return;
+        if (target === page && allRows.length) return;
+        // Stop in-flight page validation; fetchPos will validate the new page.
+        await fetchPos(null, { page: target, resetCache: false });
     }
 
     function refreshSupplierOptions(rows) {
@@ -1385,6 +1580,62 @@
         const label = $('pcbRuntimeText');
         if (wrap) wrap.hidden = !on;
         if (label && text) label.textContent = text;
+        updateValidatedBtn(on ? text : '');
+    }
+
+    function pendingValidatePos() {
+        return allRows
+            .map((r) => String(r.purchase_order || ''))
+            .filter((po) => po && !itemCache[po]);
+    }
+
+    function updateValidatedBtn(runtimeText = '') {
+        const btn = $('pcbValidatedBtn');
+        const label = $('pcbValidatedBtnLabel');
+        if (!btn) return;
+        const pending = pendingValidatePos().length;
+        const total = allRows.length;
+        const done = Math.max(0, total - pending);
+        if (!total) {
+            btn.disabled = true;
+            if (label) label.textContent = 'Validated';
+            btn.classList.remove('is-running');
+            return;
+        }
+        if (runtimeRunning) {
+            btn.disabled = true;
+            btn.classList.add('is-running');
+            if (label) label.textContent = runtimeText || `Validating ${done}/${total}`;
+            return;
+        }
+        btn.classList.remove('is-running');
+        if (pending <= 0) {
+            btn.disabled = true;
+            if (label) label.textContent = `Validated ${done}/${total}`;
+            return;
+        }
+        btn.disabled = false;
+        if (label) label.textContent = done > 0 ? `Validated (${pending} left)` : 'Validated';
+    }
+
+    function runBulkValidation(extraPos = null) {
+        if (cfg.canValidate === false) {
+            toast('You do not have permission to validate.', 'error');
+            return;
+        }
+        if (runtimeRunning) {
+            toast('Validation is already running.', 'info');
+            return;
+        }
+        const targets = Array.isArray(extraPos)
+            ? extraPos.map(String).filter((po) => po && !itemCache[po])
+            : pendingValidatePos();
+        if (!targets.length) {
+            toast(allRows.length ? 'All loaded POs are already validated.' : 'Load purchase orders first.', 'info');
+            updateValidatedBtn();
+            return;
+        }
+        enqueueSelectedValidation(targets);
     }
 
     function stopRuntimeValidation() {
@@ -1392,7 +1643,8 @@
         runtimeRunning = false;
         validateQueue = [];
         setRuntimeStatus(false);
-        setProgress(false);
+        if (!listFetching) showSpinner(false);
+        updateValidatedBtn();
     }
 
     function selectedPendingPos() {
@@ -1422,8 +1674,8 @@
         let done = 0;
         let fail = 0;
         const startedWith = validateQueue.length;
-        setRuntimeStatus(true, `Loading PO vs zCOST 0/${startedWith}`);
-        setProgress(true, 0, startedWith, 'Loading PO vs zCOST totals…');
+        setRuntimeStatus(true, `Validating 0/${startedWith}`);
+        showSpinner(true);
 
         const workers = Array.from({ length: Math.min(RUNTIME_CONCURRENCY, Math.max(1, validateQueue.length)) }, async () => {
             while (token === runtimeToken) {
@@ -1444,8 +1696,7 @@
                 if (token !== runtimeToken) return;
                 const remaining = validateQueue.length;
                 const total = done + remaining;
-                setProgress(true, done, total, `Validated ${done}/${total}${fail ? ` · ${fail} failed` : ''}`);
-                setRuntimeStatus(true, `Loading PO vs zCOST ${done}/${total}`);
+                setRuntimeStatus(true, `Validating ${done}/${total}`);
                 if (done % 2 === 0 || remaining === 0 || pageRows().some((r) => r.purchase_order === po)) {
                     fillKpis();
                     renderTable();
@@ -1467,12 +1718,13 @@
             return;
         }
 
-        setProgress(false);
+        showSpinner(false);
         setRuntimeStatus(false);
+        updateValidatedBtn();
         toast(
             fail
-                ? `Loaded totals for ${done - fail} PO(s) · ${fail} failed`
-                : `PO vs zCOST totals loaded for ${done} PO(s)`,
+                ? `Validated ${done - fail} PO(s) · ${fail} failed`
+                : `Validated ${done} PO(s)`,
             fail ? 'info' : 'ok'
         );
     }
@@ -1494,9 +1746,9 @@
         } else if (s === 'NEEDS_REVIEW') {
             cls = 'is-review';
             label = 'NEEDS REVIEW';
-        } else if (s === 'FAIL' || s === 'EXCEPTION') {
+        } else if (s === 'FAIL' || s === 'EXCEPTION' || s === 'UNMATCHED') {
             cls = 'is-fail';
-            label = 'EXCEPTION';
+            label = 'UNMATCHED';
         }
         return `<span class="pcw-pill ${cls}">${esc(label)}</span>`;
     }
@@ -1564,12 +1816,13 @@
         { key: 'po_currency', label: 'PO_CURRENCY' },
         { key: 'costing_quotation_no', label: 'Quotation No' },
         { key: 'costing_item_no', label: 'zCOST Item' },
-        { key: 'maktx', label: 'MAKTX' },
+        { key: 'zsection', label: 'ZSECTION' },
+        { key: 'maktx', label: 'Material Desc' },
         { key: 'budgeted_cons', label: 'BUDGETED_CONS' },
         { key: 'budget_inr', label: 'BUDGET_INR' },
         { key: 'budget_currency', label: 'BUDGET_CURRENCY' },
         { key: 'budget_conv_rt', label: 'BUDGET_CONV_RT' },
-        { key: 'budget_cost_per_gmt', label: 'BUDGET_COST_PER_GMT' },
+        { key: 'budget_cost_per_gmt', label: 'BUDGET_COST_PER_PIECE' },
         { key: 'conv', label: 'CONV' },
         { key: 'buom', label: 'BUOM' },
         { key: 'actual_cost', label: 'ACTUAL_COST' },
@@ -1581,7 +1834,7 @@
         'budget_conv_rt', 'budget_cost_per_gmt', 'conv', 'actual_cost', 'variance_pct',
     ]);
     const ITEM_ZCOST_COLS = new Set([
-        'costing_quotation_no', 'costing_item_no', 'maktx',
+        'costing_quotation_no', 'costing_item_no', 'zsection', 'maktx',
         'budgeted_cons', 'budget_inr', 'budget_currency', 'budget_conv_rt', 'budget_cost_per_gmt',
         'conv', 'buom', 'actual_cost', 'variance_pct',
     ]);
@@ -1655,6 +1908,8 @@
                 if (/^\d+-\d+$/.test(raw)) return '';
                 return raw;
             }
+            case 'zsection':
+                return r.zsection || r.cost_section || r.section || '';
             case 'maktx':
                 return r.maktx || r.cost_description || '';
             case 'budgeted_cons':
@@ -1672,7 +1927,8 @@
             case 'buom':
                 return r.buom || r.ouom || r.unit || '';
             case 'actual_cost':
-                return r.actual_cost ?? r.po_unit_cost;
+                // Show PORATE in ACTUAL_COST column
+                return r.porate ?? r.po_unit_cost ?? r.net_price ?? r.actual_cost;
             case 'variance_pct':
                 return r.variance_pct;
             default:
@@ -1685,9 +1941,28 @@
         const classes = [];
         if (ITEM_NUM_COLS.has(key)) classes.push('num');
         classes.push(`pcw-col-${group}`);
-        if (ITEM_HIGHLIGHT_COLS.has(key)) classes.push('pcw-hl-cost');
+        if (ITEM_HIGHLIGHT_COLS.has(key) && !isFooterLine(r)) classes.push('pcw-hl-cost');
         const cls = classes.length ? ` class="${classes.join(' ')}"` : '';
         let inner = '—';
+
+        if (isFooterLine(r)) {
+            if (key === 'pono') {
+                inner = `<strong class="pcw-footer-label">${esc(r.pono || r.matgroup || r.validation_result || '—')}</strong>`;
+            } else if (key === 'status') {
+                inner = '';
+            } else if (r.row_kind === 'charge' || r.row_kind === 'tax') {
+                inner = '';
+            } else if (ITEM_FOOTER_SUM_KEYS.includes(key)) {
+                const v = itemCellValue(key, r);
+                if (key === 'so_wise_po_val' || key === 'totvalue' || key === 'budget_inr') inner = money2(v);
+                else if (key === 'actual_cost' || key === 'budget_cost_per_gmt' || key === 'consumption' || key === 'conv' || key === 'budgeted_cons') inner = num(v, 4);
+                else inner = qty(v);
+            } else {
+                inner = '';
+            }
+            return `<td${cls} data-col-key="${esc(key)}" data-col-group="${esc(group)}">${inner}</td>`;
+        }
+
         switch (key) {
             case 'status':
                 inner = resultPill(r.status);
@@ -1709,6 +1984,9 @@
                 break;
             case 'costing_item_no':
                 inner = `<span class="pcw-nav-chip" title="zCOST ITEM">${dash(itemCellValue(key, r))}</span>`;
+                break;
+            case 'zsection':
+                inner = `<span class="pcw-nav-chip" title="ZSECTION">${dash(itemCellValue(key, r))}</span>`;
                 break;
             case 'maktx':
                 inner = `<span class="pcw-compare-maktx" title="${esc(itemCellValue(key, r))}">${dash(itemCellValue(key, r))}</span>`;
@@ -2127,7 +2405,7 @@
         }
         groupRow.innerHTML = runs.map((run) => {
             const isPo = run.group !== 'zcost';
-            const label = isPo ? 'PO Data' : 'zCOST Data';
+            const label = isPo ? 'PO Data' : 'Costing Data';
             const icon = isPo ? 'receipt_long' : 'calculate';
             const cls = isPo ? 'is-po' : 'is-zcost';
             return `<th class="pcw-group-th ${cls}" data-group="${esc(run.group)}" colspan="${run.span}">
@@ -2201,16 +2479,19 @@
         if (!body) return;
         const filtered = filterItemRows();
         const items = filtered;
+        const detailTotal = activeItemRows.filter((r) => !isFooterLine(r)).length;
+        const detailFiltered = items.filter((r) => !isFooterLine(r));
         updateItemFilterUi();
         if ($('pcbItemCount')) {
-            if (!filtered.length) {
+            if (!detailFiltered.length) {
                 $('pcbItemCount').textContent = 'No items';
             } else {
-                $('pcbItemCount').textContent = `Showing ${filtered.length} of ${activeItemRows.length} items`;
+                $('pcbItemCount').textContent = `Showing ${detailFiltered.length} of ${detailTotal} items`;
             }
             $('pcbItemCount').classList.toggle('is-filtered', !!(itemSearchQuery() || Object.keys(itemColFilterMap()).length));
         }
-        if (!items.length) {
+        const detailItems = items.filter((r) => !isFooterLine(r));
+        if (!detailItems.length) {
             body.innerHTML = `<tr class="pcw-empty"><td colspan="${ITEM_COL_DEFS.length}">${
                 activeItemRows.length ? 'No items match the filters.' : (runtimeRunning ? 'Validation in progress…' : 'Not validated yet. Select this PO to validate.')
             }</td></tr>`;
@@ -2219,18 +2500,29 @@
             return;
         }
 
-        body.innerHTML = items.map((r) => {
+        const apiFooters = items.filter((r) => isFooterLine(r));
+        const footerRows = (apiFooters.length && hasItemClassicFooter(apiFooters))
+            ? apiFooters
+            : buildItemClassicFooter(detailItems);
+
+        body.innerHTML = [...detailItems, ...footerRows].map((r) => {
             const idx = r._srcIdx != null ? r._srcIdx : activeItemRows.indexOf(r);
             const active = idx === activeItemIdx ? ' is-active' : '';
             const st = String(r.status || '').toUpperCase();
-            const unmatched = !!r.needs_manual_match
-                || (!r.costing_quotation_no && !r.costing_quotation && !r.matched_quotation && !r.maktx && !r.cost_item);
-            const pass = !unmatched && st === 'PASS' ? ' is-pass-row' : '';
-            const review = !unmatched && st === 'NEEDS_REVIEW' ? ' is-review-row' : '';
-            const fail = !unmatched && (st === 'EXCEPTION' || st === 'FAIL') ? ' is-fail-row' : '';
+            const kind = String(r.row_kind || 'detail');
+            const isFooter = isFooterLine(r);
+            const unmatched = !isFooter && (!!r.needs_manual_match
+                || (!r.costing_quotation_no && !r.costing_quotation && !r.matched_quotation && !r.maktx && !r.cost_item));
+            const pass = !unmatched && !isFooter && st === 'PASS' ? ' is-pass-row' : '';
+            const review = !unmatched && !isFooter && st === 'NEEDS_REVIEW' ? ' is-review-row' : '';
+            const fail = !unmatched && !isFooter && (st === 'EXCEPTION' || st === 'FAIL') ? ' is-fail-row' : '';
             const unmatchedCls = unmatched ? ' is-unmatched-row' : '';
             const mismatch = r.cost_mismatch && !unmatched && st !== 'PASS' ? ' is-cost-mismatch' : '';
-            return `<tr class="pcw-row${active}${pass}${review}${fail}${unmatchedCls}${mismatch}" data-idx="${idx}">${
+            const footerLabel = itemFooterLabel(r).replace(/\s+/g, '');
+            const footer = isFooter
+                ? ` is-footer-row is-${kind}${kind === 'total' || footerLabel === 'TOTAL' ? ' is-total' : ''}`
+                : '';
+            return `<tr class="pcw-row${active}${pass}${review}${fail}${unmatchedCls}${mismatch}${footer}" data-idx="${idx}" data-row-kind="${esc(kind)}">${
                 ITEM_COL_DEFS.map((c) => renderItemCell(c.key, r)).join('')
             }</tr>`;
         }).join('');
@@ -2481,7 +2773,7 @@
         if (!shell) return;
         shell.classList.remove('is-open');
         shell.setAttribute('aria-hidden', 'true');
-        const stillOpen = ['pcwValidateModal', 'pcwHistoryModal'].some((id) => {
+        const stillOpen = ['pcwValidateModal'].some((id) => {
             const el = $(id);
             return el && el !== shell && el.classList.contains('is-open');
         });
@@ -2496,51 +2788,104 @@
     }
 
     function closeHistoryModal() {
-        closeActionOffcanvas('pcwHistoryModal');
+        closeValidateModal();
     }
 
-    function openValidateModal() {
-        const selected = selectedPos();
-        if (!selected.length) {
-            toast('Select one PO row to assign & validate.', 'error');
-            return;
+    function avatarLetter(name) {
+        const s = String(name || '').trim();
+        return (s ? s.charAt(0) : '?').toUpperCase();
+    }
+
+    function formatActivityWhen(raw) {
+        const whenFull = String(raw || '').replace('T', ' ').slice(0, 19);
+        if (!whenFull) return '—';
+        try {
+            const d = new Date(whenFull.replace(' ', 'T'));
+            if (Number.isNaN(d.getTime())) return whenFull;
+            return d.toLocaleString(undefined, {
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+            });
+        } catch (_) {
+            return whenFull;
         }
-        validateTargetPos = selected.slice(0, 1);
-        const loginUser = String(cfg.currentUser || $('pcwLoginUserName')?.textContent || 'User').trim();
-        if ($('pcwLoginUserName')) $('pcwLoginUserName').textContent = loginUser || 'User';
-        const meta = $('pcwValidateMeta');
-        if (meta) {
-            meta.innerHTML = `
-                <div class="pcw-validate-meta-chip"><span>Purchase Order</span><strong>${esc(validateTargetPos[0] || '—')}</strong></div>
-                <div class="pcw-validate-meta-chip"><span>Scope</span><strong>Single PO</strong></div>
-                <div class="pcw-validate-meta-chip"><span>Validated By</span><strong>${esc(loginUser || '—')}</strong></div>`;
-        }
-        if ($('pcwValidateRemarks')) $('pcwValidateRemarks').value = '';
-        document.querySelectorAll('input[name="pcwValidateStatus"]').forEach((el, i) => {
-            el.checked = i === 0;
-            el.closest('label')?.classList.toggle('is-active', i === 0);
+    }
+
+    function groupValidationLogs(logs) {
+        const grouped = [];
+        const seen = new Map();
+        (logs || []).forEach((log) => {
+            const when = String(log.created_at || '').replace('T', ' ').slice(0, 19);
+            const key = [
+                when,
+                String(log.created_by || ''),
+                String(log.assigned_username || ''),
+                String(log.validation_status || ''),
+                String(log.description || ''),
+            ].join('|');
+            if (seen.has(key)) {
+                seen.get(key).item_count += 1;
+                return;
+            }
+            const entry = { ...log, when, item_count: 1 };
+            seen.set(key, entry);
+            grouped.push(entry);
         });
-        closeHistoryModal();
-        openActionOffcanvas('pcwValidateModal');
-        $('pcwUserSearch')?.focus();
+        return grouped;
     }
 
-    async function openHistoryModal() {
-        const selected = selectedPos();
-        const po = selected[0] || activePo || '';
-        if (!po) {
-            toast('Select one PO row to view validation history.', 'error');
-            return;
-        }
+    function renderActivityFeed(grouped, po) {
         const body = $('pcwHistoryBody');
         const countEl = $('pcwHistoryCount');
-        if (countEl) countEl.textContent = 'Loading…';
-        if (body) body.innerHTML = `<div class="pcw-history-empty">Loading validation history…</div>`;
-        if ($('pcwHistoryDesc')) {
-            $('pcwHistoryDesc').textContent = `Validation history for PO ${po}.`;
+        if (!body) return;
+        if (countEl) {
+            countEl.textContent = grouped.length
+                ? `${grouped.length} activit${grouped.length === 1 ? 'y' : 'ies'}`
+                : '0 activities';
         }
-        closeValidateModal();
-        openActionOffcanvas('pcwHistoryModal');
+        if (!grouped.length) {
+            body.innerHTML = `<div class="pcw-history-empty">No comments or activity yet.</div>`;
+            return;
+        }
+        body.innerHTML = grouped.map((log) => {
+            const st = String(log.validation_status || '');
+            const byUser = String(log.created_by || '').trim() || '—';
+            const assigned = String(log.assigned_username || '').trim();
+            const remarks = String(log.description || '').trim();
+            let action = 'updated this PO';
+            if (st === 'COMMENT') {
+                action = 'added a comment';
+            } else if (st === 'VALIDATE_PO') {
+                action = `validated this PO${assigned ? ` and assigned <strong>${esc(assigned)}</strong>` : ''}`;
+            } else if (st === 'NOT_VALIDATE') {
+                action = `marked Not Validate${assigned ? ` and assigned <strong>${esc(assigned)}</strong>` : ''}`;
+            }
+            const showCommentBox = st === 'COMMENT' || !!remarks;
+            return `<article class="pcw-activity-item" role="listitem">
+                <span class="pcw-activity-avatar" aria-hidden="true">${esc(avatarLetter(byUser))}</span>
+                <div class="pcw-activity-body">
+                    <div class="pcw-activity-line">
+                        <strong>${esc(byUser)}</strong> ${action}
+                    </div>
+                    ${showCommentBox && remarks ? `<div class="pcw-activity-comment">${formatCommentHtml(remarks)}</div>` : ''}
+                    <time class="pcw-activity-when">${esc(formatActivityWhen(log.when || log.created_at))}</time>
+                </div>
+            </article>`;
+        }).join('');
+    }
+
+    async function loadActivityFeed(po) {
+        const body = $('pcwHistoryBody');
+        const countEl = $('pcwHistoryCount');
+        if (!po) {
+            if (countEl) countEl.textContent = '—';
+            if (body) body.innerHTML = `<div class="pcw-history-empty">Select a PO to see activity.</div>`;
+            return;
+        }
+        if (countEl) countEl.textContent = 'Loading…';
+        if (body) body.innerHTML = `<div class="pcw-history-empty">Loading activity…</div>`;
         const endpoint = cfg.validationLogUrl || 'purchase-order/validation-log';
         try {
             const res = await fetch(`${endpoint}?po=${encodeURIComponent(po)}&_=${Date.now()}`, {
@@ -2550,53 +2895,192 @@
             });
             const json = await res.json();
             const logs = Array.isArray(json?.data?.logs) ? json.data.logs : [];
-            const grouped = [];
-            const seen = new Map();
-            logs.forEach((log) => {
-                const when = String(log.created_at || '').replace('T', ' ').slice(0, 19);
-                const key = [when, log.created_by, log.assigned_username, log.validation_status, log.description].join('|');
-                if (seen.has(key)) {
-                    seen.get(key).item_count += 1;
-                    return;
-                }
-                const entry = { ...log, when, item_count: 1 };
-                seen.set(key, entry);
-                grouped.push(entry);
-            });
-            if (countEl) {
-                countEl.textContent = grouped.length
-                    ? `${grouped.length} validation${grouped.length === 1 ? '' : 's'}`
-                    : '0 validations';
-            }
-            if (!body) return;
-            if (!grouped.length) {
-                body.innerHTML = `<div class="pcw-history-empty">No validation history for PO ${esc(po)}.</div>`;
-                return;
-            }
-            body.innerHTML = grouped.map((log) => {
-                const st = String(log.validation_status || '');
-                const stLabel = st === 'VALIDATE_PO' ? 'Validate PO' : st === 'NOT_VALIDATE' ? 'Not Validate' : st;
-                const whenFull = String(log.when || '—');
-                const remarks = String(log.description || '').trim();
-                return `<article class="pcw-history-card" role="listitem">
-                    <div class="pcw-history-when">
-                        <strong>${esc(whenFull.slice(0, 10) || '—')}</strong>
-                        <small>${esc(whenFull.length > 10 ? whenFull.slice(11) : '')}</small>
-                    </div>
-                    <div class="pcw-history-main">
-                        <div class="pcw-history-people">
-                            <span><span class="material-icons-round">account_circle</span>By <strong>${esc(log.created_by || '—')}</strong></span>
-                            <span><span class="material-icons-round">person_add</span>Assigned <strong>${esc(log.assigned_username || '—')}</strong></span>
-                        </div>
-                        <p class="pcw-history-remarks${remarks ? '' : ' is-empty'}">${esc(remarks || 'No remarks')}</p>
-                    </div>
-                    <span class="pcw-pill ${st === 'VALIDATE_PO' ? 'is-pass' : 'is-review'}">${esc(stLabel)}</span>
-                </article>`;
-            }).join('');
+            renderActivityFeed(groupValidationLogs(logs), po);
         } catch (err) {
             if (countEl) countEl.textContent = 'Error';
-            if (body) body.innerHTML = `<div class="pcw-history-empty">${esc(err.message || 'Failed to load history')}</div>`;
+            if (body) body.innerHTML = `<div class="pcw-history-empty">${esc(err.message || 'Failed to load activity')}</div>`;
         }
+    }
+
+    function setComposeOpen(open) {
+        const box = $('pcwActivityCompose');
+        const actions = $('pcwActivityComposeActions');
+        const ta = $('pcwValidateRemarks');
+        box?.classList.toggle('is-open', !!open);
+        if (actions) actions.hidden = !open;
+        if (!open) hideMentionMenu();
+        if (ta && !open) {
+            ta.value = '';
+            ta.style.height = '';
+            ta.blur();
+        }
+    }
+
+    function autoSizeComment() {
+        const ta = $('pcwValidateRemarks');
+        if (!ta) return;
+        ta.style.height = 'auto';
+        ta.style.height = `${Math.min(180, Math.max(40, ta.scrollHeight))}px`;
+    }
+
+    function formatCommentHtml(text) {
+        return esc(text).replace(/@([A-Za-z0-9._-]+)/g, '<span class="pcw-mention">@$1</span>');
+    }
+
+    function extractMentionsFromText(text) {
+        const out = [];
+        const seen = new Set();
+        String(text || '').replace(/@([A-Za-z0-9._-]+)/g, (_, name) => {
+            const key = String(name).toLowerCase();
+            if (!seen.has(key)) {
+                seen.add(key);
+                out.push(name);
+            }
+            return _;
+        });
+        return out;
+    }
+
+    function getMentionContext(ta) {
+        if (!ta) return null;
+        const pos = ta.selectionStart ?? 0;
+        const before = String(ta.value || '').slice(0, pos);
+        const m = before.match(/(^|[\s([{])@([A-Za-z0-9._-]*)$/);
+        if (!m) return null;
+        const query = m[2] || '';
+        return { start: pos - query.length - 1, end: pos, query };
+    }
+
+    let mentionTimer = null;
+    let mentionUsers = [];
+    let mentionActiveIdx = -1;
+
+    function hideMentionMenu() {
+        const menu = $('pcwMentionMenu');
+        if (menu) {
+            menu.hidden = true;
+            menu.innerHTML = '';
+        }
+        mentionUsers = [];
+        mentionActiveIdx = -1;
+    }
+
+    function renderMentionMenu(users) {
+        const menu = $('pcwMentionMenu');
+        if (!menu) return;
+        mentionUsers = users || [];
+        if (!mentionUsers.length) {
+            menu.innerHTML = `<div class="pcw-mention-empty">No users found</div>`;
+            menu.hidden = false;
+            mentionActiveIdx = -1;
+            return;
+        }
+        mentionActiveIdx = 0;
+        menu.innerHTML = mentionUsers.map((u, i) => {
+            const initial = avatarLetter(u.username || '?');
+            return `<button type="button" class="pcw-mention-option${i === 0 ? ' is-active' : ''}" role="option"
+                data-idx="${i}" data-id="${esc(u.id)}" data-username="${esc(u.username)}" data-email="${esc(u.email || '')}">
+                <span class="pcw-activity-avatar" aria-hidden="true">${esc(initial)}</span>
+                <span class="pcw-mention-meta">
+                    <strong>@${esc(u.username)}</strong>
+                    <small>${esc([u.email, u.department, u.role].filter(Boolean).join(' · ') || '—')}</small>
+                </span>
+            </button>`;
+        }).join('');
+        menu.hidden = false;
+    }
+
+    async function searchMentionUsers(q) {
+        const endpoint = cfg.usersUrl || 'purchase-order/users';
+        const params = new URLSearchParams({ q: q || '', limit: '8', _: String(Date.now()) });
+        try {
+            const res = await fetch(`${endpoint}?${params}`, {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+                cache: 'no-store',
+            });
+            const json = await res.json();
+            const users = Array.isArray(json?.data?.users) ? json.data.users : [];
+            if (!getMentionContext($('pcwValidateRemarks'))) {
+                hideMentionMenu();
+                return;
+            }
+            renderMentionMenu(users);
+        } catch (_) {
+            renderMentionMenu([]);
+        }
+    }
+
+    function scheduleMentionLookup() {
+        const ctx = getMentionContext($('pcwValidateRemarks'));
+        if (!ctx) {
+            hideMentionMenu();
+            return;
+        }
+        clearTimeout(mentionTimer);
+        mentionTimer = setTimeout(() => { void searchMentionUsers(ctx.query); }, 120);
+    }
+
+    function insertMention(username) {
+        const ta = $('pcwValidateRemarks');
+        if (!ta || !username) return;
+        const ctx = getMentionContext(ta);
+        const value = String(ta.value || '');
+        const start = ctx ? ctx.start : ta.selectionStart;
+        const end = ctx ? ctx.end : ta.selectionStart;
+        const insert = `@${username} `;
+        ta.value = value.slice(0, start) + insert + value.slice(end);
+        const caret = start + insert.length;
+        ta.focus();
+        ta.setSelectionRange(caret, caret);
+        hideMentionMenu();
+        setComposeOpen(true);
+        autoSizeComment();
+    }
+
+    function moveMentionActive(delta) {
+        if (!mentionUsers.length) return;
+        const menu = $('pcwMentionMenu');
+        if (!menu || menu.hidden) return;
+        mentionActiveIdx = (mentionActiveIdx + delta + mentionUsers.length) % mentionUsers.length;
+        menu.querySelectorAll('.pcw-mention-option').forEach((el, i) => {
+            el.classList.toggle('is-active', i === mentionActiveIdx);
+        });
+        menu.querySelector('.pcw-mention-option.is-active')?.scrollIntoView({ block: 'nearest' });
+    }
+
+    function acceptActiveMention() {
+        if (mentionActiveIdx < 0 || !mentionUsers[mentionActiveIdx]) return false;
+        insertMention(mentionUsers[mentionActiveIdx].username);
+        return true;
+    }
+
+    function openValidateModal() {
+        const selected = selectedPos();
+        if (!selected.length) {
+            toast('Select one PO row for comments & activity.', 'error');
+            return;
+        }
+        validateTargetPos = selected.slice(0, 1);
+        const po = validateTargetPos[0];
+        const loginUser = String(cfg.currentUser || $('pcwLoginUserName')?.textContent || 'User').trim();
+        if ($('pcwLoginUserName')) $('pcwLoginUserName').textContent = loginUser || 'User';
+        const avatar = $('pcwActivityAvatar');
+        if (avatar) avatar.textContent = avatarLetter(loginUser || 'U');
+        setComposeOpen(false);
+        const feed = $('pcwHistoryBody');
+        const hideBtn = $('pcwActivityHideDetails');
+        if (feed) {
+            feed.hidden = false;
+            feed.classList.remove('is-compact');
+        }
+        if (hideBtn) hideBtn.textContent = 'Hide details';
+        openActionOffcanvas('pcwValidateModal');
+        void loadActivityFeed(po);
+    }
+
+    async function openHistoryModal() {
+        openValidateModal();
     }
 
     async function searchUsers(q) {
@@ -2638,11 +3122,10 @@
     }
 
     async function saveValidationLog() {
-        const status = document.querySelector('input[name="pcwValidateStatus"]:checked')?.value || 'VALIDATE_PO';
         const description = String($('pcwValidateRemarks')?.value || '').trim();
-        if (!assignedUser.username) {
-            toast('Select a next-level user to assign.', 'error');
-            $('pcwUserSearch')?.focus();
+        if (!description) {
+            toast('Write a comment first.', 'error');
+            $('pcwValidateRemarks')?.focus();
             return;
         }
         const targets = (validateTargetPos.length ? validateTargetPos : selectedPos()).slice(0, 1);
@@ -2650,20 +3133,24 @@
             toast('Select one PO row.', 'error');
             return;
         }
+        const loginUser = String(cfg.currentUser || $('pcwLoginUserName')?.textContent || 'User').trim();
+        const mentions = extractMentionsFromText(description);
         const endpoint = cfg.validationLogUrl || 'purchase-order/validation-log';
         const btn = $('pcwValidateSave');
         if (btn) btn.disabled = true;
         let ok = 0;
         let fail = 0;
+        let mailed = 0;
         try {
             for (const po of targets) {
                 const payload = {
                     purchase_order: po,
                     mat_cat: selectedMat(),
-                    assigned_user_id: assignedUser.id || null,
-                    assigned_username: assignedUser.username,
-                    validation_status: status,
+                    assigned_user_id: null,
+                    assigned_username: loginUser || 'system',
+                    validation_status: 'COMMENT',
                     description,
+                    mentions,
                     po_item: '',
                     material: '',
                     mat_desc: '',
@@ -2683,24 +3170,22 @@
                     continue;
                 }
                 ok += 1;
-                const row = allRows.find((r) => String(r.purchase_order) === String(po));
-                if (row) {
-                    row._validated_by = String(cfg.currentUser || $('pcwLoginUserName')?.textContent || 'User').trim();
-                    row._last_validated = new Date().toISOString().slice(0, 19).replace('T', ' ');
-                    if (status === 'VALIDATE_PO') row._validation_status = 'PASSED';
-                    else if (status === 'NOT_VALIDATE') row._validation_status = 'NEEDS_REVIEW';
-                }
+                mailed += Number(json?.data?.mail?.sent || 0);
             }
-            closeValidateModal();
-            renderTable();
+            setComposeOpen(false);
+            hideMentionMenu();
+            const po = targets[0];
+            if (po) await loadActivityFeed(po);
             toast(
                 fail
-                    ? `Saved ${ok} PO validation(s), ${fail} failed.`
-                    : `Saved validation for ${ok} PO${ok === 1 ? '' : 's'} → ${assignedUser.username}`,
+                    ? `Saved ${ok} comment(s), ${fail} failed.`
+                    : mailed > 0
+                      ? `Comment saved · mailed ${mailed} from apps@evolvclothing.com`
+                      : 'Comment saved (set SMTP password in config/mail.php if mail is missing)',
                 fail ? 'error' : 'ok'
             );
         } catch (err) {
-            toast(err.message || 'Could not save validation log', 'error');
+            toast(err.message || 'Could not save comment', 'error');
         } finally {
             if (btn) btn.disabled = false;
         }
@@ -2736,6 +3221,13 @@
     }
 
     function bind() {
+        $('pcbBackBtn')?.addEventListener('click', (e) => {
+            const ref = String(document.referrer || '');
+            if (ref && ref.startsWith(window.location.origin) && /po-costing/i.test(ref)) {
+                e.preventDefault();
+                window.history.back();
+            }
+        });
         $('pcbFilterForm')?.addEventListener('submit', (e) => {
             e.preventDefault();
             // Enter in PO search should open that PO, not refetch list
@@ -2783,6 +3275,12 @@
                 void fetchPos();
             });
         });
+        document.querySelectorAll('input[name="pcb_approved"]').forEach((el) => {
+            el.addEventListener('change', () => {
+                selectedApprovedStatus();
+                void fetchPos();
+            });
+        });
         $('pcbSupplier')?.addEventListener('change', () => void fetchPos());
         $('pcbPoSearchBtn')?.addEventListener('click', () => searchPoHeader());
         $('pcbPoSearch')?.addEventListener('keydown', (e) => {
@@ -2801,6 +3299,11 @@
             document.querySelectorAll('input[name="pcb_mat"]').forEach((el) => {
                 el.checked = el.value === 'all';
             });
+            if ($('pcbApproved')) $('pcbApproved').value = 'Approved';
+            document.querySelectorAll('input[name="pcb_approved"]').forEach((el) => {
+                el.checked = el.value === 'Approved';
+            });
+            cfg.approvedStatus = 'Approved';
             if ($('pcbPoSearch')) $('pcbPoSearch').value = '';
             if ($('pcbQuickSearch')) $('pcbQuickSearch').value = '';
             document.querySelectorAll('#pcbFilterRow .pcb-col-filter').forEach((inp) => { inp.value = ''; });
@@ -2864,10 +3367,11 @@
             colAttr: 'data-col-key',
         });
         $('pcbExportBtn')?.addEventListener('click', exportCsv);
-        $('pcbPrev')?.addEventListener('click', () => { if (page > 1) { page--; renderTable(); } });
+        $('pcbPrev')?.addEventListener('click', () => {
+            if (page > 1) void goToPage(page - 1);
+        });
         $('pcbNext')?.addEventListener('click', () => {
-            const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
-            if (page < pages) { page++; renderTable(); }
+            if (page < (serverPageCount || 1)) void goToPage(page + 1);
         });
         const onListClick = (e) => {
             const pdfBtn = e.target.closest('button.pcb-pdf-btn');
@@ -2876,6 +3380,15 @@
                 e.stopPropagation();
                 const po = pdfBtn.getAttribute('data-po');
                 if (po) window.open(pdfUrl(po), '_blank', 'noopener');
+                return;
+            }
+            const validateBtn = e.target.closest('button.pcb-validate-btn');
+            if (validateBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (validateBtn.disabled || validateBtn.classList.contains('is-done')) return;
+                const po = validateBtn.getAttribute('data-po');
+                if (po) runBulkValidation([po]);
                 return;
             }
             const checkCell = e.target.closest('.pcb-check');
@@ -2901,6 +3414,37 @@
         $('pcbTableBody')?.addEventListener('click', onListClick);
         $('pcbCards')?.addEventListener('click', onListClick);
 
+        $('pcbValidatedBtn')?.addEventListener('click', () => runBulkValidation());
+        if ($('pcbValidatedBtn') && cfg.canValidate === false) {
+            $('pcbValidatedBtn').hidden = true;
+        }
+        updateValidatedBtn();
+
+        const unmatchedKpi = $('pcbUnmatchedKpi');
+        unmatchedKpi?.addEventListener('click', (e) => {
+            e.preventDefault();
+            const pop = $('pcbRulesPopover');
+            if (pop && !pop.hidden) closeRulesPopover();
+            else openRulesPopover();
+        });
+        unmatchedKpi?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                unmatchedKpi.click();
+            }
+        });
+        $('pcbRulesClose')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            closeRulesPopover();
+        });
+        $('pcbRulesPopover')?.addEventListener('click', (e) => {
+            if (e.target === $('pcbRulesPopover')) closeRulesPopover();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeRulesPopover();
+        });
+
         $('pcbOpenValidateBtn')?.addEventListener('click', () => {
             if (cfg.canValidate === false) return;
             openValidateModal();
@@ -2910,9 +3454,61 @@
         }
         $('pcbHistoryBtn')?.addEventListener('click', () => { void openHistoryModal(); });
         $('pcwValidateClose')?.addEventListener('click', closeValidateModal);
-        $('pcwValidateCancel')?.addEventListener('click', closeValidateModal);
+        $('pcwValidateCancel')?.addEventListener('click', () => setComposeOpen(false));
         $('pcwValidateBackdrop')?.addEventListener('click', closeValidateModal);
         $('pcwValidateSave')?.addEventListener('click', () => { void saveValidationLog(); });
+        const remarks = $('pcwValidateRemarks');
+        remarks?.addEventListener('focus', () => setComposeOpen(true));
+        remarks?.addEventListener('input', () => {
+            autoSizeComment();
+            scheduleMentionLookup();
+        });
+        remarks?.addEventListener('keydown', (e) => {
+            const menu = $('pcwMentionMenu');
+            const menuOpen = menu && !menu.hidden && mentionUsers.length;
+            if (menuOpen && e.key === 'ArrowDown') {
+                e.preventDefault();
+                moveMentionActive(1);
+                return;
+            }
+            if (menuOpen && e.key === 'ArrowUp') {
+                e.preventDefault();
+                moveMentionActive(-1);
+                return;
+            }
+            if (menuOpen && (e.key === 'Enter' || e.key === 'Tab') && !e.ctrlKey && !e.metaKey) {
+                e.preventDefault();
+                acceptActiveMention();
+                return;
+            }
+            if (menuOpen && e.key === 'Escape') {
+                e.preventDefault();
+                hideMentionMenu();
+                return;
+            }
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                void saveValidationLog();
+            }
+        });
+        $('pcwMentionMenu')?.addEventListener('mousedown', (e) => {
+            const opt = e.target.closest('.pcw-mention-option');
+            if (!opt) return;
+            e.preventDefault();
+            insertMention(opt.getAttribute('data-username'));
+        });
+        document.addEventListener('click', (e) => {
+            if (e.target.closest('#pcwActivityCompose')) return;
+            hideMentionMenu();
+        });
+        $('pcwActivityHideDetails')?.addEventListener('click', () => {
+            const feed = $('pcwHistoryBody');
+            const btn = $('pcwActivityHideDetails');
+            if (!feed || !btn) return;
+            const compact = !feed.classList.contains('is-compact');
+            feed.classList.toggle('is-compact', compact);
+            btn.textContent = compact ? 'Show details' : 'Hide details';
+        });
         $('pcwHistoryClose')?.addEventListener('click', closeHistoryModal);
         $('pcwHistoryDone')?.addEventListener('click', closeHistoryModal);
         $('pcwHistoryBackdrop')?.addEventListener('click', closeHistoryModal);
@@ -3052,5 +3648,9 @@
 
     bind();
     applyRangePreset(currentRange(), { fillDates: currentRange() !== 'custom' });
-    void fetchPos();
+    {
+        const urlPage = Number(new URLSearchParams(window.location.search).get('page') || 1);
+        const startPage = Number.isFinite(urlPage) && urlPage > 1 ? Math.floor(urlPage) : 1;
+        void fetchPos(null, startPage > 1 ? { page: startPage, resetCache: true } : {});
+    }
 })();

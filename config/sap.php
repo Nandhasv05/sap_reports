@@ -40,6 +40,23 @@ return [
     'purchase_order_service' => '/sap/opu/odata/sap/ZI_PURCHASEORDERAPI_HUB_CDS/ZI_PurchaseOrderAPI_HUB',
     'cost_service'           => '/sap/opu/odata/sap/ZCOST_SRV/ZCOSTHSet',
     'po_pdf_service'         => '/sap/opu/odata/sap/ZCOST_SRV/POPDFSet',
+    'po_approval_service'    => '/sap/opu/odata/sap/ZCOST_SRV/POApprovalSet',
+    /*
+     * PO PDF + e-sign storage (local EVOL folder):
+     *   {htdocs}/EVOL/uploads/po_esign/PO_New_Module/PO-{po}.pdf          (SAP original cache)
+     *   {htdocs}/EVOL/uploads/po_esign/PO_New_Module/PO-{po}_signed.pdf   (after e-sign)
+     * SAP POPDFSet is called only when no local file exists. Signed PDF is never overwritten by SAP.
+     */
+    'po_esign_storage' => [
+        'path' => 'EVOL/uploads/po_esign/PO_New_Module',
+        'use_date_folder' => false,
+        'date_format' => 'Y-m-d',
+    ],
+    // Legacy key kept for older code paths; e-sign now uses po_esign_storage (local FS).
+    'po_pdf_share' => [
+        'unc' => '',
+        'esign_date_format' => 'Y-m-d',
+    ],
     // Quotation ↔ Sales Order hub (used by PO Costing Step 2)
     'quotation_service'      => '/sap/opu/odata/sap/ZI_QUOTATIONSALESORDER_HUB_CDS/ZI_QuotationSalesOrder_HUB',
     // Quotation & Costing combined CDS view (PO + Items + Quotation + SO + Fabric/Trim/Packing/Special)

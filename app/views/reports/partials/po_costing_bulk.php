@@ -6,12 +6,44 @@
 <section class="pcb" id="poCostingBulk" aria-label="Bulk PO Costing Validation">
     <div class="pcb-toast" id="pcbToast" hidden role="status" aria-live="polite"></div>
 
-    <div class="pcb-progress" id="pcbProgress" hidden>
-        <div class="pcb-progress-meta">
-            <span id="pcbProgressLabel">Validating…</span>
-            <span id="pcbProgressPct">0%</span>
+    <div class="pcb-rules-popover" id="pcbRulesPopover" hidden role="dialog" aria-labelledby="pcbRulesTitle" aria-modal="false">
+        <div class="pcb-rules-card">
+            <div class="pcb-rules-head">
+                <div>
+                    <span class="pcb-rules-kicker">PO vs zCOST</span>
+                    <h3 id="pcbRulesTitle">Compare rules &amp; status decode</h3>
+                </div>
+                <button type="button" class="pcb-rules-close" id="pcbRulesClose" aria-label="Close rules">&times;</button>
+            </div>
+            <div class="pcb-rules-body">
+                <section>
+                    <h4>How values are compared</h4>
+                    <ol>
+                        <li>Load PO items from SAP (TEMPFIN / PO hub).</li>
+                        <li>Link each PO line to Sales Order → Quotation → zCOST sheet.</li>
+                        <li>Match lines by Material Group / Description / Trim code / Material Code.</li>
+                        <li>Compare <strong>Actual Cost (PO)</strong> vs <strong>Budget Cost (zCOST)</strong>.</li>
+                        <li>Classic tolerance: Actual ≤ Budget + <strong>0.005</strong> → Passed.</li>
+                        <li>Match score ≥ <strong>90</strong> → automatic Pass / Unmatched decision.</li>
+                        <li>Match score <strong>40–89</strong> → Needs Review (uncertain mapping).</li>
+                        <li>Match score &lt; <strong>40</strong> or no zCOST link → Unmatched.</li>
+                    </ol>
+                </section>
+                <section>
+                    <h4>Status decode</h4>
+                    <ul class="pcb-rules-status">
+                        <li><span class="pcb-badge is-pass">PASSED</span> PO actual cost is within budget / matched successfully.</li>
+                        <li><span class="pcb-badge is-fail">UNMATCHED</span> No matching zCOST line, missing budget, or cost above budget.</li>
+                        <li><span class="pcb-badge is-review">NEEDS REVIEW</span> Partial match — confirm material mapping manually.</li>
+                        <li><span class="pcb-badge is-pending">PENDING</span> Not validated yet. Click <strong>Validated</strong> or row <strong>Validate</strong>.</li>
+                    </ul>
+                </section>
+                <section>
+                    <h4>Unmatched means</h4>
+                    <p>Count of POs (or lines) where PO value could not be matched to zCOST under the rules above. Click this card anytime to reopen these rules.</p>
+                </section>
+            </div>
         </div>
-        <div class="pcb-progress-track"><div class="pcb-progress-bar" id="pcbProgressBar"></div></div>
     </div>
 
     <div class="pcb-kpis" id="pcbKpis">
@@ -31,11 +63,14 @@
             </div>
             <div class="pcb-kpi-bar" aria-hidden="true" style="display:none;"><i id="pcbKpiPassedBar" style="width:0%"></i></div>
         </article>
-        <article class="pcb-kpi is-fail">
+        <article class="pcb-kpi is-fail pcb-kpi-rules" id="pcbUnmatchedKpi" role="button" tabindex="0" title="Click to view PO vs zCOST compare rules" aria-controls="pcbRulesPopover" aria-expanded="false">
             <span class="pcb-kpi-icon material-icons-round">error</span>
             <div class="pcb-kpi-body">
                 <b id="pcbKpiExceptions">—</b>
-                <small id="pcbKpiExcPct">Exceptions</small>
+                <small id="pcbKpiExcPct">
+                    Data Not Matched
+                    <span class="material-icons-round pcb-kpi-help" aria-hidden="true">info</span>
+                </small>
             </div>
             <div class="pcb-kpi-bar" aria-hidden="true" style="display:none;"><i id="pcbKpiExcBar" style="width:0%"></i></div>
         </article>
@@ -57,90 +92,6 @@
         </article>
     </div>
 
-    <div class="pcw-compare pcb-compare" id="pcbCompare" aria-label="PO Data vs zCOST Data comparison">
-        <section class="pcw-compare-panel is-po" aria-label="PO Data totals">
-            <header class="pcw-compare-head">
-                <span class="material-icons-round">receipt_long</span>
-                <strong>PO Data</strong>
-            </header>
-            <div class="pcw-compare-grid">
-                <div class="pcw-compare-card">
-                    <span class="material-icons-round pcw-card-ico is-items">format_list_numbered</span>
-                    <div class="pcw-card-content">
-                        <small>Total Items</small>
-                        <div class="pcw-card-val"><b id="pcbCmpPoItems">—</b></div>
-                    </div>
-                </div>
-                <div class="pcw-compare-card">
-                    <span class="material-icons-round pcw-card-ico is-materials">category</span>
-                    <div class="pcw-card-content">
-                        <small>Total Material</small>
-                        <div class="pcw-card-val"><b id="pcbCmpPoMaterials">—</b></div>
-                    </div>
-                </div>
-                <div class="pcw-compare-card is-qty">
-                    <span class="material-icons-round pcw-card-ico is-qty">inventory_2</span>
-                    <div class="pcw-card-content">
-                        <small>Total SO Qty</small>
-                        <div class="pcw-card-val"><b id="pcbCmpPoQty">—</b></div>
-                    </div>
-                </div>
-                <div class="pcw-compare-card is-value">
-                    <span class="material-icons-round pcw-card-ico is-value">payments</span>
-                    <div class="pcw-card-content">
-                        <small>Total Net Value</small>
-                        <div class="pcw-card-val">
-                            <b id="pcbCmpPoValue">—</b>
-                            <em>INR</em>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <div class="pcw-compare-vs" aria-hidden="true"><span>VS</span></div>
-
-        <section class="pcw-compare-panel is-zcost" aria-label="zCOST Data totals">
-            <header class="pcw-compare-head">
-                <span class="material-icons-round">calculate</span>
-                <strong>zCOST Data</strong>
-            </header>
-            <div class="pcw-compare-grid">
-                <div class="pcw-compare-card">
-                    <span class="material-icons-round pcw-card-ico is-items">format_list_numbered</span>
-                    <div class="pcw-card-content">
-                        <small>Total Items</small>
-                        <div class="pcw-card-val"><b id="pcbCmpZcItems">—</b></div>
-                    </div>
-                </div>
-                <div class="pcw-compare-card">
-                    <span class="material-icons-round pcw-card-ico is-materials">category</span>
-                    <div class="pcw-card-content">
-                        <small>Total Material</small>
-                        <div class="pcw-card-val"><b id="pcbCmpZcMaterials">—</b></div>
-                    </div>
-                </div>
-                <div class="pcw-compare-card is-qty">
-                    <span class="material-icons-round pcw-card-ico is-qty">inventory_2</span>
-                    <div class="pcw-card-content">
-                        <small>Total SO Qty</small>
-                        <div class="pcw-card-val"><b id="pcbCmpZcQty">—</b></div>
-                    </div>
-                </div>
-                <div class="pcw-compare-card is-value">
-                    <span class="material-icons-round pcw-card-ico is-value">payments</span>
-                    <div class="pcw-card-content">
-                        <small>Total Net Value</small>
-                        <div class="pcw-card-val">
-                            <b id="pcbCmpZcValue">—</b>
-                            <em>INR</em>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-    </div>
-
     <div class="pcb-table-card">
         <div class="rpt-table-toolbar pcb-table-toolbar">
             <div class="rpt-tb-search">
@@ -152,23 +103,10 @@
             </div>
             <div class="rpt-tb-actions">
                 <span class="rpt-tb-count" id="pcbCount">—</span>
-                <span class="pcb-runtime" id="pcbRuntimeStatus" hidden>
-                    <span class="pcb-runtime-dot" aria-hidden="true"></span>
-                    <em id="pcbRuntimeText">Working…</em>
-                </span>
                 <button type="button" class="rpt-tb-btn" id="pcbToggleStickyScroll" title="Toggle fixed header with scrollable body">
                     <i class="fas fa-arrows-up-down"></i>
                     <span id="pcbStickyScrollLabel">Expand Table</span>
                 </button>
-                <div class="rpt-cat-dropdown pcb-col-dropdown" id="pcbColumnToggleDropdown">
-                    <button type="button" class="rpt-tb-btn" id="pcbColumnToggleBtn" title="Show or hide columns" aria-haspopup="true" aria-expanded="false">
-                        <i class="fas fa-columns"></i>
-                        <span>Columns</span>
-                        <span class="material-icons-round rpt-cat-dd-arrow" style="font-size:14px;">expand_more</span>
-                    </button>
-                    <div class="rpt-cat-dd-menu pcb-col-menu" id="pcbColumnToggleMenu" role="menu"></div>
-                </div>
-                <span class="rpt-col-save" id="pcbColSaveStatus" role="status" aria-live="polite" hidden></span>
                 <button type="button" class="rpt-tb-btn rpt-tb-btn-excel" id="pcbExportBtn" title="Download Excel / CSV">
                     <i class="fas fa-file-excel"></i>
                     <span>Excel</span>
@@ -182,14 +120,6 @@
                     <i class="fas fa-rotate-left"></i>
                     <span>Clear All</span>
                 </button>
-                <button type="button" class="rpt-tb-btn" id="pcbHistoryBtn" title="View validation history for the selected PO">
-                    <span class="material-icons-round">history</span>
-                    <span>View History</span>
-                </button>
-                <button type="button" class="rpt-tb-btn rpt-tb-btn-primary" id="pcbOpenValidateBtn" title="Assign and validate the selected PO">
-                    <span class="material-icons-round">fact_check</span>
-                    <span>Assign &amp; Validate</span>
-                </button>
             </div>
         </div>
 
@@ -200,12 +130,9 @@
             $bulkColumns = $bulkTableDef['columns'] ?? [];
             $bulkColCount = max(1, count($bulkColumns));
             $bulkNumKeys = [
-                'sno', 'items', 'passed', 'exceptions', 'pending',
-                'so_qty', 'prwise_so_qty', 'consumption', 'reqqty', 'tot_poqty',
-                'so_wise_poqty', 'so_wise_po_val', 'totvalue',
-                'budgeted_cons', 'budget_inr', 'budget_cost_per_gmt', 'conv', 'actual_cost',
+                'sno', 'items', 'passed', 'exceptions', 'pending', 'totvalue',
             ];
-            $bulkNoFilter = ['check', 'pdf', 'sno'];
+            $bulkNoFilter = ['pdf', 'sno'];
         ?>
         <div class="pcb-table-wrap is-expanded" id="pcbTableWrap">
             <div class="pcb-table-scrollx">
@@ -282,7 +209,7 @@
             'budget_conv_rt', 'budget_cost_per_gmt', 'conv', 'actual_cost', 'variance_pct',
         ];
         $itemZcostKeys = [
-            'costing_quotation_no', 'costing_item_no', 'maktx',
+            'costing_quotation_no', 'costing_item_no', 'zsection', 'maktx',
             'budgeted_cons', 'budget_inr', 'budget_currency', 'budget_conv_rt', 'budget_cost_per_gmt',
             'conv', 'buom', 'actual_cost', 'variance_pct',
         ];
@@ -304,7 +231,7 @@
                 <div class="pcb-offcanvas-title">
                     <span class="pcb-offcanvas-kicker">PO Validation</span>
                     <h2 id="pcbDrillTitle">PO —</h2>
-                    <p id="pcbDrillSub">PO Data vs zCOST Data</p>
+                    <p id="pcbDrillSub">PO Data vs Costing Data</p>
                 </div>
                 <div class="pcb-offcanvas-actions">
                     <a class="rpt-tb-btn" id="pcbOpenWorkbench" href="#" hidden>
@@ -318,7 +245,7 @@
                 <div class="pcb-oc-kpis" aria-hidden="true">
                     <span>Items <b id="pcbOcKpiItems">—</b></span>
                     <span>Passed <b id="pcbOcKpiPassed">—</b></span>
-                    <span>Exceptions <b id="pcbOcKpiExceptions">—</b></span>
+                    <span>Data Not Matched <b id="pcbOcKpiExceptions">—</b></span>
                     <span>Review <b id="pcbOcKpiReview">—</b></span>
                     <span>Value <b id="pcbOcKpiValue">—</b></span>
                 </div>
@@ -367,7 +294,7 @@
                                     <th class="pcw-group-th is-zcost" data-group="zcost" colspan="<?= (int) max(1, $itemZcostColCount) ?>">
                                         <span class="pcw-group-label">
                                             <span class="material-icons-round">calculate</span>
-                                            zCOST Data
+                                            Costing Data
                                         </span>
                                     </th>
                                 </tr>

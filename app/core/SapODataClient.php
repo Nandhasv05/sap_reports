@@ -322,6 +322,122 @@ class SapODataClient
         return $this->requestViaStream($url, $username, $password, $timeout);
     }
 
+    /**
+     * POST JSON to an OData entity set (CSRF token + session cookies).
+     *
+     * @param array<string,mixed> $payload
+     * @return array{success:bool,http_code:int,body:?array,raw:?string,error:?string,url:string}
+     */
+    public function postJson(string $servicePath, array $payload, int $timeout = 45): array
+    {
+        $username = (string) ($this->cfg['username'] ?? '');
+        $password = (string) ($this->cfg['password'] ?? '');
+        if ($username === '' || $password === '') {
+            return ['success' => false, 'http_code' => 0, 'body' => null, 'raw' => null, 'error' => 'SAP credentials are not configured.', 'url' => ''];
+        }
+        if (!function_exists('curl_init')) {
+            return ['success' => false, 'http_code' => 0, 'body' => null, 'raw' => null, 'error' => 'cURL is required for SAP POST.', 'url' => ''];
+        }
+
+        $base = rtrim((string) ($this->cfg['base_url'] ?? ''), '/');
+        $path = '/' . ltrim($servicePath, '/');
+        $postUrl = $base . $path;
+        $serviceRoot = preg_replace('#/[^/]+$#', '/', $postUrl) ?: ($base . '/sap/opu/odata/sap/ZCOST_SRV/');
+
+        $resolve = $this->cfg['resolve'] ?? [];
+        $resolveOpts = (is_array($resolve) && $resolve !== []) ? [CURLOPT_RESOLVE => array_values($resolve)] : [];
+
+        // 1) CSRF fetch
+        $ch = curl_init($serviceRoot);
+        curl_setopt_array($ch, array_replace([
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HEADER         => true,
+            CURLOPT_HTTPAUTH       => CURLAUTH_BASIC,
+            CURLOPT_USERPWD        => $username . ':' . $password,
+            CURLOPT_TIMEOUT        => min(20, $timeout),
+            CURLOPT_CONNECTTIMEOUT => 8,
+            CURLOPT_HTTPHEADER     => ['X-CSRF-Token: Fetch', 'Accept: application/json'],
+        ], $resolveOpts));
+        $fetchResponse = curl_exec($ch);
+        $fetchCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $fetchErr = curl_error($ch);
+        curl_close($ch);
+
+        if ($fetchResponse === false) {
+            return ['success' => false, 'http_code' => $fetchCode, 'body' => null, 'raw' => null, 'error' => $fetchErr !== '' ? $fetchErr : 'CSRF fetch failed.', 'url' => $postUrl];
+        }
+
+        $csrfToken = '';
+        if (preg_match('/x-csrf-token:\s*([^\r\n]+)/i', (string) $fetchResponse, $m)) {
+            $csrfToken = trim($m[1]);
+        }
+        $cookies = [];
+        if (preg_match_all('/Set-Cookie:\s*([^;]+)/i', (string) $fetchResponse, $cm)) {
+            $cookies = $cm[1];
+        }
+        $cookieHeader = implode('; ', $cookies);
+
+        $jsonPayload = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        $headers = [
+            'Content-Type: application/json; charset=utf-8',
+            'Accept: application/json',
+        ];
+        if ($csrfToken !== '') {
+            $headers[] = 'X-CSRF-Token: ' . $csrfToken;
+        }
+        if ($cookieHeader !== '') {
+            $headers[] = 'Cookie: ' . $cookieHeader;
+        }
+
+        $chPost = curl_init($postUrl);
+        curl_setopt_array($chPost, array_replace([
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $jsonPayload,
+            CURLOPT_HTTPAUTH       => CURLAUTH_BASIC,
+            CURLOPT_USERPWD        => $username . ':' . $password,
+            CURLOPT_TIMEOUT        => $timeout,
+            CURLOPT_CONNECTTIMEOUT => 8,
+            CURLOPT_HTTPHEADER     => $headers,
+        ], $resolveOpts));
+        $postRes = curl_exec($chPost);
+        $postCode = (int) curl_getinfo($chPost, CURLINFO_HTTP_CODE);
+        $postErr = curl_error($chPost);
+        curl_close($chPost);
+
+        if ($postRes === false) {
+            return ['success' => false, 'http_code' => $postCode, 'body' => null, 'raw' => null, 'error' => $postErr !== '' ? $postErr : 'SAP POST failed.', 'url' => $postUrl];
+        }
+
+        $decoded = json_decode((string) $postRes, true);
+        if ($postCode >= 200 && $postCode < 300) {
+            return [
+                'success'   => true,
+                'http_code' => $postCode,
+                'body'      => is_array($decoded) ? $decoded : null,
+                'raw'       => (string) $postRes,
+                'error'     => null,
+                'url'       => $postUrl,
+            ];
+        }
+
+        $message = "SAP HTTP {$postCode}";
+        if (is_array($decoded) && isset($decoded['error']['message']['value'])) {
+            $message = (string) $decoded['error']['message']['value'];
+        } elseif (is_array($decoded) && isset($decoded['error']['message']) && is_string($decoded['error']['message'])) {
+            $message = (string) $decoded['error']['message'];
+        }
+
+        return [
+            'success'   => false,
+            'http_code' => $postCode,
+            'body'      => is_array($decoded) ? $decoded : null,
+            'raw'       => (string) $postRes,
+            'error'     => $message,
+            'url'       => $postUrl,
+        ];
+    }
+
     /*
      * Request via CURL
      */

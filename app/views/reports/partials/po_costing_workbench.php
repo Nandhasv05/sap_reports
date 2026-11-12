@@ -13,67 +13,109 @@ require_once base_path('app/services/TableColumnRegistry.php');
 $wbTableKey = 'purchase_order_costing_workbench_table';
 $wbTableDef = TableColumnRegistry::get($wbTableKey) ?? ['columns' => [], 'defaultHidden' => []];
 $wbColumns = $wbTableDef['columns'] ?? [];
+// Actions always last column
+$wbActionsCol = null;
+$wbColumns = array_values(array_filter($wbColumns, static function ($col) use (&$wbActionsCol) {
+    if (($col['id'] ?? '') === 'actions') {
+        $wbActionsCol = $col;
+        return false;
+    }
+    return true;
+}));
+if ($wbActionsCol) {
+    $wbColumns[] = $wbActionsCol;
+} else {
+    $wbColumns[] = ['id' => 'actions', 'label' => 'Actions', 'locked' => false];
+}
 $wbColCount = max(1, count($wbColumns));
 $wbNumKeys = [
     'poitem', 'so_qty', 'prwise_so_qty', 'consumption', 'reqqty', 'tot_poqty',
     'so_wise_poqty', 'so_wise_po_val', 'porate', 'totvalue', 'budgeted_cons', 'budget_inr',
-    'budget_conv_rt', 'budget_cost_per_gmt', 'conv', 'actual_cost', 'variance_pct',
+    'budget_conv_rt', 'budget_cost_per_gmt', 'budget_cost_per_piece', 'conv', 'actual_cost', 'variance_pct',
 ];
 $wbZcostKeys = [
-    'costing_quotation_no', 'costing_item_no', 'maktx',
-    'budgeted_cons', 'budget_inr', 'budget_currency', 'budget_conv_rt', 'budget_cost_per_gmt',
-    'conv', 'buom', 'actual_cost', 'variance_pct',
+    'costing_quotation_no', 'costing_item_no', 'zsection', 'maktx',
+    'budgeted_cons', 'budget_inr', 'budget_currency', 'budget_conv_rt', 'conv',
+];
+$wbResultKeys = [
+    'budget_cost_per_gmt', 'budget_cost_per_piece', 'buom', 'actual_cost', 'variance_pct', 'actions',
 ];
 $wbPoColCount = 0;
 $wbZcostColCount = 0;
+$wbResultColCount = 0;
 foreach ($wbColumns as $col) {
     $id = (string) ($col['id'] ?? '');
-    if (in_array($id, $wbZcostKeys, true)) {
+    if (in_array($id, $wbResultKeys, true)) {
+        $wbResultColCount++;
+    } elseif (in_array($id, $wbZcostKeys, true)) {
         $wbZcostColCount++;
     } else {
         $wbPoColCount++;
     }
 }
+$wbColGroupOf = static function (string $id) use ($wbZcostKeys, $wbResultKeys): string {
+    if (in_array($id, $wbResultKeys, true)) {
+        return 'result';
+    }
+    if (in_array($id, $wbZcostKeys, true)) {
+        return 'zcost';
+    }
+    return 'po';
+};
 $wbLoginUser = trim((string) (
     $_SESSION['username']
     ?? ($_SESSION['user_name'] ?? ($_SESSION['name'] ?? 'User'))
 ));
 ?>
 <section class="pcw" id="poCostingWorkbench" data-po="<?= e($wbPo) ?>" data-so="<?= e($wbSo) ?>" data-mat="<?= e($wbMat) ?>">
-    <!-- Row 1: Common status overview -->
+    <!-- Row 1: Status overview (classic portal cards) -->
     <div class="pcw-status-kpis" id="pcwStatusKpis" aria-label="Validation Status Overview">
         <article class="pcb-kpi is-total" data-card-key="status_total" title="Click to view details & calculation">
-            <span class="pcb-kpi-icon material-icons-round">rule</span>
+            <span class="pcb-kpi-icon material-icons-round">description</span>
             <div class="pcb-kpi-body">
                 <b id="pcwKpiTotal">—</b>
-                <small>Total</small>
+                <small>Total Items</small>
             </div>
         </article>
-        <article class="pcb-kpi is-pass" data-card-key="status_pass" title="Click to view details & calculation">
+        <article class="pcb-kpi is-pass" data-card-key="status_pass" title="Passed — actual ≤ budget">
             <span class="pcb-kpi-icon material-icons-round">check_circle</span>
             <div class="pcb-kpi-body">
                 <b id="pcwKpiPassed">—</b>
                 <small>Passed</small>
             </div>
         </article>
-        <article class="pcb-kpi is-fail" data-card-key="status_fail" title="Click to view not matched / not validated lines">
-            <span class="pcb-kpi-icon material-icons-round">error</span>
+        <article class="pcb-kpi is-pending" data-card-key="status_mapping" title="Mapping Required — select zCOST line">
+            <span class="pcb-kpi-icon material-icons-round">warning</span>
             <div class="pcb-kpi-body">
-                <b id="pcwKpiExceptions">—</b>
-                <small>Not Matched</small>
+                <b id="pcwKpiMapping">—</b>
+                <small>Mapping Required</small>
             </div>
         </article>
-        <article class="pcb-kpi is-review" data-card-key="status_review" title="Click to view details & calculation">
+        <article class="pcb-kpi is-fail" data-card-key="status_mismatch" title="Cost Mismatch — actual &gt; budget">
+            <span class="pcb-kpi-icon material-icons-round">error</span>
+            <div class="pcb-kpi-body">
+                <b id="pcwKpiMismatch">—</b>
+                <small>Cost Mismatch</small>
+            </div>
+        </article>
+        <article class="pcb-kpi is-ambiguous" data-card-key="status_ambiguous" title="Need to Review — uncertain mapping">
             <span class="pcb-kpi-icon material-icons-round">rate_review</span>
             <div class="pcb-kpi-body">
-                <b id="pcwKpiReview">—</b>
-                <small>Needs Review</small>
+                <b id="pcwKpiAmbiguous">—</b>
+                <small>Need to Review</small>
+            </div>
+        </article>
+        <article class="pcb-kpi is-value" data-card-key="status_po_value" title="Total PO Value">
+            <span class="pcb-kpi-icon material-icons-round">payments</span>
+            <div class="pcb-kpi-body">
+                <b id="pcwKpiStatusPoValue">—</b>
+                <small>Total PO Value</small>
             </div>
         </article>
     </div>
 
-    <!-- Row 2: PO Data vs zCOST Data comparison -->
-    <div class="pcw-compare" id="pcwKpis" aria-label="PO Data vs zCOST Data comparison">
+    <!-- Row 2: PO Data vs Costing Data comparison -->
+    <div class="pcw-compare" id="pcwKpis" aria-label="PO Data vs Costing Data comparison">
         <section class="pcw-compare-panel is-po" aria-label="PO Data totals">
             <header class="pcw-compare-head">
                 <span class="material-icons-round">receipt_long</span>
@@ -97,7 +139,7 @@ $wbLoginUser = trim((string) (
                 <div class="pcw-compare-card is-qty" data-card-key="po_so_qty" title="Click to view details & calculation">
                     <span class="material-icons-round pcw-card-ico is-qty">inventory_2</span>
                     <div class="pcw-card-content">
-                        <small>Total SO Qty</small>
+                        <small>Total PO Qty</small>
                         <div class="pcw-card-val">
                             <b id="pcwKpiPoOrderQty">—</b>
                             <em id="pcwKpiPoOrderQtyUnit"></em>
@@ -119,10 +161,10 @@ $wbLoginUser = trim((string) (
 
         <div class="pcw-compare-vs" aria-hidden="true"><span>VS</span></div>
 
-        <section class="pcw-compare-panel is-zcost" aria-label="zCOST Data totals">
+        <section class="pcw-compare-panel is-zcost" aria-label="Costing Data totals">
             <header class="pcw-compare-head">
                 <span class="material-icons-round">grid_view</span>
-                <strong>zCOST Data</strong>
+                <strong>Costing Data</strong>
             </header>
             <div class="pcw-compare-grid">
                 <div class="pcw-compare-card" data-card-key="zcost_items" title="Click to view details & calculation">
@@ -142,7 +184,7 @@ $wbLoginUser = trim((string) (
                 <div class="pcw-compare-card is-qty" data-card-key="zcost_so_qty" title="Click to view details & calculation">
                     <span class="material-icons-round pcw-card-ico is-qty">inventory_2</span>
                     <div class="pcw-card-content">
-                        <small>Total SO Qty</small>
+                        <small>Total PO Qty</small>
                         <div class="pcw-card-val">
                             <b id="pcwKpiZcostOrderQty">—</b>
                             <em id="pcwKpiZcostOrderQtyUnit"></em>
@@ -207,15 +249,25 @@ $wbLoginUser = trim((string) (
                 <span>Open PDF</span>
             </button>
 
-            <button type="button" class="rpt-tb-btn" id="pcwHistoryBtn" title="View validation history for this PO">
-                <span class="material-icons-round">history</span>
-                <span>View History</span>
+            <button type="button" class="rpt-tb-btn rpt-tb-btn-primary" id="pcwOpenValidateBtn" title="Status &amp; Remarks">
+                <span class="material-icons-round">forum</span>
+                <span>Status &amp; Remarks</span>
             </button>
 
-            <button type="button" class="rpt-tb-btn rpt-tb-btn-primary" id="pcwOpenValidateBtn" title="Assign next user, set Validate / Not Validate, save remarks">
-                <span class="material-icons-round">fact_check</span>
-                <span>Assign &amp; Validate</span>
+            <?php
+                $canEsignBtn = true;
+                if (isset($canEsign)) {
+                    $canEsignBtn = (bool) $canEsign;
+                } elseif (function_exists('sap_reports_user_can')) {
+                    $canEsignBtn = sap_reports_user_can('po-costing', 'esign');
+                }
+            ?>
+            <?php if ($canEsignBtn): ?>
+            <button type="button" class="rpt-tb-btn pcw-esign-toolbar-btn" id="pcwOpenEsignBtn" title="Open PO E-Signature">
+                <span class="material-icons-round">draw</span>
+                <span>eSign</span>
             </button>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -241,38 +293,63 @@ $wbLoginUser = trim((string) (
             <div class="pcw-pdf-loading" id="pcwPdfLoading">Loading PDF…</div>
             <iframe id="pcwPdfFrame" class="pcw-pdf-frame" title="Purchase order PDF" hidden></iframe>
         </div>
+        <div class="pcw-pdf-foot" id="pcwPdfPassFoot" hidden>
+            <p>Review the PO PDF, then continue to Pass &amp; e-sign.</p>
+            <button type="button" class="rpt-tb-btn" id="pcwPdfPassCancel">Cancel</button>
+            <button type="button" class="pcw-cb-btn is-pass" id="pcwPdfContinuePass">Continue to Pass</button>
+        </div>
     </div>
 
-    <div class="pcw-match-pop" id="pcwMatchPop" hidden role="dialog" aria-modal="true" aria-labelledby="pcwMatchTitle">
-        <button type="button" class="pcw-match-close" id="pcwMatchClose" aria-label="Close">&times;</button>
-        <div class="pcw-match-head">
-            <strong id="pcwMatchTitle">Match zCOST line</strong>
-            <p id="pcwMatchDesc">Select a costing line to link this unmatched PO item.</p>
-        </div>
-        <div class="pcw-match-search">
-            <span class="material-icons-round">search</span>
-            <input type="search" id="pcwMatchSearch" placeholder="Search ITEM, MAKTX, quotation…" autocomplete="off">
-        </div>
-        <div class="pcw-match-list" id="pcwMatchList" role="listbox" aria-label="zCOST candidates"></div>
-        <div class="pcw-match-foot">
-            <label class="pcw-match-multi-check" id="pcwMatchMultiCheckWrap" title="Match other PO rows sharing the same material or group">
-                <input type="checkbox" id="pcwMatchApplyAllSame" checked>
-                <span id="pcwMatchMultiCheckLabel">Match all rows with same Material / Group</span>
-            </label>
-            <div style="display: flex; gap: 8px; margin-left: auto;">
-                <button type="button" class="rpt-tb-btn" id="pcwMatchCancel">Cancel</button>
-                <button type="button" class="rpt-tb-btn rpt-tb-btn-primary" id="pcwMatchApply" disabled>
-                    <span class="material-icons-round">check</span>
-                    Apply Match
-                </button>
+    <div class="pcw-match-offcanvas" id="pcwMatchPop" hidden aria-hidden="true">
+        <div class="pcw-match-backdrop" id="pcwMatchBackdrop"></div>
+        <aside class="pcw-match-panel" id="pcwMatchPanel" role="dialog" aria-modal="true" aria-labelledby="pcwMatchTitle">
+            <div class="pcw-match-head">
+                <div class="pcw-match-head-left">
+                    <span class="pcw-match-icon material-icons-round">link</span>
+                    <div>
+                        <span class="pcw-match-kicker">PO Costing Validation</span>
+                        <strong id="pcwMatchTitle">Manual Costing Mapping</strong>
+                        <p id="pcwMatchDesc">Select a matching costing row from the quotation.</p>
+                    </div>
+                </div>
+                <button type="button" class="pcw-match-close" id="pcwMatchClose" aria-label="Close">&times;</button>
             </div>
-        </div>
+            <div class="pcw-match-layout">
+                <!-- Full-width 2-row PO values -->
+                <div class="pcw-match-meta" id="pcwMatchMeta"></div>
+                <div class="pcw-match-body">
+                    <section class="pcw-match-main">
+                        <div class="pcw-match-table-wrap">
+                            <div class="pcw-match-table-head">
+                                <strong id="pcwMatchTableTitle">Select Matching Costing Row from Quotation</strong>
+                                <div class="pcw-match-search">
+                                    <span class="material-icons-round">search</span>
+                                    <input type="search" id="pcwMatchSearch" placeholder="Search in costing description…" autocomplete="off">
+                                </div>
+                            </div>
+                            <div class="pcw-match-list" id="pcwMatchList" role="listbox" aria-label="zCOST candidates"></div>
+                        </div>
+                        <div class="pcw-match-foot">
+                            <div class="pcw-match-foot-actions">
+                                <button type="button" class="rpt-tb-btn" id="pcwMatchCancel">Cancel</button>
+                                <button type="button" class="rpt-tb-btn rpt-tb-btn-primary" id="pcwMatchApply" disabled>
+                                    <span class="material-icons-round">check</span>
+                                    Map &amp; Validate
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </aside>
     </div>
 
     <?php
         $pvLoginUser = $wbLoginUser;
         $pvKicker = 'PO Costing Workbench';
         require base_path('app/views/reports/partials/po_validation_offcanvas.php');
+        $esignUser = $wbLoginUser;
+        require base_path('app/views/reports/partials/po_esign_modal.php');
     ?>
 
     <div class="pcw-same-val-backdrop" id="pcwSameValBackdrop" hidden></div>
@@ -393,7 +470,13 @@ $wbLoginUser = trim((string) (
                     <th class="pcw-group-th is-zcost" data-group="zcost" colspan="<?= (int) max(1, $wbZcostColCount) ?>">
                         <span class="pcw-group-label">
                             <span class="material-icons-round">calculate</span>
-                            zCOST Data
+                            Costing Data
+                        </span>
+                    </th>
+                    <th class="pcw-group-th is-result" data-group="result" colspan="<?= (int) max(1, $wbResultColCount) ?>">
+                        <span class="pcw-group-label">
+                            <span class="material-icons-round">fact_check</span>
+                            Result
                         </span>
                     </th>
                 </tr>
@@ -402,7 +485,7 @@ $wbLoginUser = trim((string) (
                         <?php
                         $key = (string) ($col['id'] ?? '');
                         $isNum = in_array($key, $wbNumKeys, true);
-                        $group = in_array($key, $wbZcostKeys, true) ? 'zcost' : 'po';
+                        $group = $wbColGroupOf($key);
                         ?>
                         <th class="is-sortable<?= $isNum ? ' num' : '' ?> pcw-col-<?= e($group) ?>"
                             data-col="<?= (int) $i ?>"
@@ -419,7 +502,7 @@ $wbLoginUser = trim((string) (
                         <?php
                         $key = (string) ($col['id'] ?? '');
                         $isNum = in_array($key, $wbNumKeys, true);
-                        $group = in_array($key, $wbZcostKeys, true) ? 'zcost' : 'po';
+                        $group = $wbColGroupOf($key);
                         ?>
                         <?php if ($key === 'status'): ?>
                             <th data-col-id="status" data-col-group="po">
@@ -455,7 +538,87 @@ $wbLoginUser = trim((string) (
                     </td>
                 </tr>
             </tbody>
+            <tfoot>
+                <tr id="pcwTableFoot" class="pcw-table-foot">
+                    <?php foreach ($wbColumns as $i => $col): ?>
+                        <?php
+                        $key = (string) ($col['id'] ?? '');
+                        $isNum = in_array($key, $wbNumKeys, true);
+                        $group = $wbColGroupOf($key);
+                        $isLabel = ($i === 0);
+                        ?>
+                        <th class="<?= $isNum ? 'num ' : '' ?>pcw-col-<?= e($group) ?>"
+                            data-col-id="<?= e($key) ?>"
+                            data-foot-key="<?= e($key) ?>"
+                            <?= $isLabel ? ' id="pcwFootTotalLabel"' : '' ?>>
+                            <?= $isLabel ? 'TOTAL' : '' ?>
+                        </th>
+                    <?php endforeach; ?>
+                </tr>
+            </tfoot>
         </table>
     </div>
+
+    <!-- SAP pricing conditions — after table -->
+    <aside class="pcw-po-value" id="pcwChargesPanel" aria-label="PO charges and total value" hidden>
+        <div class="pcw-po-value-bar">
+            <div class="pcw-po-value-title">
+                <span class="material-icons-round">payments</span>
+                <div>
+                    <strong>PO Value Breakdown</strong>
+                    <small>SAP conditions · CondOTHR · CondFRB · CondZB00 · CondZSCI · CondZBCR</small>
+                </div>
+            </div>
+            <div class="pcw-po-value-hero">
+                <span>Total P.O Value</span>
+                <strong><em id="pcwChargeGrandCurr"></em> <b id="pcwChargeGrandTotal">—</b></strong>
+            </div>
+        </div>
+
+        <div class="pcw-po-value-body">
+            <div class="pcw-po-value-sub">
+                <span>Sub Total <small>(Excl. Tax)</small></span>
+                <b id="pcwChargeSubTotal">—</b>
+            </div>
+
+            <div class="pcw-po-value-tiles" role="list">
+                <article class="pcw-po-tile" data-charge="discount" role="listitem" title="Discount">
+                    <span class="pcw-po-tile-k">Discount</span>
+                    <b id="pcwChargeDiscount">0.00</b>
+                </article>
+                <article class="pcw-po-tile" data-charge="freight" role="listitem" title="CondFRB1 + CondFRB2">
+                    <span class="pcw-po-tile-k">Freight</span>
+                    <span class="pcw-po-tile-sap">FRB1/2</span>
+                    <b id="pcwChargeFreight">0.00</b>
+                </article>
+                <article class="pcw-po-tile" data-charge="moq" role="listitem" title="CondZB00">
+                    <span class="pcw-po-tile-k">MOQ</span>
+                    <span class="pcw-po-tile-sap">ZB00</span>
+                    <b id="pcwChargeMoq">0.00</b>
+                </article>
+                <article class="pcw-po-tile" data-charge="other" role="listitem" title="CondOTHR">
+                    <span class="pcw-po-tile-k">Other</span>
+                    <span class="pcw-po-tile-sap">OTHR</span>
+                    <b id="pcwChargeOther">0.00</b>
+                </article>
+                <article class="pcw-po-tile" data-charge="screen" role="listitem" title="CondZSCI">
+                    <span class="pcw-po-tile-k">Screen</span>
+                    <span class="pcw-po-tile-sap">ZSCI</span>
+                    <b id="pcwChargeScreen">0.00</b>
+                </article>
+                <article class="pcw-po-tile" data-charge="bank" role="listitem" title="CondZBCR">
+                    <span class="pcw-po-tile-k">Bank</span>
+                    <span class="pcw-po-tile-sap">ZBCR</span>
+                    <b id="pcwChargeBank">0.00</b>
+                </article>
+            </div>
+
+            <div class="pcw-po-value-tax">
+                <div class="pcw-po-tax-item"><span>SGST</span><b id="pcwChargeSgst">0.00</b></div>
+                <div class="pcw-po-tax-item"><span>CGST</span><b id="pcwChargeCgst">0.00</b></div>
+                <div class="pcw-po-tax-item"><span>IGST</span><b id="pcwChargeIgst">0.00</b></div>
+            </div>
+        </div>
+    </aside>
 
 </section>

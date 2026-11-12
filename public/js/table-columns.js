@@ -68,6 +68,14 @@
                 const prev = ids.slice(0, i).reverse().find(p => order.includes(p));
                 order.splice(prev ? order.indexOf(prev) + 1 : order.length, 0, id);
             });
+            // Keep trailing action columns at the end
+            ['pdf', 'actions'].forEach((tailId) => {
+                const at = order.indexOf(tailId);
+                if (at >= 0) {
+                    order.splice(at, 1);
+                    order.push(tailId);
+                }
+            });
             return {
                 columnOrder: order,
                 hiddenColumns: ids.filter(id => hidden.has(id)),

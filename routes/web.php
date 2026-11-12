@@ -30,6 +30,12 @@ $router->get('sales/material-api', [SalesController::class, 'materialApiData']);
 $router->get('sales/sales-api', [SalesController::class, 'salesApiHubData']);
 $router->get('sales/orders-by-date', [SalesController::class, 'ordersByDate']);
 $router->get('fabric-sale', [ReportsController::class, 'showFabricSale']);
+if (method_exists(ReportsController::class, 'showPoPassLog')) {
+    $router->get('po-costing/pass-log', [ReportsController::class, 'showPoPassLog']);
+}
+if (method_exists(ReportsController::class, 'showPoValidationHistory')) {
+    $router->get('po-costing/validation-history', [ReportsController::class, 'showPoValidationHistory']);
+}
 $router->get('po-costing', [ReportsController::class, 'showPoCosting']);
 $router->get('po-costing-validation', [ReportsController::class, 'showPoCosting']);
 $router->get('sale', function () {
@@ -73,8 +79,27 @@ $router->get('purchase-order/data', [ReportsController::class, 'purchaseOrderDat
 if (method_exists(ReportsController::class, 'purchaseOrderPdf')) {
     $router->get('purchase-order/pdf', [ReportsController::class, 'purchaseOrderPdf']);
 }
+if (method_exists(ReportsController::class, 'purchaseOrderPass')) {
+    $router->post('purchase-order/pass', [ReportsController::class, 'purchaseOrderPass']);
+}
+if (method_exists(ReportsController::class, 'purchaseOrderEsignSignature')) {
+    $router->get('purchase-order/esign-signature', [ReportsController::class, 'purchaseOrderEsignSignature']);
+    $router->post('purchase-order/esign-signature', [ReportsController::class, 'purchaseOrderEsignSignature']);
+}
+if (method_exists(ReportsController::class, 'purchaseOrderEsignSave')) {
+    $router->post('purchase-order/esign-save', [ReportsController::class, 'purchaseOrderEsignSave']);
+}
+if (method_exists(ReportsController::class, 'purchaseOrderPassLog')) {
+    $router->get('purchase-order/pass-log', [ReportsController::class, 'purchaseOrderPassLog']);
+}
+if (method_exists(ReportsController::class, 'purchaseOrderSignedFile')) {
+    $router->get('purchase-order/signed-file', [ReportsController::class, 'purchaseOrderSignedFile']);
+}
 if (method_exists(ReportsController::class, 'purchaseOrderValidate')) {
     $router->get('purchase-order/validate', [ReportsController::class, 'purchaseOrderValidate']);
+}
+if (method_exists(ReportsController::class, 'purchaseOrderManualMapSave')) {
+    $router->post('purchase-order/manual-map', [ReportsController::class, 'purchaseOrderManualMapSave']);
 }
 if (method_exists(ReportsController::class, 'purchaseOrderUsers')) {
     $router->get('purchase-order/users', [ReportsController::class, 'purchaseOrderUsers']);

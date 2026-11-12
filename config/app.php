@@ -5,18 +5,29 @@
  * DESCRIPTION : App configuration
  */
 $host = strtolower((string) ($_SERVER['HTTP_HOST'] ?? getenv('EVOLV_HTTP_HOST') ?: ''));
-$onServer = getenv('EVOLV_ENV') === 'production' || str_contains($host, '10.103.10.33');
+$isLive = getenv('EVOLV_ENV') === 'production'
+    || str_contains($host, 'apps.evolvclothing.com');
+$isDevServer = str_contains($host, '10.103.10.33');
 
 /*
- * Return the app configuration
+ * LOCAL URL : http://localhost:8888/sap_reports/
+ * DEVELOPMENT URL : http://10.103.10.33/sap_reports/
+ * PRODUCTION URL : https://apps.evolvclothing.com/sap_reports/
  */
-// LOCAL URL : http://localhost:8888/sap_reports/
-// DEVELOPMENT URL : http://10.103.10.33/sap_reports/
-// PRODUCTION URL : http://apps.evolvclothing.com/sap_reports/
+if ($isLive) {
+    $url = 'https://apps.evolvclothing.com/sap_reports/';
+    $envName = 'production';
+} elseif ($isDevServer) {
+    $url = 'http://10.103.10.33/sap_reports/';
+    $envName = 'development';
+} else {
+    $url = 'http://localhost:8888/sap_reports/';
+    $envName = 'local';
+}
+
 return [
     'name'      => 'SAP Reports',
-    'url'       => $onServer ? 'http://10.103.10.33/sap_reports/' : 'http://localhost:8888/sap_reports/ ',
-    'env'       => $onServer ? 'production' : 'local' ,
+    'url'       => $url,
+    'env'       => $envName,
     'base_path' => '',
 ];
-?>

@@ -637,11 +637,36 @@ class ReportsController extends Controller
             'appShell'    => true,
             'layoutWide'  => true,
             'presets'     => SapPurchaseOrderService::rangePresets(),
-            'poBaseUrl'   => url('purchase-order'),
-            'home'        => sap_reports_evol_url('portal_dashboard.php'),
-            'catalogHome' => url('/'),
-            'logoUrl'     => sap_reports_logo_url(),
-            'extraScripts'=> '',
+            'poBaseUrl'             => url('purchase-order'),
+            'passLogPageUrl'        => url('po-costing/pass-log'),
+            'validationHistoryUrl'  => url('po-costing/validation-history'),
+            'home'                  => sap_reports_evol_url('portal_dashboard.php'),
+            'catalogHome'           => url('/'),
+            'logoUrl'               => sap_reports_logo_url(),
+            'extraScripts'          => '',
+        ]);
+    }
+
+    /*
+     * PO Validation History — Status & Remarks / validate activity by PO
+     */
+    public function showPoValidationHistory(): void
+    {
+        if (function_exists('sap_reports_user_can_access') && !sap_reports_user_can_access('po-costing')) {
+            $_SESSION['flash_error'] = 'Access restricted: You do not have permission to view PO Costing Validation.';
+            $this->redirect(url('/'));
+            return;
+        }
+        $this->view('reports/po_validation_history', [
+            'pageTitle'         => 'PO Validation History',
+            'appShell'          => true,
+            'layoutWide'        => true,
+            'poBaseUrl'         => url('purchase-order'),
+            'validationLogUrl'  => url('purchase-order/validation-log'),
+            'costingUrl'        => url('po-costing'),
+            'home'              => sap_reports_evol_url('portal_dashboard.php'),
+            'catalogHome'       => url('/'),
+            'logoUrl'           => sap_reports_logo_url(),
         ]);
     }
 
@@ -686,6 +711,10 @@ class ReportsController extends Controller
         $matCat = strtolower(trim((string) ($_GET['mat_cat'] ?? 'all')));
         if (!array_key_exists($matCat, SapPurchaseOrderService::materialCategories())) {
             $matCat = 'all';
+        }
+        $approvedStatus = trim((string) ($_GET['approved_status'] ?? $_GET['APPROVEDSTATUS'] ?? ''));
+        if (!in_array($approvedStatus, ['Approved', 'NotApproved'], true)) {
+            $approvedStatus = '';
         }
 
         $listColumns = SapPurchaseOrderService::listColumns();
@@ -785,6 +814,7 @@ class ReportsController extends Controller
             'poType'        => $poType,
             'poTypes'       => $poTypes,
             'matCat'        => $matCat,
+            'approvedStatus'=> $approvedStatus,
             'matCategories' => SapPurchaseOrderService::materialCategories(),
             'docTypes'      => SapPurchaseOrderService::documentTypes(),
             'columns'       => $activeColumns,
@@ -853,8 +883,370 @@ class ReportsController extends Controller
     }
 
     /*
-     * Stream SAP PO PDF: ZCOST_SRV/POPDFSet(EBELN='…')/$value
+     * PASS PO: POST POApprovalSet then fetch POPDFSet $value and save under upload/PoZcostValidation/Po-{po}/
+     */
+    public function purchaseOrderPass(): void
+    {
+        require_once base_path('app/services/PoPassApprovalService.php');
+        $raw = function_exists('sap_reports_request_raw_body') ? sap_reports_request_raw_body() : ((string) (file_get_contents('php://input') ?: ''));
+        $input = json_decode($raw, true);
+        if (!is_array($input)) {
+            $input = $_POST;
+        }
+        $po = preg_replace('/\D/', '', (string) ($input['po'] ?? $input['purchase_order'] ?? $_GET['po'] ?? '')) ?? '';
+        $requestId = trim((string) ($input['request_id'] ?? $input['RequestId'] ?? ''));
+        // Value: "X" = PASS / approve, " " = REVERT
+        $rawValue = (string) ($input['value'] ?? $input['Value'] ?? $input['action'] ?? 'X');
+        $action = strtolower(trim((string) ($input['action'] ?? '')));
+        if ($action === 'revert' || $action === 'unapprove') {
+            $valueFlag = ' ';
+        } elseif (strtoupper(trim($rawValue)) === 'X' || $action === 'approve' || $action === 'pass') {
+            $valueFlag = 'X';
+        } else {
+            $valueFlag = ' ';
+        }
+        $svc = new PoPassApprovalService();
+
+        // Approved button: SAP POApprovalSet only. Local DB updated only after SAP success.
+        $approveOnly = !empty($input['approve_only'])
+            || $action === 'approve'
+            || $action === 'approve_only';
+        if ($approveOnly && $valueFlag === 'X') {
+            $res = $svc->approveOnly($po, $requestId !== '' ? $requestId : null, 'X');
+            if (empty($res['success'])) {
+                $this->jsonResponse([
+                    'success' => false,
+                    'message' => (string) ($res['error'] ?? 'SAP Approve API failed'),
+                    'error'   => (string) ($res['error'] ?? 'SAP Approve API failed'),
+                    'data'    => $res,
+                ], 502);
+            }
+            $this->jsonResponse([
+                'success' => true,
+                'message' => 'SAP approved PO (POApprovalSet Value = X). Local status updated for tracking only.',
+                'data'    => [
+                    'request_id'   => $res['request_id'],
+                    'po'           => $res['po'],
+                    'value'        => 'X',
+                    'action'       => 'approve',
+                    'approve_only' => true,
+                    'sap_approved' => true,
+                    'local_status' => 'Approved Completed',
+                ],
+            ]);
+        }
+
+        $res = $svc->approveAndFetchPdf($po, $requestId !== '' ? $requestId : null, $valueFlag);
+        if (empty($res['success'])) {
+            $failMsg = $valueFlag === 'X' ? 'PASS PO failed' : 'REVERT PO failed';
+            $this->jsonResponse([
+                'success' => false,
+                'message' => (string) ($res['error'] ?? $failMsg),
+                'error'   => (string) ($res['error'] ?? $failMsg),
+                'data'    => $res,
+            ], 502);
+        }
+
+        if ($valueFlag !== 'X') {
+            $this->jsonResponse([
+                'success' => true,
+                'message' => 'PO reverted (Value = blank)',
+                'data'    => [
+                    'request_id' => $res['request_id'],
+                    'po'         => $res['po'],
+                    'value'      => ' ',
+                    'action'     => 'revert',
+                    'folder'     => 'upload/PoZcostValidation/Po-' . $res['po'],
+                ],
+            ]);
+        }
+
+        // Browser preview must use the routed PDF proxy (static /upload/... hits the app router → 404)
+        $previewUrl = url('purchase-order/pdf') . '?po=' . rawurlencode((string) $res['po']);
+        $this->jsonResponse([
+            'success' => true,
+            'message' => 'PO approved (Value = X) and PDF ready for e-sign',
+            'data'    => [
+                'request_id'  => $res['request_id'],
+                'po'          => $res['po'],
+                'value'       => 'X',
+                'action'      => 'pass',
+                'pdf_url'     => $previewUrl,
+                'preview_url' => $previewUrl,
+                'saved_path'  => $res['pdf_url'],
+                'folder'      => 'upload/PoZcostValidation/Po-' . $res['po'],
+            ],
+        ]);
+    }
+
+    /*
+     * Load / save the signed-in user's e-signature (dbo.user_esignatures)
+     * GET  → load
+     * POST → upsert signature image after upload/draw
+     */
+    public function purchaseOrderEsignSignature(): void
+    {
+        require_once base_path('app/services/UserEsignService.php');
+        $current = function_exists('portal_user') ? portal_user() : null;
+        $username = trim((string) ($current['username'] ?? ($_SESSION['username'] ?? '')));
+        $userId = (string) ($current['id'] ?? ($_SESSION['user_id'] ?? ''));
+        if ($username === '') {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Not signed in',
+                'error'   => 'Not signed in',
+                'data'    => ['found' => false],
+            ], 401);
+        }
+        $svc = new UserEsignService();
+        $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+        if ($method === 'POST' || $method === 'PUT') {
+            $raw = function_exists('sap_reports_request_raw_body') ? sap_reports_request_raw_body() : ((string) (file_get_contents('php://input') ?: ''));
+            $input = json_decode($raw, true);
+            if (!is_array($input)) {
+                $input = $_POST;
+            }
+            $sig = trim((string) ($input['signature_data'] ?? $input['signature'] ?? ''));
+            $save = $svc->saveForUser($userId !== '' ? $userId : null, $username, $sig);
+            if (empty($save['success'])) {
+                $this->jsonResponse([
+                    'success' => false,
+                    'message' => (string) ($save['error'] ?? 'Could not save signature'),
+                    'error'   => (string) ($save['error'] ?? 'Could not save signature'),
+                    'data'    => ['found' => false],
+                ], 422);
+            }
+            $this->jsonResponse([
+                'success' => true,
+                'message' => 'Signature saved to database',
+                'data'    => [
+                    'found' => true,
+                    'username' => $username,
+                    'signature_data' => $sig,
+                    'saved' => true,
+                ],
+            ]);
+        }
+
+        $res = $svc->getForUsername($username);
+        if (empty($res['success'])) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => (string) ($res['error'] ?? 'Could not load signature'),
+                'error'   => (string) ($res['error'] ?? 'Could not load signature'),
+                'data'    => $res,
+            ], 500);
+        }
+        $this->jsonResponse([
+            'success' => true,
+            'message' => !empty($res['found']) ? 'Signature found' : 'No saved signature',
+            'data'    => [
+                'found' => !empty($res['found']),
+                'username' => $res['username'],
+                'signature_data' => $res['signature_data'],
+            ],
+        ]);
+    }
+
+    /*
+     * Save signed PO: write signed PDF to EVOL path only (no POApprovalSet).
+     * Approve API is triggered by the Approved button separately.
+     */
+    public function purchaseOrderEsignSave(): void
+    {
+        try {
+            @set_time_limit(120);
+            require_once base_path('app/services/PoPassApprovalService.php');
+            $raw = function_exists('sap_reports_request_raw_body')
+                ? sap_reports_request_raw_body()
+                : ((string) (file_get_contents('php://input') ?: ''));
+            if ($raw === '' && empty($_POST)) {
+                $this->jsonResponse([
+                    'success' => false,
+                    'message' => 'Empty request body. Increase PHP post_max_size / memory_limit and try again.',
+                    'error'   => 'Empty request body',
+                    'data'    => null,
+                ], 413);
+            }
+            $input = json_decode($raw, true);
+            if (!is_array($input)) {
+                $input = is_array($_POST) ? $_POST : [];
+            }
+            if ($input === []) {
+                $this->jsonResponse([
+                    'success' => false,
+                    'message' => 'Invalid JSON body for e-sign save.',
+                    'error'   => 'Invalid JSON body',
+                    'data'    => null,
+                ], 422);
+            }
+            $po = preg_replace('/\D/', '', (string) ($input['po'] ?? $input['purchase_order'] ?? '')) ?? '';
+            $current = function_exists('portal_user') ? portal_user() : null;
+            $input['signed_by'] = (string) ($current['username'] ?? ($_SESSION['username'] ?? 'system'));
+            $svc = new PoPassApprovalService();
+            $res = $svc->saveEsign($po, $input);
+
+            $displayPo = ltrim(preg_replace('/\D/', '', $po) ?? '', '0');
+            if ($displayPo === '') {
+                $displayPo = $po;
+            }
+            $fileUrl = (string) ($res['file_url'] ?? '');
+            if ($fileUrl === '' && !empty($res['signed_pdf'])) {
+                $fileUrl = url('purchase-order/signed-file?po=' . rawurlencode($displayPo));
+            }
+            // Slim payload — never return SAP raw/body (breaks json_encode / empty response)
+            $data = [
+                'success' => !empty($res['success']),
+                'db_id' => $res['db_id'] ?? null,
+                'request_id' => $res['request_id'] ?? null,
+                'pdf_url' => $res['pdf_url'] ?? null,
+                'file_url' => $fileUrl !== '' ? $fileUrl : null,
+                'pdf_file' => $res['pdf_file'] ?? null,
+                'folder' => $res['folder'] ?? null,
+                'network_path' => $res['network_path'] ?? null,
+                'network_folder' => $res['network_folder'] ?? null,
+                'signed_pdf' => !empty($res['signed_pdf']),
+                'approval_http' => $res['approval']['http_code'] ?? ($res['approval_http'] ?? null),
+                'approval_payload' => $res['approval_payload'] ?? null,
+                'error' => $res['error'] ?? null,
+            ];
+
+            if (empty($res['success'])) {
+                $this->jsonResponse([
+                    'success' => false,
+                    'message' => (string) ($res['error'] ?? 'E-sign save failed'),
+                    'error'   => (string) ($res['error'] ?? 'E-sign save failed'),
+                    'data'    => $data,
+                ], 422);
+            }
+            $this->jsonResponse([
+                'success' => true,
+                'message' => 'Signed PDF saved to path',
+                'data'    => $data,
+            ]);
+        } catch (Throwable $e) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'E-sign save crashed: ' . $e->getMessage(),
+                'error'   => $e->getMessage(),
+                'data'    => null,
+            ], 500);
+        }
+    }
+
+    /*
+     * Full-screen Past PO Log dashboard (charts + filters + table)
+     */
+    public function showPoPassLog(): void
+    {
+        if (function_exists('sap_reports_user_can_access') && !sap_reports_user_can_access('po-costing')) {
+            $_SESSION['flash_error'] = 'Access restricted: You do not have permission to view PO Costing Validation.';
+            $this->redirect(url('/'));
+            return;
+        }
+        $this->view('reports/po_pass_log', [
+            'pageTitle'  => 'PO E-Sign Log',
+            'appShell'   => true,
+            'layoutWide' => true,
+            'poBaseUrl'  => url('purchase-order'),
+            'passLogUrl' => url('purchase-order/pass-log'),
+            'costingUrl' => url('po-costing'),
+            'home'       => sap_reports_evol_url('portal_dashboard.php'),
+            'catalogHome'=> url('/'),
+            'logoUrl'    => sap_reports_logo_url(),
+        ]);
+    }
+
+    /*
+     * GET purchase-order/pass-log — list successfully passed POs (Past PO Log API)
+     */
+    public function purchaseOrderPassLog(): void
+    {
+        require_once base_path('app/services/PassPoValidationLogService.php');
+        $svc = new PassPoValidationLogService();
+        $res = $svc->listPassed([
+            'limit' => (int) ($_GET['limit'] ?? 200),
+            'po' => (string) ($_GET['po'] ?? ''),
+            'username' => (string) ($_GET['username'] ?? $_GET['user'] ?? ''),
+            'action' => (string) ($_GET['action'] ?? ''),
+            'from' => (string) ($_GET['from'] ?? ''),
+            'to' => (string) ($_GET['to'] ?? ''),
+        ]);
+        if (empty($res['success'])) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => (string) ($res['error'] ?? 'Could not load Past PO Log'),
+                'error'   => (string) ($res['error'] ?? 'Could not load Past PO Log'),
+                'data'    => ['rows' => [], 'stats' => []],
+            ], 500);
+        }
+        $this->jsonResponse([
+            'success' => true,
+            'message' => 'Past PO Log',
+            'data'    => [
+                'rows' => $res['rows'],
+                'stats' => $res['stats'] ?? [],
+                'count' => count($res['rows']),
+            ],
+        ]);
+    }
+
+    /*
+     * Stream locally saved signed PO PDF (Past PO Log → File)
+     * GET purchase-order/signed-file?po=1000027972
+     */
+    public function purchaseOrderSignedFile(): void
+    {
+        $po = preg_replace('/\D/', '', (string) ($_GET['po'] ?? '')) ?? '';
+        $display = ltrim($po, '0');
+        if ($display === '') {
+            $display = $po;
+        }
+        if ($display === '' || !preg_match('/^\d{1,10}$/', $po)) {
+            $message = 'Purchase order must be a number of up to 10 digits.';
+            $this->jsonResponse(['success' => false, 'message' => $message, 'error' => $message], 422);
+        }
+        require_once base_path('app/services/PassPoValidationLogService.php');
+        $file = (new PassPoValidationLogService())->resolveSignedPdf($display);
+        $path = (string) ($file['path'] ?? $file['network_path'] ?? '');
+        if ($path === '' || empty($file['has_file'])) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Signed PDF file not found for this PO.',
+                'error'   => 'Signed PDF file not found for this PO.',
+                'po'      => $display,
+            ], 404);
+        }
+        if (!@is_file($path)) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Signed PDF file not found on network share.',
+                'error'   => 'Signed PDF file not found on network share.',
+                'po'      => $display,
+            ], 404);
+        }
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+        $name = basename((string) ($file['pdf_file'] ?? $path));
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: inline; filename="' . $name . '"');
+        $size = @filesize($path);
+        if ($size !== false) {
+            header('Content-Length: ' . (string) $size);
+        }
+        header('Cache-Control: private, max-age=60');
+        readfile($path);
+        exit;
+    }
+
+    /*
+     * Stream PO PDF (local-first):
+     *  1) Signed PDF under EVOL/uploads/po_esign/PO_New_Module/PO-{po}_signed.pdf
+     *  2) Cached original PO-{po}.pdf
+     *  3) Else SAP POPDFSet → save as PO-{po}.pdf (never overwrites signed)
      * GET purchase-order/pdf?po=1000000543
+     * GET purchase-order/pdf?po=…&ensure=1  → JSON { success, source, fetched_sap } (warm cache)
      */
     public function purchaseOrderPdf(): void
     {
@@ -863,41 +1255,54 @@ class ReportsController extends Controller
             $message = 'Purchase order must be a number of up to 10 digits.';
             $this->jsonResponse(['success' => false, 'message' => $message, 'error' => $message], 422);
         }
-        $ebeln = str_pad($po, 10, '0', STR_PAD_LEFT);
-        require_once base_path('app/core/SapODataClient.php');
-        $cfg = config('sap') ?: [];
-        $base = rtrim((string) ($cfg['base_url'] ?? ''), '/');
-        $service = (string) ($cfg['po_pdf_service'] ?? '/sap/opu/odata/sap/ZCOST_SRV/POPDFSet');
-        $url = $base . $service . "(EBELN='" . $ebeln . "')/\$value";
+        require_once base_path('app/services/PoPassApprovalService.php');
+        $svc = new PoPassApprovalService();
+        $res = $svc->ensureLocalPoPdf($po);
+        $ensureOnly = isset($_GET['ensure']) && (string) $_GET['ensure'] !== '' && (string) $_GET['ensure'] !== '0';
 
-        $raw = (new SapODataClient($cfg))->fetchRaw($url, (int) ($cfg['timeout'] ?? 60));
-        $body = $raw['body'] ?? null;
-        if (is_string($body) && str_starts_with($body, "\xEF\xBB\xBF")) {
-            $body = substr($body, 3);
-        }
-        $ctype = strtolower((string) ($raw['content_type'] ?? ''));
-        $isPdf = is_string($body) && (
-            strncmp($body, '%PDF', 4) === 0
-            || str_contains($ctype, 'application/pdf')
-        );
-        if ($raw['error'] !== null || !is_string($body) || $body === '' || !$isPdf) {
-            $message = $raw['error'] ?? 'SAP did not return a PDF for this purchase order.';
+        if (empty($res['success']) || empty($res['path']) || !@is_file((string) $res['path'])) {
+            $message = (string) ($res['error'] ?? 'SAP did not return a PDF for this purchase order.');
             $this->jsonResponse([
                 'success' => false,
                 'message' => $message,
                 'error'   => $message,
-                'po'      => $ebeln,
+                'po'      => $svc->displayPoNumber($po),
+                'source'  => $res['source'] ?? null,
+                'fetched_sap' => !empty($res['fetched_sap']),
             ], 502);
+        }
+
+        if ($ensureOnly) {
+            $this->jsonResponse([
+                'success' => true,
+                'message' => !empty($res['is_signed'])
+                    ? 'Using signed PDF'
+                    : (!empty($res['fetched_sap']) ? 'PDF fetched from SAP and cached' : 'Using cached PDF'),
+                'data' => [
+                    'po' => $svc->displayPoNumber($po),
+                    'pdf_file' => $res['pdf_file'] ?? null,
+                    'folder' => $res['folder'] ?? null,
+                    'is_signed' => !empty($res['is_signed']),
+                    'source' => $res['source'] ?? null,
+                    'fetched_sap' => !empty($res['fetched_sap']),
+                ],
+            ]);
         }
 
         while (ob_get_level() > 0) {
             ob_end_clean();
         }
+        $path = (string) $res['path'];
+        $name = (string) ($res['pdf_file'] ?? basename($path));
         header('Content-Type: application/pdf');
-        header('Content-Disposition: inline; filename="PO_' . $ebeln . '.pdf"');
-        header('Content-Length: ' . (string) strlen($body));
-        header('Cache-Control: private, max-age=120');
-        echo $body;
+        header('Content-Disposition: inline; filename="' . $name . '"');
+        $size = @filesize($path);
+        if ($size !== false) {
+            header('Content-Length: ' . (string) $size);
+        }
+        header('Cache-Control: private, max-age=60');
+        header('X-PO-PDF-Source: ' . (string) ($res['source'] ?? 'local'));
+        readfile($path);
         exit;
     }
 
@@ -938,6 +1343,27 @@ class ReportsController extends Controller
                 $customer,
                 $endUser
             );
+            // Re-apply User1 manual Map Costing so User2 sees the same mapping
+            if (!empty($payload['records']) && is_array($payload['records'])) {
+                require_once base_path('app/services/PoManualCostingMapService.php');
+                $mapSvc = new PoManualCostingMapService();
+                $payload['records'] = $mapSvc->applyToRecords($po, $payload['records']);
+                $payload['summary'] = $this->recountPoCostSummary($payload['records'], $payload['summary'] ?? []);
+                $payload['manual_mappings'] = $mapSvc->listForPo($po);
+            }
+            // APPROVEDSTATUS: prefer SAP Z_QuotationZCostCom.ApprovedStatus; also honor local Pass log
+            require_once base_path('app/services/SapPurchaseOrderService.php');
+            $sapApproved = trim((string) ($payload['approved_status'] ?? $payload['header']['approved_status'] ?? ''));
+            if ($sapApproved !== 'Approved' && $sapApproved !== 'NotApproved') {
+                $sapApproved = 'NotApproved';
+            }
+            $localApproved = (new SapPurchaseOrderService())->approvedStatusFor($po);
+            $payload['approved_status'] = ($sapApproved === 'Approved' || $localApproved === 'Approved')
+                ? 'Approved'
+                : 'NotApproved';
+            if (isset($payload['header']) && is_array($payload['header'])) {
+                $payload['header']['approved_status'] = $payload['approved_status'];
+            }
         } catch (Throwable $e) {
             $this->jsonResponse([
                 'success' => false,
@@ -968,6 +1394,83 @@ class ReportsController extends Controller
         ], !empty($payload['success']) ? 200 : 502);
     }
 
+    /**
+     * Recount KPI summary after applying shared manual mappings.
+     *
+     * @param list<array<string,mixed>> $records
+     * @param array<string,mixed> $base
+     * @return array<string,mixed>
+     */
+    private function recountPoCostSummary(array $records, array $base): array
+    {
+        $passed = 0;
+        $exceptions = 0;
+        $needsReview = 0;
+        $matched = 0;
+        $detail = 0;
+        foreach ($records as $r) {
+            $kind = (string) ($r['row_kind'] ?? 'detail');
+            if (in_array($kind, ['footer', 'charge', 'tax'], true)) {
+                continue;
+            }
+            $st = strtoupper(str_replace(' ', '_', (string) ($r['status'] ?? '')));
+            if ($st === 'FOOTER') {
+                continue;
+            }
+            $detail++;
+            if ($st === 'PASS') {
+                $passed++;
+            } elseif ($st === 'NEEDS_REVIEW') {
+                $needsReview++;
+            } elseif ($st === 'NOT_MATCHED' || !empty($r['needs_manual_match'])) {
+                $exceptions++;
+            } else {
+                $exceptions++;
+            }
+            if (($r['maktx'] ?? '') !== '' || ($r['cost_item'] ?? '') !== '' || !empty($r['manual_match'])) {
+                $matched++;
+            }
+        }
+        $base['passed'] = $passed;
+        $base['exceptions'] = $exceptions;
+        $base['needs_review'] = $needsReview;
+        $base['zcost_matched'] = $matched;
+        $base['can_pass_po'] = $detail > 0 && $exceptions === 0 && $needsReview === 0 && $passed > 0;
+        return $base;
+    }
+
+    /*
+     * Save Manual Map Costing (shared for all users on this PO)
+     */
+    public function purchaseOrderManualMapSave(): void
+    {
+        require_once base_path('app/services/PoManualCostingMapService.php');
+        $raw = function_exists('sap_reports_request_raw_body')
+            ? sap_reports_request_raw_body()
+            : ((string) (file_get_contents('php://input') ?: ''));
+        $input = json_decode($raw, true);
+        if (!is_array($input)) {
+            $input = is_array($_POST) ? $_POST : [];
+        }
+        $current = function_exists('portal_user') ? portal_user() : null;
+        $input['updated_by'] = (string) ($current['username'] ?? ($_SESSION['username'] ?? 'system'));
+        $input['created_by'] = $input['updated_by'];
+        $res = (new PoManualCostingMapService())->upsert($input);
+        if (empty($res['success'])) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => (string) ($res['error'] ?? 'Could not save mapping'),
+                'error'   => (string) ($res['error'] ?? 'Could not save mapping'),
+                'data'    => $res,
+            ], 422);
+        }
+        $this->jsonResponse([
+            'success' => true,
+            'message' => 'Mapping saved for all users',
+            'data'    => $res,
+        ]);
+    }
+
     /*
      * Active portal users for PO costing assign / validate dropdown
      */
@@ -994,42 +1497,291 @@ class ReportsController extends Controller
      */
     public function purchaseOrderValidationLogSave(): void
     {
-        require_once base_path('app/services/PoValidationLogService.php');
-        $raw = function_exists('sap_reports_request_raw_body') ? sap_reports_request_raw_body() : ((string) (file_get_contents('php://input') ?: ''));
-        $input = json_decode($raw, true);
-        if (!is_array($input)) {
-            $input = $_POST;
-        }
-        $current = function_exists('portal_user') ? portal_user() : null;
-        $createdBy = (string) ($current['username'] ?? ($_SESSION['username'] ?? 'system'));
-        $input['created_by'] = $createdBy;
+        try {
+            require_once base_path('app/services/PoValidationLogService.php');
+            $raw = function_exists('sap_reports_request_raw_body') ? sap_reports_request_raw_body() : ((string) (file_get_contents('php://input') ?: ''));
+            $input = json_decode($raw, true);
+            if (!is_array($input)) {
+                $input = $_POST;
+            }
+            $current = function_exists('portal_user') ? portal_user() : null;
+            $createdBy = (string) ($current['username'] ?? ($_SESSION['username'] ?? 'system'));
+            $input['created_by'] = $createdBy;
 
-        $svc = new PoValidationLogService();
-        // Always one PO-level validation log (ignore legacy per-line rows payload)
-        unset($input['rows']);
-        $input['po_item'] = '';
-        $input['material'] = $input['material'] ?? '';
-        $input['mat_desc'] = $input['mat_desc'] ?? '';
-        $input['matched_zcost_item'] = '';
-        $input['matched_maktx'] = '';
-        $input['row_status'] = '';
+            $svc = new PoValidationLogService();
+            // Always one PO-level validation log (ignore legacy per-line rows payload)
+            unset($input['rows']);
+            $input['po_item'] = '';
+            $input['material'] = $input['material'] ?? '';
+            $input['mat_desc'] = $input['mat_desc'] ?? '';
+            $input['matched_zcost_item'] = '';
+            $input['matched_maktx'] = '';
+            $input['row_status'] = '';
 
-        $res = $svc->save($input);
-        if (empty($res['success'])) {
-            $err = (string) ($res['error'] ?? 'Save failed');
+            $res = $svc->save($input);
+            if (empty($res['success'])) {
+                $err = (string) ($res['error'] ?? 'Save failed');
+                $this->jsonResponse([
+                    'success' => false,
+                    'message' => $err,
+                    'error'   => $err,
+                    'data'    => ['ids' => []],
+                ], 422);
+            }
+
+            $status = strtoupper(trim((string) ($input['validation_status'] ?? '')));
+            $isComment = $status === PoValidationLogService::STATUS_COMMENT;
+
+            // Respond first so SMTP hang/timeout cannot blank the browser JSON body
+            $payload = [
+                'success' => true,
+                'message' => $isComment ? 'Comment saved' : 'PO validation saved',
+                'data'    => [
+                    'ids' => [$res['id']],
+                    'errors' => [],
+                    'mail' => [
+                        'sent' => 0,
+                        'failed' => 0,
+                        'errors' => $isComment ? ['Mail queued after response'] : [],
+                        'mentioned' => [],
+                        'from' => '',
+                        'recipients' => [],
+                        'deferred' => $isComment,
+                    ],
+                ],
+            ];
+            $this->flushJsonThenContinue($payload, 200);
+
+            if ($isComment) {
+                try {
+                    @set_time_limit(60);
+                    $this->notifyCommentMentions($svc, $input, $createdBy);
+                } catch (Throwable $ignored) {
+                    // Comment already saved + response already sent
+                }
+            }
+            exit;
+        } catch (Throwable $e) {
             $this->jsonResponse([
                 'success' => false,
-                'message' => $err,
-                'error'   => $err,
+                'message' => 'Could not save comment: ' . $e->getMessage(),
+                'error'   => $e->getMessage(),
                 'data'    => ['ids' => []],
-            ], 422);
+            ], 500);
+        }
+    }
+
+    /**
+     * Send JSON to the client, then keep PHP running (for post-response mail).
+     *
+     * @param array<string,mixed> $payload
+     */
+    private function flushJsonThenContinue(array $payload, int $status = 200): void
+    {
+        while (ob_get_level() > 0) {
+            @ob_end_clean();
+        }
+        if (function_exists('sap_reports_audit_api_response')) {
+            try {
+                sap_reports_audit_api_response($payload, $status);
+            } catch (Throwable $ignored) {
+            }
+        }
+        http_response_code($status);
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: no-store, no-cache, must-revalidate');
+        header('Connection: close');
+        $flags = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE;
+        if (defined('JSON_PARTIAL_OUTPUT_ON_ERROR')) {
+            $flags |= JSON_PARTIAL_OUTPUT_ON_ERROR;
+        }
+        $json = json_encode($payload, $flags);
+        if ($json === false || $json === '') {
+            $json = '{"success":true,"message":"Comment saved","data":null}';
+        }
+        header('Content-Length: ' . strlen($json));
+        echo $json;
+        if (function_exists('fastcgi_finish_request')) {
+            @fastcgi_finish_request();
+        } else {
+            @ob_flush();
+            @flush();
+        }
+    }
+
+    /**
+     * Email users tagged with @username in a PO comment.
+     *
+     * @param array<string,mixed> $input
+     * @return array{sent:int,failed:int,errors:list<string>,mentioned:list<string>}
+     */
+    private function notifyCommentMentions(PoValidationLogService $svc, array $input, string $createdBy): array
+    {
+        $description = trim((string) ($input['description'] ?? ''));
+        $po = preg_replace('/\D/', '', (string) ($input['purchase_order'] ?? '')) ?? '';
+        $mentioned = [];
+
+        if (!empty($input['mentions']) && is_array($input['mentions'])) {
+            foreach ($input['mentions'] as $m) {
+                if (is_array($m)) {
+                    $name = trim((string) ($m['username'] ?? $m['user'] ?? ''));
+                } else {
+                    $name = trim((string) $m);
+                }
+                if ($name !== '') {
+                    $mentioned[strtolower($name)] = $name;
+                }
+            }
+        }
+        foreach ($svc->extractMentions($description) as $name) {
+            $mentioned[strtolower($name)] = $name;
         }
 
-        $this->jsonResponse([
-            'success' => true,
-            'message' => 'PO validation saved',
-            'data'    => ['ids' => [$res['id']], 'errors' => []],
-        ]);
+        if (!$mentioned) {
+            return [
+                'sent' => 0,
+                'failed' => 0,
+                'errors' => ['No @mention found in comment'],
+                'mentioned' => [],
+                'from' => '',
+            ];
+        }
+
+        $mailCfg = function_exists('config') ? config('mail') : [];
+        $smtpPass = trim((string) (($mailCfg['smtp']['password'] ?? '') ?: ''));
+        if ($smtpPass === '' && strtolower((string) ($mailCfg['driver'] ?? 'smtp')) === 'smtp') {
+            return [
+                'sent' => 0,
+                'failed' => count($mentioned),
+                'errors' => ['SMTP password is empty — set smtp.password in config/mail.php (or EVOLV_SMTP_PASS)'],
+                'mentioned' => array_values($mentioned),
+                'from' => (string) ($mailCfg['from']['address'] ?? ''),
+                'recipients' => [],
+            ];
+        }
+
+        $fallbackDomain = trim((string) ($mailCfg['fallback_domain'] ?? 'evolvclothing.com'));
+        $users = $svc->findUsersByUsernames(array_values($mentioned));
+        $byName = [];
+        foreach ($users as $u) {
+            $byName[strtolower((string) ($u['username'] ?? ''))] = $u;
+        }
+
+        $emails = [];
+        $resolved = [];
+        foreach ($mentioned as $key => $name) {
+            $u = $byName[$key] ?? null;
+            $email = trim((string) ($u['email'] ?? ''));
+            if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                // Prefer company mailbox for known portal users
+                $email = strtolower($name) . '@' . $fallbackDomain;
+            }
+            if (filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $emails[] = $email;
+                $resolved[] = (string) ($u['username'] ?? $name);
+            }
+        }
+        $emails = array_values(array_unique($emails));
+
+        if (!$emails) {
+            return [
+                'sent' => 0,
+                'failed' => 0,
+                'errors' => ['No email found for mentioned users'],
+                'mentioned' => array_values($mentioned),
+                'from' => (string) ($mailCfg['from']['address'] ?? ''),
+            ];
+        }
+
+        require_once base_path('app/services/SimpleMailService.php');
+        $fromEmail = (string) ($mailCfg['from']['address'] ?? 'apps@evolvclothing.com');
+        $fromName = (string) ($mailCfg['from']['name'] ?? 'Evolv Apps');
+        $subject = ($createdBy !== '' ? $createdBy : 'Someone') . ' mentioned you on PO ' . ($po !== '' ? $po : '—');
+        $safeComment = nl2br(htmlspecialchars($description, ENT_QUOTES, 'UTF-8'));
+        $safeBy = htmlspecialchars($createdBy !== '' ? $createdBy : 'Someone', ENT_QUOTES, 'UTF-8');
+        $safePo = htmlspecialchars($po !== '' ? $po : '—', ENT_QUOTES, 'UTF-8');
+        $safeFrom = htmlspecialchars($fromEmail, ENT_QUOTES, 'UTF-8');
+        $safeWhen = htmlspecialchars(date('d M Y · h:i A'), ENT_QUOTES, 'UTF-8');
+        $byInitial = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $createdBy !== '' ? $createdBy : 'U') ?: 'U', 0, 1));
+
+        $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        $host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
+        $workbenchPath = function_exists('url')
+            ? url('po-costing' . ($po !== '' ? ('?po=' . rawurlencode($po)) : ''))
+            : '/sap_reports/po-costing';
+        $workbenchUrl = $scheme . '://' . $host . $workbenchPath;
+        $safeWorkbenchUrl = htmlspecialchars($workbenchUrl, ENT_QUOTES, 'UTF-8');
+
+        $body = <<<HTML
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#eef2f7;font-family:'Segoe UI',Tahoma,Arial,sans-serif;color:#0f172a;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f7;padding:28px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 10px 30px rgba(15,23,42,.08);">
+        <tr>
+          <td style="background:linear-gradient(135deg,#312e81 0%,#4f46e5 55%,#0ea5e9 100%);padding:22px 24px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="color:#fff;">
+                  <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.85;font-weight:700;">Evolv Apps</div>
+                  <div style="font-size:20px;font-weight:800;margin-top:4px;letter-spacing:-.02em;">PO mention</div>
+                </td>
+                <td align="right" style="vertical-align:middle;">
+                  <span style="display:inline-block;background:rgba(255,255,255,.18);color:#fff;font-size:12px;font-weight:800;padding:8px 12px;border-radius:999px;">PO {$safePo}</span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:16px;">
+              <tr>
+                <td style="width:42px;height:42px;border-radius:12px;background:#4f46e5;color:#fff;font-weight:800;font-size:16px;text-align:center;vertical-align:middle;">{$byInitial}</td>
+                <td style="padding-left:12px;vertical-align:middle;">
+                  <div style="font-size:15px;font-weight:700;color:#0f172a;"><strong style="color:#4f46e5;">{$safeBy}</strong> mentioned you</div>
+                  <div style="font-size:12px;color:#64748b;margin-top:2px;">{$safeWhen}</div>
+                </td>
+              </tr>
+            </table>
+
+            <div style="font-size:13px;color:#475569;margin:0 0 10px;font-weight:650;">Comment</div>
+            <div style="margin:0 0 20px;padding:14px 16px;border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0;border-left:4px solid #4f46e5;font-size:14px;line-height:1.55;color:#0f172a;">
+              {$safeComment}
+            </div>
+
+            <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 8px;">
+              <tr>
+                <td style="border-radius:10px;background:#4f46e5;">
+                  <a href="{$safeWorkbenchUrl}" style="display:inline-block;padding:12px 18px;color:#ffffff;text-decoration:none;font-size:14px;font-weight:800;">
+                    Open PO Costing Workbench →
+                  </a>
+                </td>
+              </tr>
+            </table>
+            <div style="font-size:12px;color:#94a3b8;margin-top:10px;">Reply from the workbench activity panel on this PO.</div>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:14px 24px 18px;background:#f8fafc;border-top:1px solid #e2e8f0;">
+            <div style="font-size:11px;color:#94a3b8;line-height:1.5;">
+              Sent by <strong style="color:#64748b;">{$safeFrom}</strong> · Evolv Clothing · SAP Reports
+            </div>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>
+HTML;
+
+        $mail = (new SimpleMailService($mailCfg))->send($emails, $subject, $body, $fromEmail, $fromName);
+        $mail['mentioned'] = $resolved ?: array_values($mentioned);
+        $mail['recipients'] = $emails;
+        return $mail;
     }
 
     /*
@@ -1039,12 +1791,22 @@ class ReportsController extends Controller
     {
         require_once base_path('app/services/PoValidationLogService.php');
         $po = preg_replace('/\D/', '', (string) ($_GET['po'] ?? '')) ?? '';
-        if ($po === '') {
-            $this->jsonResponse(['success' => false, 'message' => 'PO is required', 'data' => ['logs' => []]], 422);
-        }
+        $from = trim((string) ($_GET['from'] ?? ''));
+        $to = trim((string) ($_GET['to'] ?? ''));
+        $limit = (int) ($_GET['limit'] ?? 200);
         try {
-            $logs = (new PoValidationLogService())->listForPo($po);
-            $this->jsonResponse(['success' => true, 'data' => ['logs' => $logs]]);
+            $svc = new PoValidationLogService();
+            if ($po !== '' && $from === '' && $to === '') {
+                $logs = $svc->listForPo($po, max(20, min(200, $limit)));
+            } else {
+                $logs = $svc->listRecent([
+                    'po' => $po,
+                    'from' => $from,
+                    'to' => $to,
+                    'limit' => $limit,
+                ]);
+            }
+            $this->jsonResponse(['success' => true, 'data' => ['logs' => $logs, 'count' => count($logs)]]);
         } catch (Throwable $e) {
             $this->jsonResponse([
                 'success' => false,

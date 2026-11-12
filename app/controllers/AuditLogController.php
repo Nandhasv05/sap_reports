@@ -22,12 +22,14 @@ class AuditLogController extends Controller
             return;
         }
 
-        $records = ApiAuditLogService::latest(300);
+        // Full table history (no rolling 15-day cut) — only UI payload capped.
+        $records = ApiAuditLogService::latest(2000);
         $this->view('reports/audit_log', [
             'pageTitle' => 'API Activity Log',
             'appShell'  => true,
             'records'   => $records,
             'total'     => count($records),
+            'stats'     => ApiAuditLogService::buildStats($records),
         ]);
     }
 
@@ -45,7 +47,7 @@ class AuditLogController extends Controller
                 ], 403);
             }
 
-            $limit = (int) ($_GET['limit'] ?? 200);
+            $limit = (int) ($_GET['limit'] ?? 2000);
             $rows = ApiAuditLogService::latest($limit);
             $this->jsonResponse([
                 'success' => true,
@@ -53,6 +55,8 @@ class AuditLogController extends Controller
                 'data' => [
                     'records' => $rows,
                     'total' => count($rows),
+                    'stats' => ApiAuditLogService::buildStats($rows),
+                    'timezone' => 'Asia/Kolkata',
                 ],
             ]);
         });
