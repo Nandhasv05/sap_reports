@@ -37,12 +37,20 @@ class PoPassApprovalService
         bool $isApprove,
         array $payload,
         array $approvalResult,
-        ?string $extraNote = null
+        ?string $extraNote = null,
+        ?string $actionOverride = null
     ): void {
         try {
             $user = function_exists('portal_user') ? portal_user() : null;
+            $ok = !empty($approvalResult['success']);
+            $action = trim((string) ($actionOverride ?? ''));
+            if ($action === '') {
+                $action = $isApprove ? 'approve' : 'revert';
+            }
+            $status = PassPoValidationLogService::statusFor($action, $ok, $valueFlag);
             $response = [
-                'success' => !empty($approvalResult['success']),
+                'success' => $ok,
+                'status' => $status,
                 'http_code' => $approvalResult['http_code'] ?? null,
                 'error' => $approvalResult['error'] ?? null,
                 'body' => $approvalResult['body'] ?? null,
@@ -55,15 +63,13 @@ class PoPassApprovalService
             if ($extraNote !== null && $extraNote !== '') {
                 $response['note'] = $extraNote;
             }
-            $ok = !empty($approvalResult['success']);
-            $action = $isApprove ? 'pass' : 'revert';
             $this->passLog->save([
                 'user_id' => $user['id'] ?? ($_SESSION['user_id'] ?? null),
                 'username' => $user['username'] ?? ($_SESSION['username'] ?? null),
                 'purchase_order' => $displayPo,
                 'request_id' => $requestId,
                 'action' => $action,
-                'status' => PassPoValidationLogService::statusFor($action, $ok, $valueFlag),
+                'status' => $status,
                 'value_flag' => $valueFlag,
                 'method' => 'POST',
                 'url' => (string) ($approvalResult['url'] ?? ''),
@@ -315,18 +321,51 @@ class PoPassApprovalService
         return $display !== '' ? ('PO-' . $display . '.pdf') : 'PO-0.pdf';
     }
 
-    /** Signed PDF: PO-{po}_signed.pdf */
+    /**
+     * Canonical signed PDF name: PO-{po}.pdf (e.g. PO-60003156.pdf).
+     * Legacy *_signed.pdf names are still discovered for reading.
+     */
     public function signedPdfFileName(string $po): string
     {
-        $display = $this->displayPoNumber($po);
-        return $display !== '' ? ('PO-' . $display . '_signed.pdf') : 'PO-0_signed.pdf';
+        return $this->originalPdfFileName($po);
     }
 
     /**
-     * Save signed PDF as EVOL/uploads/po_esign/PO_New_Module/PO-{po}_signed.pdf
-     * Also mirrors as PO-{po}.pdf only when no signed marker conflict (same signed bytes).
+     * Canonical save folder: EVOL/uploads/po_esign (not date / PO_New_Module subfolders).
+     */
+    public function poEsignSaveDir(): ?string
+    {
+        $root = $this->esignStorageRoot();
+        if ($root === null || $root === '') {
+            // Hard fallback under htdocs/EVOL
+            $htdocs = dirname(base_path());
+            $fallback = $htdocs . DIRECTORY_SEPARATOR . 'EVOL' . DIRECTORY_SEPARATOR
+                . 'uploads' . DIRECTORY_SEPARATOR . 'po_esign';
+            if (!@is_dir($fallback)) {
+                @mkdir($fallback, 0775, true);
+            }
+            return @is_dir($fallback) ? $fallback : null;
+        }
+        $base = basename(rtrim($root, '\\/'));
+        // Config often points at .../po_esign/PO_New_Module — save in parent po_esign
+        if (strcasecmp($base, 'PO_New_Module') === 0) {
+            $parent = dirname($root);
+            if (!@is_dir($parent)) {
+                @mkdir($parent, 0775, true);
+            }
+            return @is_dir($parent) ? $parent : $root;
+        }
+        if (!@is_dir($root)) {
+            @mkdir($root, 0775, true);
+        }
+        return @is_dir($root) ? $root : null;
+    }
+
+    /**
+     * Save signed PDF as EVOL/uploads/po_esign/PO-{po}.pdf (overwrite same name — no duplicates).
+     * Does not create unsigned cache files.
      *
-     * @return array{path:?string,folder:?string,file:?string,error:?string}
+     * @return array{path:?string,folder:?string,file:?string,error:?string,verified:bool}
      */
     private function writeEsignNetworkPdf(string $displayPo, string $contents): array
     {
@@ -334,19 +373,20 @@ class PoPassApprovalService
         if ($displayPo === '') {
             $displayPo = '0';
         }
-        $fileName = $this->signedPdfFileName($displayPo);
-        $ensured = $this->ensureEsignNetworkFolder();
-        $folder = $ensured['folder'] ?? null;
-        if (empty($ensured['folder']) || !@is_dir((string) $folder)) {
+        $fileName = $this->signedPdfFileName($displayPo); // PO-{po}.pdf
+        $folder = $this->poEsignSaveDir();
+        if ($folder === null || !@is_dir($folder)) {
             return [
                 'path' => null,
-                'folder' => $folder ?: $this->networkEsignFolder(),
+                'folder' => $folder,
                 'file' => $fileName,
-                'error' => (string) ($ensured['error'] ?? ('Could not create folder: ' . ($folder ?: 'unknown'))),
+                'error' => 'Could not create folder EVOL/uploads/po_esign',
+                'verified' => false,
             ];
         }
         $folder = rtrim((string) $folder, '\\/');
         $path = $folder . DIRECTORY_SEPARATOR . $fileName;
+        // Single canonical file — overwrite if re-signing (prevents PO-xxx (1).pdf duplicates)
         if (@file_put_contents($path, $contents) === false) {
             $phpErr = error_get_last();
             return [
@@ -355,18 +395,40 @@ class PoPassApprovalService
                 'file' => $fileName,
                 'error' => 'Could not write signed PDF to ' . $path
                     . (!empty($phpErr['message']) ? (' (' . $phpErr['message'] . ')') : ''),
+                'verified' => false,
             ];
         }
-        // Keep PO-{po}.pdf as the latest viewable copy (signed), for Open PDF / eSign
-        $origName = $this->originalPdfFileName($displayPo);
-        @file_put_contents($folder . DIRECTORY_SEPARATOR . $origName, $contents);
-        // Marker so SAP cache never overwrites signed content
+        // Verify on disk before caller updates DB
+        $verified = @is_file($path) && (@filesize($path) ?: 0) > 8;
+        if ($verified) {
+            $fh = @fopen($path, 'rb');
+            $head = $fh ? (string) @fread($fh, 4) : '';
+            if ($fh) {
+                @fclose($fh);
+            }
+            $verified = $head === '%PDF';
+        }
+        if (!$verified) {
+            @unlink($path);
+            return [
+                'path' => null,
+                'folder' => $folder,
+                'file' => $fileName,
+                'error' => 'Signed PDF write verification failed at ' . $path,
+                'verified' => false,
+            ];
+        }
         @file_put_contents($folder . DIRECTORY_SEPARATOR . ('PO-' . $displayPo . '.signed'), date('c'));
-        return ['path' => $path, 'folder' => $folder, 'file' => $fileName, 'error' => null];
+        // Remove legacy *_signed.pdf duplicate if present (same folder)
+        $legacy = $folder . DIRECTORY_SEPARATOR . ('PO-' . $displayPo . '_signed.pdf');
+        if (@is_file($legacy) && realpath($legacy) !== realpath($path)) {
+            @unlink($legacy);
+        }
+        return ['path' => $path, 'folder' => $folder, 'file' => $fileName, 'error' => null, 'verified' => true];
     }
 
     /**
-     * Locate signed PDF under EVOL/uploads/po_esign/PO_New_Module.
+     * Locate signed PDF under EVOL/uploads/po_esign (canonical PO-{po}.pdf + legacy names).
      *
      * @return array{has_file:bool,path:?string,pdf_file:?string,folder:?string,network_path:?string,is_signed:bool}
      */
@@ -377,30 +439,31 @@ class PoPassApprovalService
             return ['has_file' => false, 'path' => null, 'pdf_file' => null, 'folder' => null, 'network_path' => null, 'is_signed' => false];
         }
         $root = $this->esignStorageRoot();
+        $saveDir = $this->poEsignSaveDir();
         $primary = $this->networkEsignFolder();
-        $signedName = $this->signedPdfFileName($displayPo);
+        $signedName = $this->signedPdfFileName($displayPo); // PO-{po}.pdf
         $origName = $this->originalPdfFileName($displayPo);
         $legacyNames = [
             $signedName,
+            'PO-' . $displayPo . '_signed.pdf',
             'po-' . $displayPo . '_signed.pdf',
             'PO_' . $displayPo . '_signed.pdf',
             'po-' . $displayPo . '.pdf',
-            'PO_' . $displayPo . '_signed.pdf',
         ];
         $candidates = [];
-        $bases = array_filter([$primary, $root]);
+        $bases = array_values(array_unique(array_filter([$saveDir, $primary, $root])));
         foreach ($bases as $base) {
             foreach ($legacyNames as $name) {
-                $candidates[] = ['path' => $base . DIRECTORY_SEPARATOR . $name, 'signed' => true, 'file' => $name];
+                $isLegacySignedName = str_contains(strtolower($name), 'signed');
+                $path = $base . DIRECTORY_SEPARATOR . $name;
+                $marker = $base . DIRECTORY_SEPARATOR . ('PO-' . $displayPo . '.signed');
+                // PO-{n}.pdf counts as signed only with .signed marker (or *_signed.pdf name)
+                $candidates[] = [
+                    'path' => $path,
+                    'signed' => $isLegacySignedName || @is_file($marker),
+                    'file' => $name,
+                ];
             }
-            // PO-{n}.pdf only counts as signed when .signed marker exists
-            $origPath = $base . DIRECTORY_SEPARATOR . $origName;
-            $marker = $base . DIRECTORY_SEPARATOR . ('PO-' . $displayPo . '.signed');
-            $candidates[] = [
-                'path' => $origPath,
-                'signed' => @is_file($marker),
-                'file' => $origName,
-            ];
         }
         if ($root !== null) {
             try {
@@ -413,9 +476,13 @@ class PoPassApprovalService
                 $day = $baseDt->modify('-' . $i . ' days');
                 foreach ([$day->format('Y-m-d'), $day->format('d-m-Y')] as $df) {
                     foreach ($legacyNames as $name) {
+                        $isLegacySignedName = str_contains(strtolower($name), 'signed');
+                        $dayDir = $root . DIRECTORY_SEPARATOR . $df;
+                        $marker = $dayDir . DIRECTORY_SEPARATOR . ('PO-' . $displayPo . '.signed');
+                        // PO-{n}.pdf in dated folders counts as signed only with marker
                         $candidates[] = [
-                            'path' => $root . DIRECTORY_SEPARATOR . $df . DIRECTORY_SEPARATOR . $name,
-                            'signed' => true,
+                            'path' => $dayDir . DIRECTORY_SEPARATOR . $name,
+                            'signed' => $isLegacySignedName || @is_file($marker),
                             'file' => $name,
                         ];
                     }
@@ -513,43 +580,18 @@ class PoPassApprovalService
     }
 
     /**
-     * Ensure local PDF exists: signed → cached original → SAP POPDFSet (save as PO-{po}.pdf).
-     * Never overwrites a signed PDF with SAP original.
+     * Fetch PO PDF bytes from SAP POPDFSet — never writes to disk.
      *
-     * @return array{success:bool,path:?string,pdf_file:?string,folder:?string,is_signed:bool,source:string,error:?string,fetched_sap:bool}
+     * @return array{success:bool,body:?string,error:?string,pdf_file:string}
      */
-    public function ensureLocalPoPdf(string $po): array
+    public function fetchSapPoPdfBytes(string $po): array
     {
         $displayPo = $this->displayPoNumber($po);
-        if ($displayPo === '' || !preg_match('/^\d{1,10}$/', preg_replace('/\D/', '', $po) ?? '')) {
-            return [
-                'success' => false,
-                'path' => null,
-                'pdf_file' => null,
-                'folder' => null,
-                'is_signed' => false,
-                'source' => 'none',
-                'error' => 'Purchase order must be a number of up to 10 digits.',
-                'fetched_sap' => false,
-            ];
-        }
-
-        $local = $this->findLocalPoPdf($displayPo);
-        if (!empty($local['has_file']) && !empty($local['path'])) {
-            return [
-                'success' => true,
-                'path' => $local['path'],
-                'pdf_file' => $local['pdf_file'],
-                'folder' => $local['folder'],
-                'is_signed' => !empty($local['is_signed']),
-                'source' => (string) ($local['source'] ?? 'cache'),
-                'error' => null,
-                'fetched_sap' => false,
-            ];
-        }
-
-        // Fetch from SAP and cache as PO-{po}.pdf
         $digits = preg_replace('/\D/', '', $po) ?? '';
+        $fileName = $this->originalPdfFileName($displayPo !== '' ? $displayPo : $digits);
+        if ($digits === '' || !preg_match('/^\d{1,10}$/', $digits)) {
+            return ['success' => false, 'body' => null, 'error' => 'Purchase order must be a number of up to 10 digits.', 'pdf_file' => $fileName];
+        }
         $ebeln = str_pad(substr($digits, -10), 10, '0', STR_PAD_LEFT);
         $base = rtrim((string) ($this->cfg['base_url'] ?? ''), '/');
         $pdfService = (string) ($this->cfg['po_pdf_service'] ?? '/sap/opu/odata/sap/ZCOST_SRV/POPDFSet');
@@ -567,88 +609,131 @@ class PoPassApprovalService
         if ($raw['error'] !== null || !is_string($body) || $body === '' || !$isPdf) {
             return [
                 'success' => false,
-                'path' => null,
-                'pdf_file' => $this->originalPdfFileName($displayPo),
-                'folder' => $this->networkEsignFolder(),
-                'is_signed' => false,
-                'source' => 'sap',
+                'body' => null,
                 'error' => $raw['error'] ?? 'SAP did not return a PDF for this purchase order.',
-                'fetched_sap' => true,
+                'pdf_file' => $fileName,
             ];
         }
+        return ['success' => true, 'body' => $body, 'error' => null, 'pdf_file' => $fileName];
+    }
 
-        $ensured = $this->ensureEsignNetworkFolder();
-        $folder = $ensured['folder'] ?? null;
-        if (empty($ensured['folder']) || !@is_dir((string) $folder)) {
+    /**
+     * DB says e-sign completed for this PO (Pass_po_validtion).
+     */
+    public function isEsignCompletedInDb(string $po): bool
+    {
+        try {
+            $display = $this->displayPoNumber($po);
+            if ($display === '') {
+                return false;
+            }
+            $map = $this->passLog->latestStatusesForPos([$display]);
+            $st = strtolower(trim((string) ($map[$display]['esign_status'] ?? '')));
+            if ($st === '') {
+                foreach ($map as $k => $row) {
+                    $kd = ltrim(preg_replace('/\D/', '', (string) $k) ?? '', '0');
+                    if ($kd === $display) {
+                        $st = strtolower(trim((string) ($row['esign_status'] ?? '')));
+                        break;
+                    }
+                }
+            }
+            if ($st === '') {
+                return false;
+            }
+            return str_contains($st, 'e-sign') || str_contains($st, 'esign') || str_contains($st, 'signed') || str_contains($st, 'completed');
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
+
+    /**
+     * Open-PDF resolver: verified signed file (DB + disk) OR SAP bytes in memory (no save).
+     *
+     * @return array{success:bool,path:?string,body:?string,pdf_file:?string,is_signed:bool,source:string,error:?string,fetched_sap:bool}
+     */
+    public function resolvePoPdfForView(string $po): array
+    {
+        $displayPo = $this->displayPoNumber($po);
+        if ($displayPo === '' || !preg_match('/^\d{1,10}$/', preg_replace('/\D/', '', $po) ?? '')) {
             return [
                 'success' => false,
                 'path' => null,
-                'pdf_file' => $this->originalPdfFileName($displayPo),
-                'folder' => $folder,
+                'body' => null,
+                'pdf_file' => null,
                 'is_signed' => false,
-                'source' => 'sap',
-                'error' => (string) ($ensured['error'] ?? 'Could not create EVOL/uploads/po_esign/PO_New_Module.'),
-                'fetched_sap' => true,
+                'source' => 'none',
+                'error' => 'Purchase order must be a number of up to 10 digits.',
+                'fetched_sap' => false,
             ];
         }
 
-        // Never overwrite signed files
-        $signedCheck = $this->findEsignNetworkPdf($displayPo);
-        if (!empty($signedCheck['has_file'])) {
+        $signed = $this->findEsignNetworkPdf($displayPo);
+        $dbOk = $this->isEsignCompletedInDb($displayPo);
+        // File alone is not enough — require DB e-sign success (or legacy .signed marker + file)
+        $markerOk = false;
+        if (!empty($signed['path'])) {
+            $marker = dirname((string) $signed['path']) . DIRECTORY_SEPARATOR . ('PO-' . $displayPo . '.signed');
+            $markerOk = @is_file($marker) || str_contains(strtolower((string) ($signed['pdf_file'] ?? '')), 'signed');
+        }
+        if (!empty($signed['has_file']) && !empty($signed['path']) && @is_file((string) $signed['path'])
+            && ($dbOk || $markerOk)) {
             return [
                 'success' => true,
-                'path' => $signedCheck['path'],
-                'pdf_file' => $signedCheck['pdf_file'],
-                'folder' => $signedCheck['folder'],
+                'path' => $signed['path'],
+                'body' => null,
+                'pdf_file' => $signed['pdf_file'],
                 'is_signed' => true,
                 'source' => 'signed',
                 'error' => null,
-                'fetched_sap' => true,
+                'fetched_sap' => false,
             ];
         }
 
-        $fileName = $this->originalPdfFileName($displayPo);
-        $path = rtrim((string) $folder, '\\/') . DIRECTORY_SEPARATOR . $fileName;
-        $marker = rtrim((string) $folder, '\\/') . DIRECTORY_SEPARATOR . ('PO-' . $displayPo . '.signed');
-        if (@is_file($marker)) {
-            // Signed marker present — do not replace PO-{po}.pdf with SAP original
-            if (@is_file($path)) {
-                return [
-                    'success' => true,
-                    'path' => $path,
-                    'pdf_file' => $fileName,
-                    'folder' => $folder,
-                    'is_signed' => true,
-                    'source' => 'signed',
-                    'error' => null,
-                    'fetched_sap' => true,
-                ];
-            }
-        }
-        if (@file_put_contents($path, $body) === false) {
-            $phpErr = error_get_last();
+        $sap = $this->fetchSapPoPdfBytes($displayPo);
+        if (empty($sap['success']) || empty($sap['body'])) {
             return [
                 'success' => false,
                 'path' => null,
-                'pdf_file' => $fileName,
-                'folder' => $folder,
+                'body' => null,
+                'pdf_file' => $sap['pdf_file'] ?? $this->originalPdfFileName($displayPo),
                 'is_signed' => false,
                 'source' => 'sap',
-                'error' => 'Could not save PDF to ' . $path
-                    . (!empty($phpErr['message']) ? (' (' . $phpErr['message'] . ')') : ''),
+                'error' => (string) ($sap['error'] ?? 'SAP did not return a PDF for this purchase order.'),
                 'fetched_sap' => true,
             ];
         }
 
         return [
             'success' => true,
-            'path' => $path,
-            'pdf_file' => $fileName,
-            'folder' => $folder,
+            'path' => null,
+            'body' => $sap['body'],
+            'pdf_file' => $sap['pdf_file'],
             'is_signed' => false,
-            'source' => 'sap_cached',
+            'source' => 'sap',
             'error' => null,
             'fetched_sap' => true,
+        ];
+    }
+
+    /**
+     * @deprecated Use resolvePoPdfForView() — no longer caches unsigned SAP PDFs to disk.
+     *
+     * @return array{success:bool,path:?string,pdf_file:?string,folder:?string,is_signed:bool,source:string,error:?string,fetched_sap:bool,body:?string}
+     */
+    public function ensureLocalPoPdf(string $po): array
+    {
+        $view = $this->resolvePoPdfForView($po);
+        return [
+            'success' => !empty($view['success']),
+            'path' => $view['path'] ?? null,
+            'pdf_file' => $view['pdf_file'] ?? null,
+            'folder' => !empty($view['path']) ? dirname((string) $view['path']) : $this->poEsignSaveDir(),
+            'is_signed' => !empty($view['is_signed']),
+            'source' => (string) ($view['source'] ?? 'none'),
+            'error' => $view['error'] ?? null,
+            'fetched_sap' => !empty($view['fetched_sap']),
+            'body' => $view['body'] ?? null,
         ];
     }
 
@@ -794,10 +879,109 @@ class PoPassApprovalService
     }
 
     /**
+     * Deep-find MessageType / Message in SAP POApprovalSet payload.
+     * Sample:
+     *   { "RequestId":"…", "Ebeln":"…", "Value":"", "MessageType":"E", "Message":"PO is not approved in SAP" }
+     *   { "MessageType":"S", "Message":"PO is approved in SAP" }
+     *
+     * @param mixed $node
+     * @return array{0:?string,1:?string} [messageType, message]
+     */
+    private function findSapMessageFields(mixed $node, int $depth = 0): array
+    {
+        if ($depth > 8 || !is_array($node)) {
+            return [null, null];
+        }
+        $typeKeys = ['MessageType', 'messageType', 'MsgType', 'TYPE', 'Type'];
+        $msgKeys = ['Message', 'message', 'MsgText', 'MESSAGE', 'Msg'];
+        $foundType = null;
+        $foundMsg = null;
+        foreach ($typeKeys as $k) {
+            if (isset($node[$k]) && trim((string) $node[$k]) !== '') {
+                $foundType = strtoupper(trim((string) $node[$k]));
+                break;
+            }
+        }
+        foreach ($msgKeys as $k) {
+            if (isset($node[$k]) && trim((string) $node[$k]) !== '') {
+                $foundMsg = trim((string) $node[$k]);
+                break;
+            }
+        }
+        if ($foundType !== null || $foundMsg !== null) {
+            return [$foundType, $foundMsg];
+        }
+        foreach ($node as $child) {
+            if (!is_array($child)) {
+                continue;
+            }
+            [$t, $m] = $this->findSapMessageFields($child, $depth + 1);
+            if ($t !== null || $m !== null) {
+                return [$t, $m];
+            }
+        }
+        return [null, null];
+    }
+
+    /**
+     * Read SAP POApprovalSet business result from OData body.
+     * MessageType S = approved; E = unapproved / error. Message = UI text.
+     *
+     * @param array<string,mixed> $approvalResult from SapODataClient::postJson
+     * @return array{message_type:string,message:string,is_success:bool,is_approved:bool,is_unapproved:bool}
+     */
+    public function parseApprovalMessage(array $approvalResult): array
+    {
+        $body = $approvalResult['body'] ?? null;
+        if (!is_array($body) && !empty($approvalResult['raw'])) {
+            $decoded = json_decode((string) $approvalResult['raw'], true);
+            if (is_array($decoded)) {
+                $body = $decoded;
+            }
+        }
+
+        [$foundType, $foundMsg] = $this->findSapMessageFields(is_array($body) ? $body : []);
+        $messageType = $foundType !== null ? $foundType : '';
+        $message = $foundMsg !== null ? $foundMsg : '';
+
+        // Fallbacks from transport / OData error envelope
+        if ($message === '' && !empty($approvalResult['error'])) {
+            $message = trim((string) $approvalResult['error']);
+        }
+        if ($messageType === '' && isset($approvalResult['message_type'])) {
+            $messageType = strtoupper(trim((string) $approvalResult['message_type']));
+        }
+        if ($message === '' && isset($approvalResult['message'])) {
+            $message = trim((string) $approvalResult['message']);
+        }
+
+        // Prefer explicit MessageType when present — do NOT invent S from HTTP 200
+        if ($messageType !== '') {
+            $letter = strtoupper(substr($messageType, 0, 1));
+            $isSuccess = $letter === 'S';
+            $isError = $letter === 'E';
+        } else {
+            // No MessageType in body → fall back to transport success
+            $letter = !empty($approvalResult['success']) ? 'S' : 'E';
+            $isSuccess = $letter === 'S';
+            $isError = !$isSuccess;
+        }
+
+        return [
+            'message_type' => $letter,
+            'message' => $message,
+            'is_success' => $isSuccess,
+            'is_approved' => $isSuccess,
+            'is_unapproved' => $isError || !$isSuccess,
+        ];
+    }
+
+    /**
      * Post POApprovalSet only (no PDF fetch / save).
      * Value "X" = approve; Value " " = revert.
+     * SAP MessageType S = approved, E = unapproved — Message is returned for UI.
      *
-     * @return array{success:bool,request_id:string,po:string,value:string,error:?string,approval:?array,payload?:array}
+     * @return array{success:bool,request_id:string,po:string,value:string,error:?string,approval:?array,payload?:array,message?:string,message_type?:string}
      */
     public function approveOnly(string $po, ?string $requestId = null, string $value = 'X'): array
     {
@@ -809,6 +993,8 @@ class PoPassApprovalService
                 'po' => $digits,
                 'value' => $value,
                 'error' => 'Purchase order must be a number of up to 10 digits.',
+                'message' => 'Purchase order must be a number of up to 10 digits.',
+                'message_type' => 'E',
                 'approval' => null,
             ];
         }
@@ -837,24 +1023,65 @@ class PoPassApprovalService
             ],
         ];
 
-        // 1) SAP Approval API first — local DB is tracking/display only
+        // 1) SAP Approve API — then interpret MessageType (S=approved, E=unapproved)
         $approval = $this->odata->postJson($approvalPath, $payload, (int) ($this->cfg['timeout'] ?? 60));
-        if (empty($approval['success'])) {
-            // Log failure for internal tracking (not an SAP approval)
-            $this->logPassApi($displayPo, $requestId, $valueFlag, $isApprove, $payload, $approval);
+        $parsed = $this->parseApprovalMessage($approval);
+        $logAction = $isApprove ? 'approve' : 'revert';
+
+        // Business failure: HTTP may still be 200 with MessageType=E
+        $transportOk = !empty($approval['success']);
+        $businessOk = $transportOk && !empty($parsed['is_success']);
+        $uiMessage = $parsed['message'] !== ''
+            ? $parsed['message']
+            : ($businessOk
+                ? ($isApprove ? 'PO approved in SAP.' : 'PO reverted in SAP.')
+                : (string) ($approval['error'] ?? ($isApprove ? 'SAP POApprovalSet failed.' : 'SAP PO revert failed.')));
+
+        if (!$businessOk) {
+            $failApproval = $approval;
+            $failApproval['success'] = false;
+            $failApproval['error'] = $uiMessage;
+            $failApproval['message_type'] = $parsed['message_type'];
+            $failApproval['message'] = $uiMessage;
+            $this->logPassApi(
+                $displayPo,
+                $requestId,
+                $valueFlag,
+                $isApprove,
+                $payload,
+                $failApproval,
+                'Approved API failed (MessageType=' . ($parsed['message_type'] ?: '?') . ')',
+                $logAction
+            );
             return [
                 'success' => false,
                 'request_id' => $requestId,
                 'po' => $displayPo,
                 'value' => $valueFlag,
-                'error' => (string) ($approval['error'] ?? ($isApprove ? 'SAP POApprovalSet failed.' : 'SAP PO revert failed.')),
-                'approval' => $approval,
+                'error' => $uiMessage,
+                'message' => $uiMessage,
+                'message_type' => $parsed['message_type'] !== '' ? $parsed['message_type'] : 'E',
+                'sap_approved' => false,
+                'approval' => $failApproval,
                 'payload' => $payload,
+                'status' => PassPoValidationLogService::statusFor($logAction, false, $valueFlag),
             ];
         }
 
-        // 2) SAP succeeded → record local tracking status for display
-        $this->logPassApi($displayPo, $requestId, $valueFlag, $isApprove, $payload, $approval);
+        // 2) MessageType S → store Approved / Reverted
+        $okApproval = $approval;
+        $okApproval['message_type'] = $parsed['message_type'];
+        $okApproval['message'] = $uiMessage;
+        $this->logPassApi(
+            $displayPo,
+            $requestId,
+            $valueFlag,
+            $isApprove,
+            $payload,
+            $okApproval,
+            $isApprove ? 'Approved API success' : 'Revert API success',
+            $logAction
+        );
 
         return [
             'success' => true,
@@ -862,9 +1089,12 @@ class PoPassApprovalService
             'po' => $displayPo,
             'value' => $valueFlag,
             'error' => null,
-            'approval' => $approval,
+            'message' => $uiMessage,
+            'message_type' => $parsed['message_type'] !== '' ? $parsed['message_type'] : 'S',
+            'approval' => $okApproval,
             'payload' => $payload,
             'sap_approved' => $isApprove,
+            'status' => PassPoValidationLogService::statusFor($logAction, true, $valueFlag),
         ];
     }
 
@@ -908,6 +1138,8 @@ class PoPassApprovalService
         // Approve API only first (shared with Approved button)
         $only = $this->approveOnly($po, $requestId, $valueFlag);
         $approval = $only['approval'] ?? null;
+        $sapMessage = (string) ($only['message'] ?? $only['error'] ?? '');
+        $sapMessageType = strtoupper(substr(trim((string) ($only['message_type'] ?? '')), 0, 1));
         if (empty($only['success'])) {
             return [
                 'success' => false,
@@ -917,7 +1149,13 @@ class PoPassApprovalService
                 'pdf_path' => null,
                 'pdf_url' => null,
                 'folder' => null,
-                'error' => (string) ($only['error'] ?? ($isApprove ? 'PO approval failed.' : 'PO revert failed.')),
+                'error' => $sapMessage !== ''
+                    ? $sapMessage
+                    : (string) ($only['error'] ?? ($isApprove ? 'PO approval failed.' : 'PO revert failed.')),
+                'message' => $sapMessage !== ''
+                    ? $sapMessage
+                    : (string) ($only['error'] ?? ($isApprove ? 'PO approval failed.' : 'PO revert failed.')),
+                'message_type' => $sapMessageType !== '' ? $sapMessageType : 'E',
                 'approval' => $approval,
             ];
         }
@@ -934,6 +1172,8 @@ class PoPassApprovalService
                 'pdf_url' => null,
                 'folder' => null,
                 'error' => null,
+                'message' => $sapMessage,
+                'message_type' => $sapMessageType !== '' ? $sapMessageType : 'S',
                 'approval' => $approval,
             ];
         }
@@ -950,6 +1190,8 @@ class PoPassApprovalService
                         'ebeln' => $ebeln,
                         'value' => $valueFlag,
                         'reverted_at' => date('c'),
+                        'message' => $sapMessage,
+                        'message_type' => $sapMessageType,
                     ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
                 );
             }
@@ -962,64 +1204,27 @@ class PoPassApprovalService
                 'pdf_url' => null,
                 'folder' => is_dir($folder) ? $folder : null,
                 'error' => null,
+                'message' => $sapMessage,
+                'message_type' => $sapMessageType !== '' ? $sapMessageType : 'S',
                 'approval' => $approval,
             ];
         }
 
-        $base = rtrim((string) ($this->cfg['base_url'] ?? ''), '/');
-        $pdfService = (string) ($this->cfg['po_pdf_service'] ?? '/sap/opu/odata/sap/ZCOST_SRV/POPDFSet');
-        $pdfUrl = $base . $pdfService . "(EBELN='" . $ebeln . "')/\$value";
-        $raw = $this->odata->fetchRaw($pdfUrl, (int) ($this->cfg['timeout'] ?? 60));
-        $body = $raw['body'] ?? null;
-        if (is_string($body) && str_starts_with($body, "\xEF\xBB\xBF")) {
-            $body = substr($body, 3);
-        }
-        $ctype = strtolower((string) ($raw['content_type'] ?? ''));
-        $isPdf = is_string($body) && (
-            strncmp($body, '%PDF', 4) === 0
-            || str_contains($ctype, 'application/pdf')
-        );
-        if ($raw['error'] !== null || !is_string($body) || $body === '' || !$isPdf) {
-            return [
-                'success' => false,
-                'request_id' => $requestId,
-                'po' => $displayPo,
-                'value' => $valueFlag,
-                'pdf_path' => null,
-                'pdf_url' => null,
-                'folder' => null,
-                'error' => $raw['error'] ?? 'SAP approval succeeded but PDF was not returned.',
-                'approval' => $approval,
-            ];
-        }
-
-        $pdfName = 'PO_' . $displayPo . '.pdf';
-        $written = $this->writePoFile($displayPo, $pdfName, $body);
-        if ($written['local'] === null && $written['network'] === null) {
-            return [
-                'success' => false,
-                'request_id' => $requestId,
-                'po' => $displayPo,
-                'value' => $valueFlag,
-                'pdf_path' => null,
-                'pdf_url' => null,
-                'folder' => null,
-                'network_path' => null,
-                'error' => (string) ($written['error'] ?? 'Could not write PDF to upload folder or network share.'),
-                'approval' => $approval,
-            ];
-        }
-
+        // Approval succeeded — do NOT fetch/cache unsigned SAP PDF.
+        // Open PDF / e-Sign stream via resolvePoPdfForView (signed file or SAP in memory).
         $meta = [
             'request_id' => $requestId,
             'po' => $displayPo,
             'ebeln' => $ebeln,
             'value' => $valueFlag,
             'approved_at' => date('c'),
-            'pdf_file' => $pdfName,
-            'local_path' => $written['local'],
-            'network_path' => $written['network'],
+            'pdf_file' => null,
+            'local_path' => null,
+            'network_path' => null,
             'approval_http' => $approval['http_code'] ?? null,
+            'message' => $sapMessage,
+            'message_type' => $sapMessageType,
+            'note' => 'Unsigned PDF not cached; use purchase-order/pdf for viewing.',
         ];
         $this->writePoFile(
             $displayPo,
@@ -1027,7 +1232,6 @@ class PoPassApprovalService
             (string) json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
         );
 
-        $publicRel = 'upload/PoZcostValidation/Po-' . $displayPo . '/' . $pdfName;
         $folder = $this->poFolder($displayPo);
 
         return [
@@ -1035,11 +1239,13 @@ class PoPassApprovalService
             'request_id' => $requestId,
             'po' => $displayPo,
             'value' => $valueFlag,
-            'pdf_path' => $written['local'] ?? $written['network'],
-            'pdf_url' => $publicRel,
+            'pdf_path' => null,
+            'pdf_url' => null,
             'folder' => $folder,
-            'network_path' => $written['network'],
+            'network_path' => null,
             'error' => null,
+            'message' => $sapMessage,
+            'message_type' => $sapMessageType !== '' ? $sapMessageType : 'S',
             'approval' => $approval,
         ];
     }
@@ -1109,24 +1315,25 @@ class PoPassApprovalService
             ? url('purchase-order/signed-file?po=' . rawurlencode($displayPo))
             : ('purchase-order/signed-file?po=' . rawurlencode($displayPo));
 
-        // 1) REQUIRED: save signed PDF to EVOL/uploads/po_esign/PO_New_Module/PO-{po}_signed.pdf
+        // 1) REQUIRED: save signed PDF to EVOL/uploads/po_esign/PO-{po}.pdf (verify before DB)
         try {
             $esignNet = $this->writeEsignNetworkPdf($displayPo, $signedBin);
         } catch (Throwable $netErr) {
             $esignNet = [
                 'path' => null,
-                'folder' => $this->networkEsignFolder(),
+                'folder' => $this->poEsignSaveDir(),
                 'file' => $pdfName,
                 'error' => 'E-sign storage write failed: ' . $netErr->getMessage(),
+                'verified' => false,
             ];
         }
         $signedNetworkPath = $esignNet['path'] ?? null;
-        $esignNetworkFolder = $esignNet['folder'] ?? $this->networkEsignFolder();
-        if ($signedNetworkPath === null) {
+        $esignNetworkFolder = $esignNet['folder'] ?? $this->poEsignSaveDir();
+        if ($signedNetworkPath === null || empty($esignNet['verified'])) {
             return [
                 'success' => false,
                 'path' => null,
-                'error' => (string) ($esignNet['error'] ?? 'Could not save signed PDF to EVOL/uploads/po_esign/PO_New_Module.'),
+                'error' => (string) ($esignNet['error'] ?? 'Could not save signed PDF to EVOL/uploads/po_esign.'),
                 'network_folder' => $esignNetworkFolder,
                 'pdf_url' => null,
                 'file_url' => null,
@@ -1181,6 +1388,7 @@ class PoPassApprovalService
             );
         }
 
+        $mumbaiNow = $this->mumbaiLocalNow();
         $dbId = null;
         try {
             $log = $this->passLog->save([
@@ -1199,10 +1407,12 @@ class PoPassApprovalService
                     'network_folder' => $esignNetworkFolder,
                     'network_file' => $pdfName,
                     'approve_api' => false,
+                    'signed_at_mumbai' => $mumbaiNow,
                 ],
                 'response' => [
                     'success' => true,
                     'status' => 'E-Sign Completed',
+                    'note' => 'E-Sign Completed',
                     'path' => $signedNetworkPath,
                     'network_path' => $signedNetworkPath,
                     'esign_network_folder' => $esignNetworkFolder,
@@ -1210,6 +1420,7 @@ class PoPassApprovalService
                     'signed_pdf' => true,
                     'pdf_url' => $fileUrl,
                     'file_url' => $fileUrl,
+                    'signed_at_mumbai' => $mumbaiNow,
                 ],
                 'http_code' => 200,
                 'success' => true,
@@ -1233,8 +1444,23 @@ class PoPassApprovalService
             'folder' => $esignNetworkFolder,
             'network_path' => $signedNetworkPath,
             'network_folder' => $esignNetworkFolder,
+            'signed_at_mumbai' => $mumbaiNow,
+            'status' => 'E-Sign Completed',
             'approval' => null,
             'approval_payload' => null,
         ];
     }
+
+    /** Asia/Kolkata (Mumbai) local — matches PDF stamp: 26/05/2026 4:07 PM */
+    private function mumbaiLocalNow(): string
+    {
+        try {
+            $dt = new DateTimeImmutable('now', new DateTimeZone('Asia/Kolkata'));
+            // g = hour 1-12 without leading zero (sample style)
+            return $dt->format('d/m/Y g:i A');
+        } catch (Throwable $e) {
+            return gmdate('d/m/Y g:i A') . ' UTC';
+        }
+    }
 }
+?>

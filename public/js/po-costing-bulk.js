@@ -34,6 +34,9 @@
         return digits.padStart(6, '0').slice(-6);
     }
 
+    /*
+    * Handle zCOST View URL Functionality
+    */
     function zcostViewUrl(quote, itemNo) {
         const raw = String(quote ?? '').trim();
         const q = (raw.match(/\d+/) || [raw])[0];
@@ -86,6 +89,7 @@
         { key: 'po', label: 'PO Number' },
         { key: 'date', label: 'PO Date' },
         { key: 'material', label: 'Material Type' },
+        { key: 'brand_name', label: 'Brand Name' },
         { key: 'items', label: 'No. of Items' },
         { key: 'vendor_name', label: 'Vendor Name' },
         { key: 'vendor_code', label: 'Vendor Code' },
@@ -93,6 +97,9 @@
         { key: 'exceptions', label: 'Unmatched' },
         { key: 'pending', label: 'Pending' },
         { key: 'totvalue', label: 'Total PO INR Value' },
+        { key: 'esign', label: 'E-Sign' },
+        { key: 'remarks', label: 'Remarks' },
+        { key: 'mail_status', label: 'Sent / Receive' },
         { key: 'pdf', label: 'View PDF' },
     ];
     let hiddenCols = new Set();
@@ -164,7 +171,7 @@
         const raw = radio != null
             ? String(radio.value || '')
             : String($('pcbApproved')?.value || cfg.approvedStatus || '');
-        const val = (raw === 'Approved' || raw === 'NotApproved') ? raw : 'Approved';
+        const val = (raw === 'Approved' || raw === 'NotApproved') ? raw : 'NotApproved';
         if ($('pcbApproved') && $('pcbApproved').value !== val) $('pcbApproved').value = val;
         document.querySelectorAll('input[name="pcb_approved"]').forEach((el) => {
             el.checked = el.value === val;
@@ -173,12 +180,22 @@
         return val;
     }
 
-    function workbenchUrl(po) {
+    function selectedBrand() {
+        const val = String($('pcbBrand')?.value || cfg.brand || '').trim();
+        if ($('pcbBrand') && $('pcbBrand').value !== val) $('pcbBrand').value = val;
+        cfg.brand = val;
+        return val;
+    }
+
+    function workbenchUrl(po, opts = {}) {
         const u = new URL(cfg.pageUrl || 'purchase-order', window.location.origin);
         u.searchParams.set('view', 'costing');
         u.searchParams.set('po', po);
         const mat = selectedMat();
         if (mat !== 'all') u.searchParams.set('mat_cat', mat);
+        const brand = selectedBrand();
+        if (brand) u.searchParams.set('brand', brand);
+        if (opts.open) u.searchParams.set('open', String(opts.open));
         return u.pathname + u.search;
     }
 
@@ -188,19 +205,109 @@
         return u.pathname + u.search;
     }
 
+    /*
+     * Fallback when costing validate has not run yet (e-sign / workflow enrichment).
+     */
+    function workflowListStatus(rec) {
+        const bucket = String(rec?.status_bucket || '').toLowerCase();
+        if (bucket === 'completed') return 'PASSED';
+        if (bucket === 'in_review' || bucket === 'rejected') return 'NEED_TO_REVIEW';
+        if (bucket === 'not_started' || bucket === 'pending') return 'MAPPING_REQUIRED';
+
+        const raw = String(rec?.validation_status || rec?.workflow_stage || '').toLowerCase();
+        if (raw.includes('validated') || raw.includes('completed') || raw === 'passed') return 'PASSED';
+        if (raw.includes('review') || raw.includes('rejected')) return 'NEED_TO_REVIEW';
+        return 'MAPPING_REQUIRED';
+    }
+
+    /**
+     * Same rollup as workbench KPI cards (PASS / Mapping Required / Need to Review).
+     * Prefer this over workflow enrichment once purchase-order/validate has run.
+     */
+    function costingListStatusFromRecords(records) {
+        let passed = 0;
+        let mapping = 0;
+        let review = 0;
+        let detail = 0;
+        (records || []).forEach((r) => {
+            if (isFooterLine(r)) return;
+            detail += 1;
+            const st = String(r?.status || '').toUpperCase().replace(/\s+/g, '_');
+            const hasLink = !!(r.manual_match || r.matched_line_key || r.cost_item || r.maktx || r.costing_item_no || r.zcost_item);
+            const unmatched = !hasLink && (
+                st === 'NOT_MATCHED'
+                || st === 'UNMATCHED'
+                || !!r.needs_manual_match
+                || !!r.family_mismatch
+                || /no matching|no linked|not matched|mapping required/i.test(String(r?.validation_result || ''))
+            );
+            if (unmatched || st === 'NOT_MATCHED') {
+                mapping += 1;
+                return;
+            }
+            // Live RESULT compare (same rule as workbench statusDisplay)
+            const budget = nNum(r.budget_cost_per_gmt ?? r.expected_unit_cost ?? r.budget_inr);
+            const actual = nNum(r.actual_cost ?? r.po_unit_cost ?? r.porate ?? r.net_price);
+            if (budget > 0 && actual > 0) {
+                if (actual > budget + 0.005) {
+                    review += 1;
+                    return;
+                }
+                passed += 1;
+                return;
+            }
+            if (budget > 0 && actual <= 0) {
+                review += 1;
+                return;
+            }
+            if (
+                st === 'NEEDS_REVIEW'
+                || st === 'NOT_VALIDATED'
+                || st === 'EXCEPTION'
+                || st === 'FAIL'
+                || st === 'AMBIGUOUS'
+                || st === 'AMBIGUOUS_MATCH'
+                || !!r.cost_mismatch
+            ) {
+                review += 1;
+                return;
+            }
+            if (st === 'PASS') {
+                passed += 1;
+                return;
+            }
+            // Linked but uncertain → review; else mapping (same as workbench statusDisplay)
+            if (hasLink) review += 1;
+            else mapping += 1;
+        });
+        if (!detail) return { status: 'MAPPING_REQUIRED', passed: 0, mapping: 0, review: 0 };
+        if (mapping > 0) return { status: 'MAPPING_REQUIRED', passed, mapping, review };
+        if (review > 0) return { status: 'NEED_TO_REVIEW', passed, mapping, review };
+        if (passed > 0) return { status: 'PASSED', passed, mapping, review };
+        return { status: 'MAPPING_REQUIRED', passed, mapping, review };
+    }
+
     function statusBadge(st) {
-        const s = String(st || 'PENDING').toUpperCase();
+        const s = String(st || 'MAPPING_REQUIRED').toUpperCase().replace(/\s+/g, '_');
         let cls = 'is-pending';
-        let label = s;
-        if (s === 'PASSED') cls = 'is-pass';
-        else if (s === 'EXCEPTION' || s === 'UNMATCHED') {
-            cls = 'is-fail';
-            label = 'UNMATCHED';
-        } else if (s === 'NEEDS_REVIEW') {
+        let label = 'MAPPING REQUIRED';
+        if (s === 'PASSED') {
+            cls = 'is-pass';
+            label = 'PASSED';
+        } else if (s === 'NEED_TO_REVIEW' || s === 'NEEDS_REVIEW') {
             cls = 'is-review';
-            label = 'NEEDS REVIEW';
+            label = 'NEED TO REVIEW';
+        } else if (
+            s === 'MAPPING_REQUIRED'
+            || s === 'MISSING_REQUIRED'
+            || s === 'PENDING'
+            || s === 'EXCEPTION'
+            || s === 'UNMATCHED'
+        ) {
+            cls = 'is-pending';
+            label = 'MAPPING REQUIRED';
         }
-        return `<span class="pcb-badge ${cls}" title="Click Unmatched KPI for compare rules">${esc(label)}</span>`;
+        return `<span class="pcb-badge ${cls}" title="Workflow validation status">${esc(label)}</span>`;
     }
 
     function openRulesPopover() {
@@ -217,6 +324,136 @@
         if (!pop) return;
         pop.hidden = true;
         if (kpi) kpi.setAttribute('aria-expanded', 'false');
+    }
+
+    function findListRowByPo(po) {
+        const key = String(po || '').replace(/\D/g, '').replace(/^0+/, '') || String(po || '');
+        const pool = [...(Array.isArray(filtered) ? filtered : []), ...(Array.isArray(allRows) ? allRows : [])];
+        return pool.find((r) => {
+            const p = String(r.purchase_order || '').replace(/\D/g, '').replace(/^0+/, '') || String(r.purchase_order || '');
+            return p === key || String(r.purchase_order || '') === String(po || '');
+        }) || null;
+    }
+
+    function closeRemarksPopover() {
+        const pop = $('pcbRemarksPopover');
+        if (pop) pop.hidden = true;
+    }
+
+    function closeMailPopover() {
+        const pop = $('pcbMailPopover');
+        if (pop) pop.hidden = true;
+    }
+
+    function openRemarksPopover(po) {
+        const pop = $('pcbRemarksPopover');
+        const title = $('pcbRemarksTitle');
+        const kicker = $('pcbRemarksKicker');
+        const meta = $('pcbRemarksMeta');
+        const list = $('pcbRemarksList');
+        if (!pop || !list) return;
+
+        const row = findListRowByPo(po);
+        const all = row && Array.isArray(row.remarks_all)
+            ? row.remarks_all.map((x) => String(x || '').trim()).filter(Boolean)
+            : [];
+        const fallback = String(row?.remarks || '').trim();
+        const notes = all.length ? all : (fallback ? [fallback] : []);
+        const by = String(row?.remarks_by || '').trim();
+        const at = String(row?.remarks_at || '').trim();
+
+        if (kicker) kicker.textContent = 'Status & Remarks';
+        if (title) title.textContent = `PO ${po || '—'} · Remarks`;
+        if (meta) {
+            meta.innerHTML = [
+                `<span><strong>${notes.length}</strong> remark${notes.length === 1 ? '' : 's'}</span>`,
+                by ? `<span>Latest by <strong>${esc(by)}</strong></span>` : '',
+                at ? `<span>${esc(at)}</span>` : '',
+            ].filter(Boolean).join('');
+        }
+
+        if (!notes.length) {
+            list.innerHTML = `<div class="pcb-remarks-empty">No remarks for this PO.</div>`;
+        } else {
+            list.innerHTML = notes.map((note, idx) => `
+                <article class="pcb-remarks-item" role="listitem">
+                    <div class="pcb-remarks-item-head">
+                        <span class="pcb-remarks-item-idx">#${idx + 1}</span>
+                        ${idx === 0 ? '<span class="pcb-remarks-item-tag">Latest</span>' : ''}
+                    </div>
+                    <div class="pcb-remarks-item-body">${formatCommentHtml(note)}</div>
+                </article>
+            `).join('');
+        }
+
+        closeRulesPopover();
+        closeMailPopover();
+        pop.hidden = false;
+    }
+
+    function openMailPopover(po) {
+        const pop = $('pcbMailPopover');
+        const title = $('pcbMailTitle');
+        const body = $('pcbMailBody');
+        if (!pop || !body) return;
+
+        const row = findListRowByPo(po);
+        const status = String(row?.sent_receive_status || '').trim() || '—';
+        const from = String(row?.mail_from || '').trim();
+        const to = String(row?.mail_to || '').trim();
+        const email = String(row?.mail_email || '').trim();
+        const note = String(row?.mail_status || '').trim();
+        const at = String(row?.mail_at || '').trim();
+        const sendNote = String(row?.mail_note || '').trim();
+        const isRecv = status.toLowerCase().includes('receiv');
+        const user = to || from || '—';
+        const statusCls = isRecv ? 'is-receive' : 'is-sent';
+
+        if (title) title.textContent = `PO ${po || '—'}`;
+        const ico = pop.querySelector('.pcb-mail-head-ico');
+        if (ico) ico.textContent = isRecv ? 'move_to_inbox' : 'send';
+
+        body.innerHTML = `
+            <div class="pcb-mail-hero ${statusCls}">
+                <span class="pcb-mail-avatar" aria-hidden="true">${esc(avatarLetter(user))}</span>
+                <div class="pcb-mail-hero-text">
+                    <div class="pcb-mail-hero-top">
+                        <strong class="pcb-mail-hero-name">${esc(user)}</strong>
+                        <span class="pcb-mail-status ${statusCls}">${esc(status)}</span>
+                    </div>
+                    <a class="pcb-mail-hero-email" href="${email ? `mailto:${esc(email)}` : '#'}" ${email ? '' : 'tabindex="-1" aria-disabled="true"'}>${esc(email || 'No mail ID')}</a>
+                    ${at ? `<time class="pcb-mail-hero-when">${esc(at)}</time>` : ''}
+                </div>
+            </div>
+            <div class="pcb-mail-grid">
+                <div class="pcb-mail-field">
+                    <span class="pcb-mail-label">Username</span>
+                    <span class="pcb-mail-value">${esc(user)}</span>
+                </div>
+                <div class="pcb-mail-field">
+                    <span class="pcb-mail-label">Mail ID</span>
+                    <span class="pcb-mail-value">${email ? `<a href="mailto:${esc(email)}">${esc(email)}</a>` : '—'}</span>
+                </div>
+                <div class="pcb-mail-field">
+                    <span class="pcb-mail-label">From</span>
+                    <span class="pcb-mail-value">${esc(from || '—')}</span>
+                </div>
+                <div class="pcb-mail-field">
+                    <span class="pcb-mail-label">Status note</span>
+                    <span class="pcb-mail-value">${esc(note || '—')}</span>
+                </div>
+            </div>
+            ${sendNote ? `
+                <div class="pcb-mail-note">
+                    <span class="pcb-mail-label">Note</span>
+                    <div class="pcb-mail-note-body">${formatCommentHtml(sendNote)}</div>
+                </div>
+            ` : ''}
+        `;
+
+        closeRulesPopover();
+        closeRemarksPopover();
+        pop.hidden = false;
     }
 
     /*****
@@ -251,28 +488,23 @@
 
     function normalizeRow(rec) {
         const po = String(rec.purchase_order || '');
-        const cached = itemCache[po];
+        const cached = itemCache[po] || itemCache[po.replace(/^0+/, '')] || null;
         let passed = 0, exceptions = 0, needsReview = 0, pending = 0;
-        let validationStatus = 'PENDING';
+        // Prefer workbench costing validate result; fall back to workflow enrichment
+        let validationStatus = workflowListStatus(rec);
         let lastValidated = '';
         let validatedBy = '';
         if (cached && Array.isArray(cached.records)) {
-            cached.records.forEach((r) => {
-                const st = String(r.status || '').toUpperCase();
-                if (st === 'PASS') passed++;
-                else if (st === 'NEEDS_REVIEW') needsReview++;
-                else exceptions++;
-            });
+            const rollup = costingListStatusFromRecords(cached.records);
+            validationStatus = rollup.status;
+            passed = rollup.passed;
+            needsReview = rollup.review;
+            exceptions = rollup.mapping;
             pending = 0;
-            if (exceptions > 0) validationStatus = 'EXCEPTION';
-            else if (needsReview > 0) validationStatus = 'NEEDS_REVIEW';
-            else if (passed > 0) validationStatus = 'PASSED';
-            else validationStatus = 'PENDING';
             lastValidated = cached._validated_at || '';
             validatedBy = cached._validated_by || '';
         } else {
             pending = Number(rec.items_count || 0) || 1;
-            validationStatus = 'PENDING';
         }
         const totals = totalsFromRecords(cached?.records) || rec._totals || emptyTotals();
         return {
@@ -488,11 +720,21 @@
             case 'sno':
                 return String(rowIndex);
             case 'po':
-                return `<button type="button" class="pcb-po-link" data-po="${esc(r.purchase_order)}">${esc(r.purchase_order)}</button>`;
+                const canWb = cfg.canWorkbench !== false;
+                return `<button type="button" class="pcb-po-link${canWb ? '' : ' is-disabled'}" data-po="${esc(r.purchase_order)}"
+                    title="${canWb ? 'Open workbench in new tab' : 'Workbench permission required'}"
+                    ${canWb ? '' : 'disabled'}>${esc(r.purchase_order)}</button>`;
             case 'date':
                 return fmtDate(r.date);
             case 'material':
                 return `<span class="pcb-mat-chip">${dash(r._mat_label)}</span>`;
+            case 'brand_name': {
+                const label = r.brand_name || r.brand_code || '';
+                const code = r.brand_code || '';
+                return label
+                    ? `<span title="${esc(code || label)}">${dash(label)}</span>`
+                    : '—';
+            }
             case 'items':
                 return qty(r.items_count);
             case 'vendor_name':
@@ -528,6 +770,60 @@
             }
             case 'po_currency':
                 return dash(r.po_currency || 'INR');
+            case 'esign': {
+                let s = String(r.esign_status || '').trim();
+                if (!s || s === '—') s = 'Not Started';
+                const low = s.toLowerCase();
+                let tone = 'is-pending';
+                if (low.includes('complet') || (low.includes('signed') && !low.includes('partial'))) tone = 'is-done';
+                else if (low.includes('reject') || low.includes('fail')) tone = 'is-fail';
+                else if (low.includes('pending') || low.includes('partial') || low.includes('checker') || low.includes('authoris')) tone = 'is-review';
+                const noAccess = cfg.canEsign === false;
+                return `<button type="button" class="pcb-esign-btn ${tone}" data-po="${esc(r.purchase_order)}"
+                    title="${noAccess ? 'eSign permission required' : `Open eSign · ${esc(s)}`}"
+                    ${noAccess ? 'disabled' : ''}>
+                    <span class="material-icons-round" aria-hidden="true">draw</span>
+                    <span>eSign</span>
+                </button>`;
+            }
+            case 'remarks': {
+                const all = Array.isArray(r.remarks_all)
+                    ? r.remarks_all.map((x) => String(x || '').trim()).filter(Boolean)
+                    : [];
+                const note = all[0] || String(r.remarks || '').trim();
+                if (!note) return '—';
+                const count = Math.max(all.length, Number(r.remarks_count) || 0, 1);
+                const short = note.length > 40 ? `${note.slice(0, 37)}…` : note;
+                const more = count > 1
+                    ? `<span class="pcb-remarks-count">+${count - 1}</span>`
+                    : '';
+                return `<button type="button" class="pcb-remarks pcb-remarks-btn" data-po="${esc(r.purchase_order)}" title="Click to view all remarks">
+                    <span class="pcb-remarks-text">${esc(short)}</span>${more}
+                </button>`;
+            }
+            case 'mail_status': {
+                const s = String(r.sent_receive_status || '').trim();
+                const to = String(r.mail_to || '').trim();
+                const email = String(r.mail_email || '').trim();
+                const from = String(r.mail_from || '').trim();
+                if (!s && !to && !email) return '—';
+                const note = String(r.mail_status || '').trim();
+                const at = String(r.mail_at || '').trim();
+                const tip = [
+                    s,
+                    from && to ? `${from} → ${to}` : (to || from),
+                    email,
+                    note,
+                    at,
+                ].filter(Boolean).join(' · ');
+                const cls = String(s).toLowerCase().includes('receiv') ? 'is-receive' : 'is-sent';
+                const userLine = to || from || s || '—';
+                const mailLine = email || '—';
+                return `<button type="button" class="pcb-mail-cell pcb-mail-btn ${cls}" data-po="${esc(r.purchase_order)}" title="${esc(tip)}">
+                    <span class="pcb-mail-user">${esc(userLine)}</span>
+                    <span class="pcb-mail-email">${esc(mailLine)}</span>
+                </button>`;
+            }
             case 'pdf':
                 return `<button type="button" class="pcb-pdf-btn" data-po="${esc(r.purchase_order)}" title="View PO PDF">
                     <span class="material-icons-round">picture_as_pdf</span>
@@ -573,14 +869,21 @@
             case 'date': return [fmtDate(r.date), r.date].join(' ');
             case 'vendor_code': return String(r.supplier || '');
             case 'vendor_name': return String(r.supplier_full_name || '');
+            case 'brand_name': return String(r.brand_name || '');
             case 'material': return String(r._mat_label || '');
             case 'items': return [r.items_count, qty(r.items_count)].join(' ');
             case 'passed': return [r._passed, qty(r._passed)].join(' ');
             case 'exceptions': return [r._exceptions, qty(r._exceptions)].join(' ');
             case 'pending': return [r._pending, qty(r._pending)].join(' ');
+            case 'esign': return String(r.esign_status || '');
+            case 'remarks': return String(r.remarks || '');
+            case 'mail_status': return [r.sent_receive_status, r.mail_from, r.mail_to, r.mail_email, r.mail_status].filter(Boolean).join(' ');
             case 'status': {
                 const s = String(r._validation_status || '');
-                return s + (s === 'EXCEPTION' || s === 'UNMATCHED' ? ' fail failed exception unmatched' : '') + (s === 'PASSED' ? ' pass ok' : '') + (s === 'PENDING' ? ' pending' : '');
+                return s + ' ' + String(r.validation_status || '') + ' ' + String(r.workflow_stage || '')
+                    + (s === 'PASSED' ? ' pass ok validated' : '')
+                    + (s === 'NEED_TO_REVIEW' ? ' review need needs' : '')
+                    + (s === 'MAPPING_REQUIRED' || s === 'MISSING_REQUIRED' ? ' mapping required missing pending' : '');
             }
             case 'last': return String(r._last_validated || '');
             case 'po_currency': return String(r.po_currency || 'INR');
@@ -611,15 +914,79 @@
         if (count) count.classList.toggle('is-filtered', !!(q || activeCols));
     }
 
+    function extractQuickSearchPo() {
+        const raw = String($('pcbQuickSearch')?.value || '').trim();
+        if (!raw) return '';
+        // Pure digits (or PO-like) → server PO lookup
+        const digits = raw.replace(/\D/g, '');
+        if (digits.length >= 6 && digits.length <= 10 && /^\d+$/.test(raw.replace(/[\s#-]/g, ''))) {
+            return digits;
+        }
+        return '';
+    }
+
+    let quickSearchTimer = null;
+    let lastServerPoSearch = '';
+
+    function scheduleQuickSearchFetch() {
+        const po = extractQuickSearchPo();
+        clearTimeout(quickSearchTimer);
+        // Text search (vendor/brand) stays client-side on current page
+        if (!po) {
+            if (lastServerPoSearch) {
+                lastServerPoSearch = '';
+                quickSearchTimer = setTimeout(() => {
+                    void fetchPos(null, { page: 1, resetCache: true, po: '' });
+                }, 280);
+            }
+            return;
+        }
+        if (po === lastServerPoSearch && allRows.some((r) => {
+            const rowPo = String(r.purchase_order || '').replace(/\D/g, '').replace(/^0+/, '');
+            const needle = po.replace(/^0+/, '');
+            return rowPo === needle || String(r.purchase_order || '').includes(po);
+        })) {
+            return;
+        }
+        quickSearchTimer = setTimeout(() => {
+            lastServerPoSearch = po;
+            void fetchPos(null, { page: 1, resetCache: true, po });
+        }, 350);
+    }
+
     function applyFilter() {
         const q = String($('pcbQuickSearch')?.value || '').trim().toLowerCase();
+        const serverPo = extractQuickSearchPo();
         const vs = String($('pcbValStatus')?.value || 'all');
         const cols = colFilterMap();
         filtered = allRows.filter((r) => {
-            if (vs !== 'all' && r._validation_status !== vs) return false;
-            if (q) {
-                const hay = [r.purchase_order, r.supplier, r.supplier_full_name, r._mat_label, r._validation_status, r._validated_by].join(' ').toLowerCase();
+            if (vs !== 'all') {
+                const st = String(r._validation_status || '');
+                const needle = String(vs).toUpperCase().replace(/\s+/g, '_');
+                const aliases = {
+                    PASSED: ['PASSED'],
+                    NEED_TO_REVIEW: ['NEED_TO_REVIEW', 'NEEDS_REVIEW'],
+                    MAPPING_REQUIRED: ['MAPPING_REQUIRED', 'MISSING_REQUIRED', 'PENDING', 'EXCEPTION', 'UNMATCHED'],
+                    MISSING_REQUIRED: ['MAPPING_REQUIRED', 'MISSING_REQUIRED'],
+                    EXCEPTION: ['NEED_TO_REVIEW', 'NEEDS_REVIEW'],
+                    PENDING: ['MAPPING_REQUIRED', 'MISSING_REQUIRED'],
+                    UNMATCHED: ['MAPPING_REQUIRED', 'MISSING_REQUIRED'],
+                };
+                const ok = (aliases[needle] || [needle]).includes(st);
+                if (!ok) return false;
+            }
+            // Server already filtered exact PO — keep light client check
+            if (q && !serverPo) {
+                const hay = [
+                    r.purchase_order, r.supplier, r.supplier_full_name, r.brand_name, r._mat_label,
+                    r._validation_status, r._validated_by, r.esign_status, r.remarks, r.sent_receive_status, r.mail_to, r.mail_email,
+                ].join(' ').toLowerCase();
                 if (!hay.includes(q)) return false;
+            } else if (serverPo) {
+                const rowPo = String(r.purchase_order || '').replace(/\D/g, '');
+                const normRow = rowPo.replace(/^0+/, '') || rowPo;
+                const normQ = serverPo.replace(/^0+/, '') || serverPo;
+                if (normRow !== normQ && !rowPo.includes(serverPo)) return false;
             }
             for (const [key, val] of Object.entries(cols)) {
                 const needle = String(val || '').toLowerCase().replace(/,/g, '').trim();
@@ -643,11 +1010,15 @@
             case 'date': return String(r.date || ''); // ISO yyyy-mm-dd sorts correctly
             case 'vendor_code': return String(r.supplier || '');
             case 'vendor_name': return String(r.supplier_full_name || '');
+            case 'brand_name': return String(r.brand_name || '');
             case 'material': return String(r._mat_label || '');
             case 'items': return Number(r.items_count || 0);
             case 'passed': return Number(r._passed || 0);
             case 'exceptions': return Number(r._exceptions || 0);
             case 'pending': return Number(r._pending || 0);
+            case 'esign': return String(r.esign_status || '');
+            case 'remarks': return String(r.remarks || '');
+            case 'mail_status': return [r.mail_to, r.mail_email, r.sent_receive_status].filter(Boolean).join(' ');
             case 'status': return String(r._validation_status || '');
             case 'last': return String(r._last_validated || '');
             case 'po_currency': return String(r.po_currency || '');
@@ -1062,34 +1433,63 @@
         if (label) label.textContent = enabled ? 'Scroll Body Only' : 'Expand Table';
     }
 
-    function listStatusFromCache(cached) {
-        if (!cached || !Array.isArray(cached.records)) return 'PENDING';
-        let passed = 0;
-        let exceptions = 0;
-        let needsReview = 0;
-        cached.records.forEach((r) => {
-            const st = String(r.status || '').toUpperCase();
-            if (st === 'PASS') passed++;
-            else if (st === 'NEEDS_REVIEW') needsReview++;
-            else exceptions++;
-        });
-        if (exceptions > 0) return 'EXCEPTION';
-        if (needsReview > 0) return 'NEEDS_REVIEW';
-        if (passed > 0) return 'PASSED';
-        return 'PENDING';
-    }
-
     function fillKpis() {
         const total = serverTotal || filtered.length;
         let passed = 0;
-        let exc = 0;
+        let review = 0;
+        let missing = 0;
         let value = 0;
-        Object.keys(itemCache).forEach((po) => {
-            const st = listStatusFromCache(itemCache[po]);
-            if (st === 'PASSED') passed++;
-            else if (st === 'EXCEPTION') exc++;
+
+        // Row badges use costing validate when cached; KPIs follow the same source.
+        // Workflow listTotals are only used before any page validate has run.
+        const source = filtered.length ? filtered : allRows;
+        const anyCosting = source.some((r) => {
+            const po = String(r.purchase_order || '');
+            return !!(po && itemCache[po] && Array.isArray(itemCache[po].records));
         });
-        const pend = Math.max(0, total - passed - exc);
+
+        if (anyCosting) {
+            source.forEach((r) => {
+                const st = String(r._validation_status || workflowListStatus(r));
+                if (st === 'PASSED') passed++;
+                else if (st === 'NEED_TO_REVIEW' || st === 'NEEDS_REVIEW') review++;
+                else missing++;
+            });
+            if (total > source.length) {
+                missing += Math.max(0, total - source.length);
+            }
+        } else {
+            const hasWorkflowTotals = listTotals
+                && (listTotals.validation_enriched
+                    || listTotals.status_completed != null
+                    || listTotals.status_in_review != null
+                    || listTotals.status_not_started != null);
+
+            if (hasWorkflowTotals) {
+                passed = Number(listTotals.status_completed || listTotals.status_validated || 0) || 0;
+                review = (Number(listTotals.status_in_review || 0) || 0)
+                    + (Number(listTotals.status_rejected || 0) || 0);
+                missing = (Number(listTotals.status_not_started || 0) || 0)
+                    + (Number(listTotals.status_pending || 0) || 0);
+                const accounted = passed + review + missing;
+                if (accounted === 0 && total > 0) {
+                    missing = total;
+                } else if (accounted < total) {
+                    missing += (total - accounted);
+                }
+            } else {
+                source.forEach((r) => {
+                    const st = String(r._validation_status || workflowListStatus(r));
+                    if (st === 'PASSED') passed++;
+                    else if (st === 'NEED_TO_REVIEW') review++;
+                    else missing++;
+                });
+                if (!filtered.length && total > source.length) {
+                    missing += Math.max(0, total - source.length);
+                }
+            }
+        }
+
         value = Number(listTotals?.total_value ?? 0);
         if (!listTotals) {
             filtered.forEach((r) => { value += Number(r.total_value || 0); });
@@ -1097,17 +1497,17 @@
         const barPct = (n) => (total ? Math.min(100, Math.round((n / total) * 100)) : 0);
         if ($('pcbKpiTotal')) $('pcbKpiTotal').textContent = qty(total);
         if ($('pcbKpiPassed')) $('pcbKpiPassed').textContent = qty(passed);
-        if ($('pcbKpiExceptions')) $('pcbKpiExceptions').textContent = qty(exc);
-        if ($('pcbKpiPending')) $('pcbKpiPending').textContent = qty(pend);
+        if ($('pcbKpiExceptions')) $('pcbKpiExceptions').textContent = qty(review);
+        if ($('pcbKpiPending')) $('pcbKpiPending').textContent = qty(missing);
         if ($('pcbKpiPassedPct')) $('pcbKpiPassedPct').textContent = `Passed (${pctLabel(passed, total)})`;
         if ($('pcbKpiExcPct')) {
-            $('pcbKpiExcPct').innerHTML = `Data Not Matched (${pctLabel(exc, total)}) <span class="material-icons-round pcb-kpi-help" aria-hidden="true">info</span>`;
+            $('pcbKpiExcPct').innerHTML = `Need to Review (${pctLabel(review, total)}) <span class="material-icons-round pcb-kpi-help" aria-hidden="true">info</span>`;
         }
-        if ($('pcbKpiPendPct')) $('pcbKpiPendPct').textContent = `Pending (${pctLabel(pend, total)})`;
+        if ($('pcbKpiPendPct')) $('pcbKpiPendPct').textContent = `Mapping Required (${pctLabel(missing, total)})`;
         if ($('pcbKpiValue')) $('pcbKpiValue').textContent = '₹ ' + money(value);
         if ($('pcbKpiPassedBar')) $('pcbKpiPassedBar').style.width = barPct(passed) + '%';
-        if ($('pcbKpiExcBar')) $('pcbKpiExcBar').style.width = barPct(exc) + '%';
-        if ($('pcbKpiPendBar')) $('pcbKpiPendBar').style.width = barPct(pend) + '%';
+        if ($('pcbKpiExcBar')) $('pcbKpiExcBar').style.width = barPct(review) + '%';
+        if ($('pcbKpiPendBar')) $('pcbKpiPendBar').style.width = barPct(missing) + '%';
         if ($('pcbKpiTotalBar')) $('pcbKpiTotalBar').style.width = total ? '100%' : '0%';
 
         document.querySelectorAll('.pcb-kpi').forEach((card) => {
@@ -1196,12 +1596,13 @@
                 const active = activePo === r.purchase_order ? ' is-active' : '';
                 return `<article class="pcb-card${active}" data-po="${esc(r.purchase_order)}">
                     <div class="pcb-card-top">
-                        <button type="button" class="pcb-po-link" data-po="${esc(r.purchase_order)}">${esc(r.purchase_order)}</button>
+                        ${formatCol('po', r)}
                         ${statusBadge(r._validation_status)}
                     </div>
                     <div class="pcb-card-meta">
                         <span>${fmtDate(r.date)}</span>
                         <span class="pcb-mat-chip">${dash(r._mat_label)}</span>
+                        <span title="Brand Name">${dash(r.brand_name)}</span>
                     </div>
                     <div class="pcb-card-vendor" title="${esc(r.supplier_full_name)}">${dash(r.supplier)} · ${dash(r.supplier_full_name)}</div>
                     <div class="pcb-card-stats">
@@ -1211,9 +1612,10 @@
                         <span class="is-fail">${qty(r._exceptions)} unmatched</span>
                     </div>
                     <div class="pcb-card-meta">
-                        <span>${dash(r._last_validated)}</span>
-                        <span title="Validated by">${dash(r._validated_by)}</span>
+                        ${formatCol('esign', r)}
+                        ${formatCol('mail_status', r)}
                     </div>
+                    <div class="pcb-card-meta">${formatCol('remarks', r)}</div>
                     <div class="pcb-card-actions">
                         <button type="button" class="pcb-pdf-btn" data-po="${esc(r.purchase_order)}">
                             <span class="material-icons-round">picture_as_pdf</span>
@@ -1325,39 +1727,26 @@
     }
 
     function currentRange() {
-        return String($('pcbRange')?.value || cfg.range?.preset || 'today');
+        return 'all';
     }
 
     async function fetchPos(e, opts = {}) {
         e?.preventDefault?.();
         if (listFetching) return;
-        const range = currentRange();
-        applyRangePreset(range, { fillDates: range !== 'custom' });
-        const from = $('pcbFrom')?.value || '';
-        const to = $('pcbTo')?.value || '';
-        if (!from || !to) {
-            toast(range === 'custom' ? 'Select Custom From and To dates.' : 'Unable to resolve date range.', 'error');
-            return;
-        }
-        if (from > to) {
-            toast('From date cannot be after To date.', 'error');
-            return;
-        }
-        if (range === 'custom') {
-            const maxDays = 100;
-            const a = new Date(`${from}T00:00:00`);
-            const b = new Date(`${to}T00:00:00`);
-            const span = Math.floor((b.getTime() - a.getTime()) / 86400000) + 1;
-            if (span > maxDays) {
-                toast(`Custom Date allows a maximum of ${maxDays} days.`, 'error');
-                return;
-            }
-        }
+        // No date filter — list all POs for approved/material selection
+        const range = 'all';
+        const from = '';
+        const to = '';
+        if ($('pcbRange')) $('pcbRange').value = 'all';
+        if ($('pcbFrom')) $('pcbFrom').value = '';
+        if ($('pcbTo')) $('pcbTo').value = '';
         const supplier = $('pcbSupplier')?.value || '';
         const mat = selectedMat();
         const approvedStatus = selectedApprovedStatus();
+        const brand = selectedBrand();
         const resetCache = opts.resetCache === true || (opts.resetCache !== false && opts.page == null);
         const pageToLoad = Math.max(1, Number(opts.page != null ? opts.page : (resetCache ? 1 : page)) || 1);
+        const searchPo = String(opts.po != null ? opts.po : extractQuickSearchPo() || '').replace(/\D/g, '');
         const params = new URLSearchParams({
             list: '1',
             range,
@@ -1370,9 +1759,12 @@
             page_size: String(pageSize),
             _: String(Date.now()),
         });
-        if (approvedStatus === 'Approved' || approvedStatus === 'NotApproved') {
+        // Exact PO search ignores Approved/Unapproved so the PO can be found
+        if (!searchPo && (approvedStatus === 'Approved' || approvedStatus === 'NotApproved')) {
             params.set('approved_status', approvedStatus);
         }
+        if (brand) params.set('brand', brand);
+        if (searchPo) params.set('po', searchPo);
         stopRuntimeValidation();
         listFetching = true;
         showSpinner(true);
@@ -1385,7 +1777,20 @@
                 credentials: 'same-origin',
                 cache: 'no-store',
             });
-            const json = await res.json();
+            const raw = await res.text();
+            let json = null;
+            try {
+                json = raw ? JSON.parse(raw) : null;
+            } catch (parseErr) {
+                throw new Error(
+                    raw
+                        ? 'Server returned an invalid response while loading POs. Please retry.'
+                        : 'Server returned an empty response while loading POs (timeout or overload). Please retry.'
+                );
+            }
+            if (!json || typeof json !== 'object') {
+                throw new Error('Server returned an empty response while loading POs. Please retry.');
+            }
             if (!res.ok || json.success === false) throw new Error(json.message || json.error || 'Fetch failed');
             const data = json.data || {};
             const records = Array.isArray(data.records) ? data.records : [];
@@ -1497,12 +1902,14 @@
         if (current) sel.value = current;
     }
 
-    function searchPoHeader() {
+    async function searchPoHeader() {
         const raw = String($('pcbPoSearch')?.value || '').trim();
         if (!raw) {
             if ($('pcbQuickSearch') && $('pcbQuickSearch').value) {
                 $('pcbQuickSearch').value = '';
+                lastServerPoSearch = '';
                 applyFilter();
+                void fetchPos(null, { page: 1, resetCache: true, po: '' });
             }
             return;
         }
@@ -1512,8 +1919,11 @@
             return;
         }
         if ($('pcbQuickSearch')) $('pcbQuickSearch').value = po;
+        lastServerPoSearch = po;
 
-        // 1. Exact match in current loaded list (full or without leading zeros)
+        // Always search SAP for this PO (not only current page)
+        await fetchPos(null, { page: 1, resetCache: true, po });
+
         const exact = allRows.find((r) => {
             const rowPo = String(r.purchase_order || '');
             return rowPo === po || rowPo.replace(/^0+/, '') === po.replace(/^0+/, '');
@@ -1524,25 +1934,13 @@
             return;
         }
 
-        // 2. Partial match in current list (e.g. typing last few digits)
-        const partialMatches = allRows.filter((r) => String(r.purchase_order || '').includes(po));
-        if (partialMatches.length > 0) {
-            applyFilter();
-            if (partialMatches.length === 1) {
-                void openDrill(partialMatches[0].purchase_order);
-            }
-            return;
-        }
-
-        // 3. If a full PO number (8-10 digits) was typed and not in current list, open workbench
-        if (po.length >= 8) {
-            window.open(workbenchUrl(po), '_blank');
-            return;
-        }
-
-        // 4. Otherwise filter table and inform user
         applyFilter();
-        toast(`No PO found matching "${po}" in loaded records.`, 'info');
+        if (po.length >= 8 && cfg.canWorkbench !== false) {
+            toast(`PO ${po} not in list filters — opening workbench.`, 'info');
+            openDrill(po);
+            return;
+        }
+        toast(`No purchase order found for "${po}".`, 'info');
     }
 
     async function validateOne(po) {
@@ -1563,14 +1961,15 @@
     }
 
     function syncRow(po) {
-        const idx = allRows.findIndex((r) => r.purchase_order === po);
+        const poKey = String(po || '');
+        const idx = allRows.findIndex((r) => String(r.purchase_order || '') === poKey);
         if (idx >= 0) {
             const checked = !!allRows[idx]._checked;
             allRows[idx] = normalizeRow({ ...allRows[idx], _checked: checked });
         }
-        const fIdx = filtered.findIndex((r) => r.purchase_order === po);
+        const fIdx = filtered.findIndex((r) => String(r.purchase_order || '') === poKey);
         if (fIdx >= 0) {
-            const src = allRows.find((r) => r.purchase_order === po);
+            const src = allRows.find((r) => String(r.purchase_order || '') === poKey);
             if (src) filtered[fIdx] = src;
         }
     }
@@ -2751,7 +3150,22 @@
 
     function openDrill(po) {
         if (!po) return;
-        window.location.href = workbenchUrl(po);
+        if (cfg.canWorkbench === false) {
+            alert('You do not have Workbench access for PO Costing Validation.');
+            return;
+        }
+        const href = workbenchUrl(po);
+        let abs = href;
+        try {
+            abs = new URL(href, window.location.origin).href;
+        } catch (_) {
+            abs = href;
+        }
+        const win = window.open(abs, '_blank', 'noopener');
+        if (!win) {
+            // Popup blocked — fall back to same tab
+            window.location.href = abs;
+        }
     }
 
     function selectedPos() {
@@ -3237,38 +3651,6 @@
             }
             void fetchPos(e);
         });
-        $('pcbRange')?.addEventListener('change', () => {
-            const range = currentRange();
-            if (range === 'custom') {
-                openCustomDateModal();
-                return;
-            }
-            lastNonCustomRange = range;
-            applyRangePreset(range, { fillDates: true });
-            void fetchPos();
-        });
-
-        // Custom Date Modal handlers
-        $('poCustomDateApply')?.addEventListener('click', applyCustomDatesAndLoad);
-        $('poCustomDateCancel')?.addEventListener('click', () => closeCustomDateModal({ revertSelect: true }));
-        $('poCustomDateClose')?.addEventListener('click', () => closeCustomDateModal({ revertSelect: true }));
-        $('poCustomDateModal')?.addEventListener('click', (e) => {
-            if (e.target === $('poCustomDateModal')) closeCustomDateModal({ revertSelect: true });
-        });
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && $('poCustomDateModal') && !$('poCustomDateModal').hidden) {
-                closeCustomDateModal({ revertSelect: true });
-            }
-        });
-        $('poCustomModalFrom')?.addEventListener('input', () => setCustomDateError(''));
-        $('poCustomModalTo')?.addEventListener('input', () => setCustomDateError(''));
-        $('poCustomModalFrom')?.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); applyCustomDatesAndLoad(); }
-        });
-        $('poCustomModalTo')?.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); applyCustomDatesAndLoad(); }
-        });
-
         document.querySelectorAll('input[name="pcb_mat"]').forEach((el) => {
             el.addEventListener('change', () => {
                 selectedMat();
@@ -3281,6 +3663,10 @@
                 void fetchPos();
             });
         });
+        $('pcbBrand')?.addEventListener('change', () => {
+            selectedBrand();
+            void fetchPos();
+        });
         $('pcbSupplier')?.addEventListener('change', () => void fetchPos());
         $('pcbPoSearchBtn')?.addEventListener('click', () => searchPoHeader());
         $('pcbPoSearch')?.addEventListener('keydown', (e) => {
@@ -3290,20 +3676,22 @@
             }
         });
         $('pcbResetBtn')?.addEventListener('click', () => {
-            if ($('pcbRange')) $('pcbRange').value = 'today';
-            lastNonCustomRange = 'today';
-            applyRangePreset('today', { fillDates: true });
+            if ($('pcbRange')) $('pcbRange').value = 'all';
+            if ($('pcbFrom')) $('pcbFrom').value = '';
+            if ($('pcbTo')) $('pcbTo').value = '';
             if ($('pcbSupplier')) $('pcbSupplier').value = '';
             if ($('pcbValStatus')) $('pcbValStatus').value = 'all';
             if ($('pcbMat')) $('pcbMat').value = 'all';
             document.querySelectorAll('input[name="pcb_mat"]').forEach((el) => {
                 el.checked = el.value === 'all';
             });
-            if ($('pcbApproved')) $('pcbApproved').value = 'Approved';
+            if ($('pcbApproved')) $('pcbApproved').value = 'NotApproved';
             document.querySelectorAll('input[name="pcb_approved"]').forEach((el) => {
-                el.checked = el.value === 'Approved';
+                el.checked = el.value === 'NotApproved';
             });
-            cfg.approvedStatus = 'Approved';
+            cfg.approvedStatus = 'NotApproved';
+            if ($('pcbBrand')) $('pcbBrand').value = '';
+            cfg.brand = '';
             if ($('pcbPoSearch')) $('pcbPoSearch').value = '';
             if ($('pcbQuickSearch')) $('pcbQuickSearch').value = '';
             document.querySelectorAll('#pcbFilterRow .pcb-col-filter').forEach((inp) => { inp.value = ''; });
@@ -3311,10 +3699,28 @@
             stopRuntimeValidation();
             void fetchPos();
         });
-        $('pcbQuickSearch')?.addEventListener('input', () => applyFilter());
+        $('pcbQuickSearch')?.addEventListener('input', () => {
+            applyFilter();
+            scheduleQuickSearchFetch();
+        });
+        $('pcbQuickSearch')?.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter') return;
+            e.preventDefault();
+            clearTimeout(quickSearchTimer);
+            const po = extractQuickSearchPo();
+            if (po) {
+                lastServerPoSearch = po;
+                void fetchPos(null, { page: 1, resetCache: true, po });
+            } else {
+                applyFilter();
+            }
+        });
         $('pcbQuickSearchClear')?.addEventListener('click', () => {
             if ($('pcbQuickSearch')) $('pcbQuickSearch').value = '';
+            lastServerPoSearch = '';
+            clearTimeout(quickSearchTimer);
             applyFilter();
+            void fetchPos(null, { page: 1, resetCache: true, po: '' });
         });
         document.addEventListener('input', (e) => {
             const inp = e.target && e.target.closest ? e.target.closest('#pcbFilterRow .pcb-col-filter') : null;
@@ -3332,10 +3738,14 @@
             applyFilter();
         });
         $('pcbClearAllFilters')?.addEventListener('click', () => {
+            const hadPoSearch = !!lastServerPoSearch || !!extractQuickSearchPo();
             if ($('pcbQuickSearch')) $('pcbQuickSearch').value = '';
             document.querySelectorAll('#pcbFilterRow .pcb-col-filter').forEach((inp) => { inp.value = ''; });
             Object.keys(colFilterState).forEach((k) => { delete colFilterState[k]; });
+            lastServerPoSearch = '';
+            clearTimeout(quickSearchTimer);
             applyFilter();
+            if (hadPoSearch) void fetchPos(null, { page: 1, resetCache: true, po: '' });
         });
         $('pcbToggleColFilters')?.addEventListener('click', () => {
             const row = $('pcbFilterRow');
@@ -3374,6 +3784,34 @@
             if (page < (serverPageCount || 1)) void goToPage(page + 1);
         });
         const onListClick = (e) => {
+            const remarksBtn = e.target.closest('button.pcb-remarks-btn');
+            if (remarksBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const po = remarksBtn.getAttribute('data-po');
+                if (po) openRemarksPopover(po);
+                return;
+            }
+            const mailBtn = e.target.closest('button.pcb-mail-btn');
+            if (mailBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const po = mailBtn.getAttribute('data-po');
+                if (po) openMailPopover(po);
+                return;
+            }
+            const esignBtn = e.target.closest('button.pcb-esign-btn');
+            if (esignBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (esignBtn.disabled || cfg.canEsign === false) {
+                    alert('You do not have eSign access for PO Costing.');
+                    return;
+                }
+                const po = esignBtn.getAttribute('data-po');
+                if (po) window.open(workbenchUrl(po, { open: 'esign' }), '_blank', 'noopener');
+                return;
+            }
             const pdfBtn = e.target.closest('button.pcb-pdf-btn');
             if (pdfBtn) {
                 e.preventDefault();
@@ -3403,13 +3841,17 @@
                 e.stopPropagation();
                 return;
             }
-            const row = e.target.closest('tr.pcb-row, article.pcb-card, button.pcb-po-link');
-            if (!row) return;
-            const po = row.getAttribute('data-po');
-            if (po) {
-                e.preventDefault();
-                openDrill(po);
+            // Only PO Number opens the workbench (new tab) — Workbench access required
+            const poLink = e.target.closest('button.pcb-po-link');
+            if (!poLink) return;
+            e.preventDefault();
+            e.stopPropagation();
+            if (poLink.disabled || cfg.canWorkbench === false) {
+                alert('You do not have Workbench access for PO Costing Validation.');
+                return;
             }
+            const po = poLink.getAttribute('data-po');
+            if (po) openDrill(po);
         };
         $('pcbTableBody')?.addEventListener('click', onListClick);
         $('pcbCards')?.addEventListener('click', onListClick);
@@ -3441,8 +3883,28 @@
         $('pcbRulesPopover')?.addEventListener('click', (e) => {
             if (e.target === $('pcbRulesPopover')) closeRulesPopover();
         });
+        $('pcbRemarksClose')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            closeRemarksPopover();
+        });
+        $('pcbRemarksPopover')?.addEventListener('click', (e) => {
+            if (e.target === $('pcbRemarksPopover')) closeRemarksPopover();
+        });
+        $('pcbMailClose')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            closeMailPopover();
+        });
+        $('pcbMailPopover')?.addEventListener('click', (e) => {
+            if (e.target === $('pcbMailPopover')) closeMailPopover();
+        });
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') closeRulesPopover();
+            if (e.key === 'Escape') {
+                closeRulesPopover();
+                closeRemarksPopover();
+                closeMailPopover();
+            }
         });
 
         $('pcbOpenValidateBtn')?.addEventListener('click', () => {
@@ -3647,7 +4109,6 @@
     }
 
     bind();
-    applyRangePreset(currentRange(), { fillDates: currentRange() !== 'custom' });
     {
         const urlPage = Number(new URLSearchParams(window.location.search).get('page') || 1);
         const startPage = Number.isFinite(urlPage) && urlPage > 1 ? Math.floor(urlPage) : 1;

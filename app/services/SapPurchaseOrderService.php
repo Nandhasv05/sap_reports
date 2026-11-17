@@ -97,6 +97,11 @@ class SapPurchaseOrderService
     {
         $tz = new DateTimeZone(self::RANGE_TIMEZONE);
         $today = new DateTimeImmutable('today', $tz);
+        $preset = strtolower(trim($preset));
+        // No date filter — used by PO Validation bulk list
+        if ($preset === 'all') {
+            return ['preset' => 'all', 'from' => '', 'to' => '', 'label' => 'All', 'error' => null];
+        }
         $preset = array_key_exists($preset, self::rangePresets()) ? $preset : 'today';
         $out = ['preset' => $preset, 'from' => '', 'to' => '', 'label' => self::rangePresets()[$preset], 'error' => null];
 
@@ -196,6 +201,7 @@ class SapPurchaseOrderService
             ['key' => 'plant',          'label' => 'Plant',        'type' => 'text'],
             ['key' => 'supplier',       'label' => 'Supplier',     'type' => 'text'],
             ['key' => 'supplier_full_name', 'label' => 'Supplier Name', 'type' => 'text'],
+            ['key' => 'brand_name',     'label' => 'Brand Name',   'type' => 'text'],
             ['key' => 'materials',      'label' => 'Material',     'type' => 'text'],
             ['key' => 'material_type',  'label' => 'MaterialType', 'type' => 'text'],
             ['key' => 'mat_type_desc',  'label' => 'MatTypeDesc',  'type' => 'text'],
@@ -220,6 +226,143 @@ class SapPurchaseOrderService
             'fabric' => 'Fabric',
             'trims'  => 'Trims',
         ];
+    }
+
+    /*
+     * Brand hotcodes (SAP BrandName) → display names for filter dropdowns
+     *
+     * @return list<array{code:string,name:string}>
+     */
+    public static function brands(): array
+    {
+        return [
+            ['code' => 'ANSN', 'name' => 'AND SONS'],
+            ['code' => 'AS',   'name' => 'tAS'],
+            ['code' => 'ASOS', 'name' => 'ASOS'],
+            ['code' => 'BB',   'name' => 'BB'],
+            ['code' => 'BBOX', 'name' => 'Banana Boxes'],
+            ['code' => 'BONO', 'name' => 'BONOBOS'],
+            ['code' => 'BRAN', 'name' => 'BRANDIS'],
+            ['code' => 'BRBR', 'name' => 'BARBOUR'],
+            ['code' => 'BROO', 'name' => 'BROOKS BROTHERS'],
+            ['code' => 'COLP', 'name' => 'COLOUR PLUS'],
+            ['code' => 'DICK', 'name' => 'dickies'],
+            ['code' => 'DRIZ', 'name' => 'DRIZA BONE'],
+            ['code' => 'DUMM', 'name' => 'DUMMY'],
+            ['code' => 'EM',   'name' => 'EM'],
+            ['code' => 'EVLR', 'name' => 'EVOLV RETAIL'],
+            ['code' => 'EVOL', 'name' => 'EVOLV'],
+            ['code' => 'EVZI', 'name' => 'EVOLUZIONE'],
+            ['code' => 'EWBB', 'name' => 'EWIN BEL & BO'],
+            ['code' => 'EWBL', 'name' => 'EWIN BLAUER'],
+            ['code' => 'EWBM', 'name' => 'EWIN BOMBOOGIE'],
+            ['code' => 'EWBR', 'name' => 'EWIN BARBOUR'],
+            ['code' => 'EWBS', 'name' => 'EWIN BIG STAR'],
+            ['code' => 'EWBT', 'name' => 'EWIN BENETTON'],
+            ['code' => 'EWDL', 'name' => 'EWIN-DIESEL'],
+            ['code' => 'EWFI', 'name' => 'EWIN-WEIRD FISH'],
+            ['code' => 'EWMA', 'name' => 'EWIN MONICA +ANDY'],
+            ['code' => 'EWMI', 'name' => 'EWIN MEXIM INDIA'],
+            ['code' => 'EWNT', 'name' => 'EWIN NATIONAL'],
+            ['code' => 'EWOK', 'name' => 'EWIN OLD KHAKI'],
+            ['code' => 'EWPC', 'name' => 'EWIN PICTURE'],
+            ['code' => 'EWPT', 'name' => 'EWIN PEUTEREY'],
+            ['code' => 'EWSL', 'name' => 'EWIN SCALPERS'],
+            ['code' => 'EWSO', 'name' => 'EWIN S OLIVER'],
+            ['code' => 'EWUB', 'name' => 'EWIN UNITED BY BLUE'],
+            ['code' => 'EWUW', 'name' => 'EWIN UNIVERSAL WORKS'],
+            ['code' => 'EXPR', 'name' => 'EXPRESS'],
+            ['code' => 'FAB',  'name' => 'FABDIST'],
+            ['code' => 'FACC', 'name' => 'FACCONABLE'],
+            ['code' => 'FILI', 'name' => 'FILIPPA K'],
+            ['code' => 'FYHA', 'name' => 'FYNCH HATTON'],
+            ['code' => 'G-ST', 'name' => 'G-STAR'],
+            ['code' => 'GEN',  'name' => 'GENERAL'],
+            ['code' => 'HARM', 'name' => 'HARMONT & BLAINE'],
+            ['code' => 'ICHI', 'name' => 'ICHI'],
+            ['code' => 'INN',  'name' => 'INNOVATION'],
+            ['code' => 'IT',   'name' => 'INDIAN TERRAIN'],
+            ['code' => 'JOHN', 'name' => 'JOHN VARVATOS'],
+            ['code' => 'JSBR', 'name' => 'JUST BRAND'],
+            ['code' => 'JV',   'name' => 'JV'],
+            ['code' => 'LEND', 'name' => 'LANDS END'],
+            ['code' => 'LIFE', 'name' => 'FUTURE LIFESTYLE'],
+            ['code' => 'MAPO', 'name' => "Marc O'Polo"],
+            ['code' => 'NAPA', 'name' => 'NAPAPAPIJRI'],
+            ['code' => 'NGA',  'name' => 'NGA'],
+            ['code' => 'NORD', 'name' => 'NORDSTROM'],
+            ['code' => 'NORS', 'name' => 'NORTH SAILS'],
+            ['code' => 'NZAK', 'name' => 'NEWZEALAND AUCKLAND'],
+            ['code' => 'ONE',  'name' => 'ONEILL'],
+            ['code' => 'PACE', 'name' => 'PACE ACTIVE'],
+            ['code' => 'PAIG', 'name' => 'PAIGE'],
+            ['code' => 'POLO', 'name' => 'POLO'],
+            ['code' => 'RBTL', 'name' => 'ROBERT TALBOTT'],
+            ['code' => 'SOFT', 'name' => 'SOFT SURROUNDINGS'],
+            ['code' => 'SPLA', 'name' => 'SPLASH'],
+            ['code' => 'SQST', 'name' => 'SEQUESTO'],
+            ['code' => 'STID', 'name' => 'SOUTHERN TIDE'],
+            ['code' => 'STUS', 'name' => 'STUSSY'],
+            ['code' => 'TEND', 'name' => 'TEN THOUSAND'],
+            ['code' => 'THFR', 'name' => 'TOMMY HILFIGER'],
+            ['code' => 'TIMB', 'name' => 'TIMBERLAND'],
+            ['code' => 'TNOR', 'name' => 'THE NORMAL BRAND'],
+            ['code' => 'TOBA', 'name' => 'TOMMY BAHAMA'],
+            ['code' => 'TOM',  'name' => 'TOM TAILOR'],
+            ['code' => 'VERM', 'name' => 'VERMONT'],
+            ['code' => 'VFS',  'name' => 'VFS'],
+            ['code' => 'VINY', 'name' => 'Vineyard'],
+            ['code' => 'WIND', 'name' => 'WIN INDIA'],
+            ['code' => 'WNU',  'name' => 'WITH NOTHING UNDERNEATH'],
+            ['code' => 'WOOL', 'name' => 'WOOLRICH'],
+            ['code' => 'WRAN', 'name' => 'WRANGLER'],
+            ['code' => 'ZARA', 'name' => 'ZARA'],
+        ];
+    }
+
+    /** code => name map for BrandName display */
+    public static function brandMap(): array
+    {
+        static $map = null;
+        if ($map === null) {
+            $map = [];
+            foreach (self::brands() as $b) {
+                $map[$b['code']] = $b['name'];
+            }
+        }
+        return $map;
+    }
+
+    /** Normalize filter value to a known brand code, or '' for All */
+    public static function normalizeBrand(string $brand): string
+    {
+        $brand = strtoupper(trim($brand));
+        if ($brand === '' || $brand === 'ALL') {
+            return '';
+        }
+        // Preserve exact code casing from catalog (e.g. G-ST)
+        foreach (self::brands() as $b) {
+            if (strcasecmp($b['code'], $brand) === 0) {
+                return $b['code'];
+            }
+        }
+        return '';
+    }
+
+    /** Friendly label for a SAP BrandName code */
+    public static function brandLabel(string $code): string
+    {
+        $code = trim($code);
+        if ($code === '') {
+            return '';
+        }
+        $map = self::brandMap();
+        foreach ($map as $k => $name) {
+            if (strcasecmp((string) $k, $code) === 0) {
+                return (string) $name;
+            }
+        }
+        return $code;
     }
 
     /** Fabric MaterialType codes only */
@@ -257,6 +400,7 @@ class SapPurchaseOrderService
             ['key' => 'po_type_name',     'label' => 'PO Type Name', 'type' => 'text'],
             ['key' => 'supplier',         'label' => 'Supplier',     'type' => 'text'],
             ['key' => 'supplier_full_name', 'label' => 'Supplier Name', 'type' => 'text'],
+            ['key' => 'brand_name',       'label' => 'Brand Name',   'type' => 'text'],
             ['key' => 'material',         'label' => 'Material',     'type' => 'text'],
             ['key' => 'description',      'label' => 'Description',  'type' => 'text'],
             ['key' => 'material_type',    'label' => 'MaterialType', 'type' => 'text'],
@@ -305,8 +449,19 @@ class SapPurchaseOrderService
             $matCat = 'all';
         }
 
+        $brand = self::normalizeBrand((string) ($filters['brand'] ?? $filters['brand_name'] ?? $filters['BrandName'] ?? ''));
+
+        $searchPo = preg_replace('/\D/', '', (string) ($filters['po'] ?? $filters['purchase_order'] ?? $filters['q'] ?? '')) ?? '';
+        if ($searchPo !== '' && !preg_match('/^\d{1,10}$/', $searchPo)) {
+            $searchPo = '';
+        }
+
         $approvedStatus = trim((string) ($filters['approved_status'] ?? $filters['APPROVEDSTATUS'] ?? ''));
         if (!in_array($approvedStatus, ['Approved', 'NotApproved'], true)) {
+            $approvedStatus = '';
+        }
+        // Exact PO search should find the PO regardless of Approved / Unapproved toggle
+        if ($searchPo !== '') {
             $approvedStatus = '';
         }
 
@@ -351,12 +506,7 @@ class SapPurchaseOrderService
             $page = 1;
         }
 
-        $cacheKey = 'po_list_' . md5(json_encode([$range['preset'], $range['from'], $range['to'], $plant, implode(',', $supKey), $so, implode(',', $typesKey), $matCat, $approvedStatus]));
-        $cached = $this->cacheRead($cacheKey, (int) ($this->cfg['cache_ttl'] ?? 300));
-        if ($cached !== null) {
-            return $paginate ? $this->paginateListPayload($cached, $page, $pageSize) : $cached;
-        }
-
+        // Live SAP only — do not read/write storage/cache for PO Validation list.
         $filterParts = [];
         if ($range['preset'] !== 'all' && $range['from'] !== '' && $range['to'] !== '') {
             $filterParts[] = "PurchaseOrderDate ge datetime'{$range['from']}T00:00:00' and PurchaseOrderDate le datetime'{$range['to']}T23:59:59'";
@@ -386,6 +536,21 @@ class SapPurchaseOrderService
                 $filterParts[] = '(' . implode(' or ', $typeClauses) . ')';
             }
         }
+        if ($brand !== '') {
+            $brandEsc = str_replace("'", "''", $brand);
+            $filterParts[] = "BrandName eq '{$brandEsc}'";
+        }
+        if ($searchPo !== '') {
+            $poDisplay = $this->displayNumber($searchPo);
+            $poPadded = preg_match('/^\d+$/', $poDisplay)
+                ? str_pad($poDisplay, 10, '0', STR_PAD_LEFT)
+                : $poDisplay;
+            if ($poPadded !== '' && $poPadded !== $poDisplay) {
+                $filterParts[] = "(PurchaseOrder eq '{$poDisplay}' or PurchaseOrder eq '{$poPadded}')";
+            } else {
+                $filterParts[] = "PurchaseOrder eq '{$poDisplay}'";
+            }
+        }
 
         // Do not pass $top here — SapODataClient paginates ($skip) up to config max_rows.
         // A hard $top=1000 was truncating Previous Month (and other ranges) to ~1000 line items
@@ -399,6 +564,13 @@ class SapPurchaseOrderService
 
         $service = (string) ($this->cfg['purchase_order_service'] ?? self::DEFAULT_SERVICE);
         $maxRows = max(1, (int) ($this->cfg['po_max_rows'] ?? $this->cfg['max_rows'] ?? 10000));
+        // No date filter can span the full PO hub — cap line fetch so PHP/SAP do not time out
+        // with an empty response body ("Unexpected end of JSON input" in the browser).
+        $maxUniquePos = 0;
+        if ($range['preset'] === 'all') {
+            $maxRows = min($maxRows, max(500, (int) ($this->cfg['po_all_max_rows'] ?? 5000)));
+            $maxUniquePos = max(100, (int) ($this->cfg['po_all_max_pos'] ?? 400));
+        }
 
         // Stream pages and aggregate per-PO so wide Custom Date ranges do not OOM
         // (fetchResults kept every SAP line in memory and exhausted 128MB).
@@ -411,8 +583,9 @@ class SapPurchaseOrderService
             $poTypes,
             $so,
             $matCat,
-            $docTypeMap
-        ): void {
+            $docTypeMap,
+            $maxUniquePos
+        ) {
             foreach ($batch as $row) {
                 if (!is_array($row)) {
                     continue;
@@ -460,6 +633,7 @@ class SapPurchaseOrderService
                         'date'                   => $this->sapDate((string) ($row['PurchaseOrderDate'] ?? '')),
                         'supplier'               => $this->displayNumber((string) ($row['Supplier'] ?? '')),
                         'supplier_full_name'     => trim((string) ($row['SupplierFullName'] ?? '')),
+                        'brand_name'             => '',
                         'company_code'           => trim((string) ($row['CompanyCode'] ?? '')),
                         'purchasing_org'         => trim((string) ($row['PurchasingOrganization'] ?? '')),
                         'purchasing_group'       => trim((string) ($row['PurchasingGroup'] ?? '')),
@@ -473,6 +647,7 @@ class SapPurchaseOrderService
                         'mat_categories'         => [],
                         'mat_type_descs'         => [],
                         'material_groups'        => [],
+                        'brand_names'            => [],
                         'total_qty'              => 0.0,
                         'unit'                   => trim((string) ($row['PurchaseOrderQuantityUnit'] ?? '')),
                         'total_value'            => 0.0,
@@ -503,6 +678,10 @@ class SapPurchaseOrderService
                 if ($materialGroup !== '' && !in_array($materialGroup, $p['material_groups'], true)) {
                     $p['material_groups'][] = $materialGroup;
                 }
+                $brandName = trim((string) ($row['BrandName'] ?? ''));
+                if ($brandName !== '' && !in_array($brandName, $p['brand_names'], true)) {
+                    $p['brand_names'][] = $brandName;
+                }
                 $qty = $this->sapNumber($row['OrderQuantity'] ?? '');
                 $price = $this->sapNumber($row['NetPriceAmount'] ?? '');
                 $p['total_qty'] += $qty;
@@ -516,7 +695,12 @@ class SapPurchaseOrderService
                     $currencies[$p['currency']] = ($currencies[$p['currency']] ?? 0) + 1;
                 }
                 unset($p);
+
+                if ($maxUniquePos > 0 && count($pos) >= $maxUniquePos) {
+                    return false;
+                }
             }
+            return $maxUniquePos > 0 && count($pos) >= $maxUniquePos ? false : true;
         }, $query, $service, $maxRows);
 
         $fetchError = $pageResult['error'] ?? null;
@@ -536,7 +720,8 @@ class SapPurchaseOrderService
         }
 
         $itemsFetched = (int) ($pageResult['row_count'] ?? 0);
-        $truncated = $itemsFetched >= $maxRows;
+        $truncated = $itemsFetched >= $maxRows
+            || ($maxUniquePos > 0 && count($pos) >= $maxUniquePos);
 
         $records = array_values($pos);
         foreach ($records as &$r) {
@@ -549,6 +734,16 @@ class SapPurchaseOrderService
             $r['material_type'] = implode(', ', $r['material_types']);
             $r['mat_type_desc'] = implode(', ', $r['mat_type_descs']);
             $r['material_group'] = implode(', ', $r['material_groups']);
+            $codes = $r['brand_names'] ?? [];
+            $r['brand_code'] = implode(', ', $codes);
+            $labels = [];
+            foreach ($codes as $code) {
+                $label = self::brandLabel((string) $code);
+                if ($label !== '' && !in_array($label, $labels, true)) {
+                    $labels[] = $label;
+                }
+            }
+            $r['brand_name'] = $labels !== [] ? implode(', ', $labels) : implode(', ', $codes);
             $cats = $r['mat_categories'] ?? [];
             if (count($cats) > 1) {
                 $r['mat_category'] = 'mixed';
@@ -560,11 +755,14 @@ class SapPurchaseOrderService
         }
         unset($r);
 
-        // Local APPROVEDSTATUS (Pass / Approve log) — SAP hub has no APPROVEDSTATUS property
-        $approvedSet = $this->approvedPurchaseOrderKeys(array_column($records, 'purchase_order'));
+        // APPROVEDSTATUS from Z_QuotationZCostCom (ApprovedStatus eq 'NotApproved' / 'Approved'),
+        // merged with local Pass log — SAP PO hub has no APPROVEDSTATUS property.
+        $poKeys = array_column($records, 'purchase_order');
+        $sapApprovedSet = $this->sapZcostApprovedPurchaseOrderKeys($poKeys);
+        $localApprovedSet = $this->approvedPurchaseOrderKeys($poKeys);
         foreach ($records as &$r) {
             $key = $this->poLookupKey((string) ($r['purchase_order'] ?? ''));
-            $isApproved = $key !== '' && isset($approvedSet[$key]);
+            $isApproved = $key !== '' && (isset($sapApprovedSet[$key]) || isset($localApprovedSet[$key]));
             $r['approved_status'] = $isApproved ? 'Approved' : 'NotApproved';
         }
         unset($r);
@@ -619,6 +817,7 @@ class SapPurchaseOrderService
             ],
             'suppliers' => array_values($uniqueSuppliers),
             'mat_cat' => $matCat,
+            'brand'   => $brand,
             'approved_status' => $approvedStatus,
             'range'   => $range,
             'truncated' => $truncated,
@@ -626,10 +825,6 @@ class SapPurchaseOrderService
             'max_rows' => $maxRows,
             'error'   => null,
         ];
-
-        if ($range['error'] === null) {
-            $this->cacheWrite($cacheKey, $out);
-        }
 
         return $paginate ? $this->paginateListPayload($out, $page, $pageSize) : $out;
     }
@@ -686,12 +881,7 @@ class SapPurchaseOrderService
             return $out;
         }
 
-        $cacheKey = 'po_detail_' . $po;
-        $cached = $this->cacheRead($cacheKey, (int) ($this->cfg['cache_ttl'] ?? 300));
-        if ($cached !== null) {
-            return $cached;
-        }
-
+        // Live SAP only — do not read/write storage/cache for PO detail.
         $service = (string) ($this->cfg['purchase_order_service'] ?? self::DEFAULT_SERVICE);
         $result = $this->client->fetchResults($service, ['$filter' => "PurchaseOrder eq '{$po}'"]);
         if (($result['error'] ?? null) !== null) {
@@ -725,6 +915,11 @@ class SapPurchaseOrderService
             'date'             => $this->sapDate((string) ($first['PurchaseOrderDate'] ?? '')),
             'supplier'         => $this->displayNumber((string) ($first['Supplier'] ?? '')),
             'supplier_full_name' => trim((string) ($first['SupplierFullName'] ?? '')),
+            'brand_code'       => implode(', ', $this->distinct($rows, 'brand_code')),
+            'brand_name'       => implode(', ', array_values(array_unique(array_filter(array_map(
+                static fn ($c): string => self::brandLabel((string) $c),
+                $this->distinct($rows, 'brand_code')
+            ))))),
             'company_code'     => trim((string) ($first['CompanyCode'] ?? '')),
             'purchasing_org'   => trim((string) ($first['PurchasingOrganization'] ?? '')),
             'purchasing_group' => trim((string) ($first['PurchasingGroup'] ?? '')),
@@ -735,7 +930,6 @@ class SapPurchaseOrderService
         $out['records'] = $rows;
         $out['totals'] = $this->totals($rows);
 
-        $this->cacheWrite($cacheKey, $out);
         return $out;
     }
 
@@ -768,6 +962,8 @@ class SapPurchaseOrderService
             'po_type_name'            => $rowTypeName,
             'supplier'                => $this->displayNumber((string) ($row['Supplier'] ?? '')),
             'supplier_full_name'      => trim((string) ($row['SupplierFullName'] ?? '')),
+            'brand_code'              => trim((string) ($row['BrandName'] ?? '')),
+            'brand_name'              => self::brandLabel(trim((string) ($row['BrandName'] ?? ''))),
             'material'                => trim((string) ($row['Material'] ?? '')),
             'description'             => trim((string) ($row['PurchaseOrderItemText'] ?? '')),
             'material_type'           => $materialType,
@@ -823,6 +1019,7 @@ class SapPurchaseOrderService
 
     /**
      * APPROVEDSTATUS for a single PO: "Approved" | "NotApproved".
+     * Prefers Z_QuotationZCostCom.ApprovedStatus, then local Pass log.
      */
     public function approvedStatusFor(string $purchaseOrder): string
     {
@@ -830,8 +1027,77 @@ class SapPurchaseOrderService
         if ($key === '') {
             return 'NotApproved';
         }
-        $set = $this->approvedPurchaseOrderKeys([$purchaseOrder]);
-        return isset($set[$key]) ? 'Approved' : 'NotApproved';
+        $sap = $this->sapZcostApprovedPurchaseOrderKeys([$purchaseOrder]);
+        if (isset($sap[$key])) {
+            return 'Approved';
+        }
+        $local = $this->approvedPurchaseOrderKeys([$purchaseOrder]);
+        return isset($local[$key]) ? 'Approved' : 'NotApproved';
+    }
+
+    /**
+     * POs with ApprovedStatus = 'Approved' on Z_QuotationZCostCom
+     * (same entity as Postman: …/Z_QuotationZCostCom?$filter=ApprovedStatus eq '…').
+     *
+     * @param list<string|int> $purchaseOrders
+     * @return array<string, true>
+     */
+    private function sapZcostApprovedPurchaseOrderKeys(array $purchaseOrders): array
+    {
+        $wanted = [];
+        foreach ($purchaseOrders as $po) {
+            $k = $this->poLookupKey((string) $po);
+            if ($k !== '') {
+                $wanted[$k] = true;
+            }
+        }
+        if ($wanted === []) {
+            return [];
+        }
+
+        $service = (string) ($this->cfg['quotation_costing_service']
+            ?? '/sap/opu/odata/sap/Z_QUOTATIONZCOSTCOM_CDS/Z_QuotationZCostCom');
+
+        // Batch OR filters (PurchaseOrder eq '…') — keep chunks small for SAP URL limits
+        $variants = [];
+        foreach (array_keys($wanted) as $k) {
+            $display = $this->displayNumber($k);
+            $padded = preg_match('/^\d+$/', $display) ? str_pad($display, 10, '0', STR_PAD_LEFT) : $display;
+            $variants[$display] = true;
+            if ($padded !== '' && $padded !== $display) {
+                $variants[$padded] = true;
+            }
+        }
+        $poList = array_keys($variants);
+        $approved = [];
+        $chunkSize = 20;
+        for ($i = 0; $i < count($poList); $i += $chunkSize) {
+            $chunk = array_slice($poList, $i, $chunkSize);
+            $orParts = array_map(
+                static fn (string $p): string => "PurchaseOrder eq '" . str_replace("'", "''", $p) . "'",
+                $chunk
+            );
+            $filter = '(' . implode(' or ', $orParts) . ") and ApprovedStatus eq 'Approved'";
+            try {
+                $res = $this->client->fetchResults($service, [
+                    '$filter' => $filter,
+                    '$select' => 'PurchaseOrder,ApprovedStatus',
+                ], 2000);
+            } catch (Throwable $e) {
+                error_log('SapPurchaseOrderService sapZcostApprovedPurchaseOrderKeys: ' . $e->getMessage());
+                continue;
+            }
+            foreach ($res['rows'] ?? [] as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $k = $this->poLookupKey((string) ($row['PurchaseOrder'] ?? $row['purchase_order'] ?? ''));
+                if ($k !== '' && isset($wanted[$k])) {
+                    $approved[$k] = true;
+                }
+            }
+        }
+        return $approved;
     }
 
     /**
@@ -899,43 +1165,5 @@ class SapPurchaseOrderService
         }
     }
 
-    /*
-     * Cache utilities
-     */
-    private function cacheRead(string $name, int $ttl): ?array
-    {
-        if ($ttl <= 0) return null;
-        $file = $this->cacheFile($name);
-        if ($file === null || !is_file($file)) return null;
-        $mtime = filemtime($file);
-        if ($mtime === false || (time() - $mtime) > $ttl) return null;
-        $raw = @file_get_contents($file);
-        if (!is_string($raw) || $raw === '') return null;
-        $data = json_decode($raw, true);
-        return is_array($data) ? $data : null;
-    }
-
-    private function cacheWrite(string $name, array $payload): void
-    {
-        $file = (int) ($this->cfg['cache_ttl'] ?? 0) > 0 ? $this->cacheFile($name) : null;
-        if ($file !== null) {
-            @file_put_contents($file, json_encode($payload), LOCK_EX);
-        }
-    }
-
-    private function cacheFile(string $name): ?string
-    {
-        static $dir = false;
-        if ($dir === false) {
-            $dir = null;
-            foreach ([base_path('storage/cache'), rtrim(sys_get_temp_dir(), '/\\') . DIRECTORY_SEPARATOR . 'sap_reports'] as $candidate) {
-                if ((is_dir($candidate) || @mkdir($candidate, 0775, true)) && is_writable($candidate)) {
-                    $dir = $candidate;
-                    break;
-                }
-            }
-        }
-        return $dir === null ? null : $dir . DIRECTORY_SEPARATOR . 'sap_po_v' . (int) ($this->cfg['cache_version'] ?? 1) . '_' . $name . '.json';
-    }
 }
 ?>

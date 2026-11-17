@@ -347,18 +347,21 @@ class PoManualCostingMapService
         $rec['_zcost_pending'] = false;
         $rec['_editingMatch'] = false;
 
-        // Recompute actual / status like client applyCostLineToRow
+        // Recompute actual / status like client applyCostLineToRow.
+        // TEMPFIN PORATE is already INR — do not × Curr Rate again.
         $porate = $this->numOrNull($rec['porate'] ?? $rec['net_price'] ?? null);
-        $rate = $convr !== null && $convr > 0 ? $convr : 1.0;
         $cons = $this->numOrNull($rec['consumption'] ?? null);
         if ($cons === null || $cons <= 0) {
             $cons = 1.0;
         }
+        $needsFx = !empty($rec['porate_needs_fx']);
+        $rate = ($needsFx && $convr !== null && $convr > 0) ? $convr : 1.0;
         $actual = null;
         if ($porate !== null) {
             $actual = round($porate * $rate * $cons, 6);
             $rec['actual_cost'] = $actual;
             $rec['po_unit_cost'] = $actual;
+            $rec['porate_already_inr'] = !$needsFx;
         }
 
         if ($budget !== null && $budget > 0 && $actual !== null) {

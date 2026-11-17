@@ -2,7 +2,7 @@
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 30/10/2026
  * DESCRIPTION : PO Costing Workbench — TEMPFIN columns, formula popovers, search, filters, column prefs
- */
+*/
 (function () {
     let cfg = {};
     try {
@@ -118,7 +118,7 @@
         budget_cost_per_piece: { api: 'TOTALINR', source: 'ZCOSTI / ZCOSTIT / ZCOSTIP / ZCOSTIS', desc: 'Budget cost per garment — zCOST Total in INR (TOTALINR).' },
         conv: { api: 'CONV (unit)', source: 'TEMPFIN / PASSPO', desc: 'Unit conversion factor (not Curr Rate).' },
         buom: { api: 'PurchaseOrderQuantityUnit', source: 'Z_QuotationZCostCom', desc: 'Base / order unit of measure.' },
-        actual_cost: { api: 'PORATE × Curr Rate', source: 'TEMPFIN / PASSPO + Curr/Rate', desc: 'ACTUAL_COST in INR = PORATE × Curr Rate (BUDGET_CONV_RT) × PO consumption, with classic unit rules. Never × zCOST Gross.' },
+        actual_cost: { api: 'PORATE (INR)', source: 'TEMPFIN / PASSPO', desc: 'ACTUAL_COST in INR = TEMPFIN PORATE × PO consumption (classic unit rules). PORATE is already INR — do not × Curr Rate again. Never × zCOST Gross.' },
         variance_pct: { api: 'derived', source: 'Computed', desc: '(Actual INR − TotalINR/Gross) ÷ Budget × 100.' },
     };
     const colGroup = (key) => {
@@ -197,8 +197,8 @@
     }
 
     /**
-     * ACTUAL_COST in INR using Curr + Rate (po_currency / budget_currency + budget_conv_rt).
-     * Mirrors classic portal: PORATE × FX, button GRO ÷ 144, THREADS CPS/BOX scales.
+     * ACTUAL_COST in INR from TEMPFIN PORATE (+ classic unit rules).
+     * TEMPFIN PORATE is already INR — never multiply by Curr Rate / BUDGET_CONV_RT again.
      */
     /** zCOST budget per GMT = Total in INR ÷ Gross (fallback RATE). */
     function lineBudgetPerGmt(line) {
@@ -228,13 +228,43 @@
         return null;
     }
 
+    /**
+     * Budget for green/red: use BUDGET_COST_PER_GARMENT (budget_cost_per_piece) first —
+     * that is the column users compare with ACTUAL_COST (e.g. 2.2491 vs 1.8).
+     */
+    function budgetForCompare(r) {
+        if (!r) return null;
+        const garment = nVal(r.budget_cost_per_piece) ?? nVal(r.budget_cost_per_garment);
+        if (garment !== null && garment > 0) return garment;
+        const piece = nVal(r.budget_cost_per_gmt) ?? nVal(r.expected_unit_cost);
+        return (piece !== null && piece > 0) ? piece : null;
+    }
+
+    /** Actual used for green/red RESULT compare (same value shown in ACTUAL_COST). */
+    function actualForCompare(r) {
+        if (!r) return null;
+        const a = actualCostInr(r);
+        if (a !== null && a > 0) return a;
+        const stored = nVal(r.actual_cost) ?? nVal(r.po_unit_cost) ?? nVal(r.porate);
+        return (stored !== null && stored > 0) ? stored : null;
+    }
+
+    /** 'under' = green (actual ≤ budget), 'over' = red, '' = no tone. */
+    function resultCostTone(r) {
+        const budget = budgetForCompare(r);
+        const actual = actualForCompare(r);
+        if (budget === null || actual === null) return '';
+        return actual > budget + 0.005 ? 'over' : 'under';
+    }
+
     function actualCostInr(r) {
         if (!r) return null;
         const porate = nVal(r.porate ?? r.net_price);
-        if (porate === null) {
-            return nVal(r.actual_cost ?? r.po_unit_cost);
+        if (porate === null || porate <= 0) {
+            const stored = nVal(r.actual_cost ?? r.po_unit_cost);
+            // 0 / blank PO rate → no real actual (show —), never treat 0 as a valid cost
+            return (stored !== null && stored > 0) ? stored : null;
         }
-        const curr = String(r.po_currency || r.currency || 'INR').toUpperCase();
         const fx = nVal(r.budget_conv_rt) ?? nVal(r.convr);
         const rate = (fx !== null && fx > 0) ? fx : 1;
         let unitConv = nVal(r.conv);
@@ -250,32 +280,33 @@
         const ouom = String(r.ouom || '').toUpperCase();
         const buom = String(r.buom || '').toUpperCase();
         const matDesc = String(r.mat_desc || r.material_desc || '').toUpperCase();
-        const foreign = curr !== '' && curr !== 'INR';
-        // CONV sometimes mirrors BUDGET_CONV_RT — don't apply FX twice / as unit factor
-        if (foreign && Math.abs(unitConv - rate) < 0.0001) unitConv = 1;
-        if (!foreign && unitConv > 20) unitConv = 1;
+        // TEMPFIN PORATE is already INR. Only apply Curr Rate when explicitly flagged.
+        // CONV sometimes mirrors BUDGET_CONV_RT — don't use FX as unit factor
+        if (rate > 1 && Math.abs(unitConv - rate) < 0.0001) unitConv = 1;
+        if (unitConv > 20) unitConv = 1;
 
+        let out = null;
         if (mg === 'THREADS1' && buom === 'CPS') {
-            return Math.round(((porate / 1000) * unitConv) * 10000) / 10000;
+            out = Math.round(((porate / 1000) * unitConv) * 10000) / 10000;
+        } else if (mg === 'THREADS1' && buom === 'BOX') {
+            out = Math.round(((porate / 10000) * unitConv) * 10000) / 10000;
+        } else {
+            const base = (r.porate_needs_fx === true) ? (porate * rate) : porate;
+            const mid = base * unitConv;
+            const isButtonGro = (ouom === 'GRO' || buom === 'GRO') && (
+                mg.includes('BUTTON') || mg.includes('SEMI DULL') || mg.includes('HOOK')
+                || mg.includes('PEARL BTN') || matDesc.includes('BTN') || matDesc.includes('BUTTON')
+                || matDesc.includes('PLASTIC')
+            );
+            if (isButtonGro) {
+                out = Math.round((Math.round(mid * cons) / 144) * 10000) / 10000;
+            } else if (ouom === 'KG' || buom === 'KG') {
+                out = Math.round(((mid * cons) / 500) * 10000) / 10000;
+            } else {
+                out = Math.round((mid * cons) * 10000) / 10000;
+            }
         }
-        if (mg === 'THREADS1' && buom === 'BOX') {
-            return Math.round(((porate / 10000) * unitConv) * 10000) / 10000;
-        }
-
-        const base = foreign ? (porate * rate) : porate;
-        const mid = base * unitConv;
-        const isButtonGro = (ouom === 'GRO' || buom === 'GRO') && (
-            mg.includes('BUTTON') || mg.includes('SEMI DULL') || mg.includes('HOOK')
-            || mg.includes('PEARL BTN') || matDesc.includes('BTN') || matDesc.includes('BUTTON')
-            || matDesc.includes('PLASTIC')
-        );
-        if (isButtonGro) {
-            return Math.round((Math.round(mid * cons) / 144) * 10000) / 10000;
-        }
-        if (ouom === 'KG' || buom === 'KG') {
-            return Math.round(((mid * cons) / 500) * 10000) / 10000;
-        }
-        return Math.round((mid * cons) * 10000) / 10000;
+        return (out !== null && out > 0) ? out : null;
     }
 
     function totalReqForItem(r) {
@@ -324,18 +355,31 @@
         )) {
             return { code: 'NOT_MATCHED', label: 'Mapping Required', cls: 'is-mapping' };
         }
-        const budget = nVal(r?.budget_cost_per_gmt ?? r?.expected_unit_cost);
-        const actual = actualCostInr(r);
-        const overBudget = budget !== null && budget > 0 && actual !== null && actual > budget + 0.005;
-        // Cost Mismatch before Need to Review when Actual > Budget
-        if (overBudget || st === 'EXCEPTION' || st === 'FAIL' || st === 'NOT_VALIDATED' || !!r.cost_mismatch) {
-            return { code: 'NOT_VALIDATED', label: 'Cost Mismatch', cls: 'is-mismatch' };
+        const budget = budgetForCompare(r);
+        const actual = actualForCompare(r);
+        // Live compare of the RESULT columns wins over stale flags:
+        // actual ≤ budget → green · actual > budget → red
+        if (budget !== null && budget > 0 && actual !== null && actual > 0) {
+            if (actual > budget + 0.005) {
+                // Actual > budget → Need to Review (Cost Mismatch card removed)
+                r.cost_mismatch = true;
+                return { code: 'NEEDS_REVIEW', label: 'Need to Review', cls: 'is-ambiguous' };
+            }
+            r.cost_mismatch = false;
+            return { code: 'PASS', label: 'Passed', cls: 'is-pass' };
+        }
+        // Budget present but actual missing / 0 → review (do not paint green for 0)
+        if (budget !== null && budget > 0 && (actual === null || actual <= 0)) {
+            r.cost_mismatch = false;
+            if (st === 'NEEDS_REVIEW' || st === 'AMBIGUOUS' || st === 'AMBIGUOUS_MATCH' || hasLink) {
+                return { code: 'NEEDS_REVIEW', label: 'Need to Review', cls: 'is-ambiguous' };
+            }
         }
         if (st === 'NEEDS_REVIEW' || st === 'AMBIGUOUS' || st === 'AMBIGUOUS_MATCH') {
             return { code: 'NEEDS_REVIEW', label: 'Need to Review', cls: 'is-ambiguous' };
         }
-        if (budget !== null && budget > 0 && actual !== null && actual <= budget + 0.005) {
-            return { code: 'PASS', label: 'Passed', cls: 'is-pass' };
+        if (st === 'EXCEPTION' || st === 'FAIL' || st === 'NOT_VALIDATED' || !!r.cost_mismatch) {
+            return { code: 'NEEDS_REVIEW', label: 'Need to Review', cls: 'is-ambiguous' };
         }
         if (st === 'PASS') return { code: 'PASS', label: 'Passed', cls: 'is-pass' };
         // Linked but uncertain → Need to Review; else Mapping Required
@@ -450,11 +494,14 @@
                 const porate = nVal(r.porate ?? r.net_price);
                 const fx = nVal(r.budget_conv_rt) ?? nVal(r.convr) ?? 1;
                 const cons = nVal(r.consumption) ?? 1;
+                const applyFx = r.porate_needs_fx === true;
                 steps.push({
                     label: 'Formula',
                     value: porate === null
-                        ? 'PORATE × Curr Rate × PO consumption (classic unit rules)'
-                        : `PORATE ${fmtStep(porate, 4)} × Rate ${fmtStep(fx, 4)} × Cons ${fmtStep(cons, 4)} → INR ${fmtStep(actual, 4)}`,
+                        ? 'PORATE (INR) × PO consumption (classic unit rules)'
+                        : (applyFx
+                            ? `PORATE ${fmtStep(porate, 4)} × Rate ${fmtStep(fx, 4)} × Cons ${fmtStep(cons, 4)} → INR ${fmtStep(actual, 4)}`
+                            : `PORATE ${fmtStep(porate, 4)} × Cons ${fmtStep(cons, 4)} → INR ${fmtStep(actual, 4)} (already INR — Curr Rate not applied)`),
                 });
                 steps.push({
                     label: 'Module check',
@@ -574,7 +621,7 @@
         const map = {
             PASS: 'Passed',
             NOT_MATCHED: 'Mapping Required',
-            NOT_VALIDATED: 'Cost Mismatch',
+            NOT_VALIDATED: 'Need to Review',
             NEEDS_REVIEW: 'Need to Review',
         };
         return map[String(code || '').toUpperCase()] || String(code || '');
@@ -635,12 +682,11 @@
             subtitle = 'Validation Overview';
             title = 'Total Items';
             val = fmt(s.total_records || detailRows.length);
-            formula = 'Total Items = Passed + Mapping Required + Cost Mismatch + Need to Review';
+            formula = 'Total Items = Passed + Mapping Required + Need to Review';
             stepsHtml = `
                 <div class="pcw-cdm-step-item"><span>Passed</span><strong>${fmt(s.passed)}</strong></div>
                 <div class="pcw-cdm-step-item"><span>Mapping Required</span><strong>${fmt(s.mapping_required)}</strong></div>
-                <div class="pcw-cdm-step-item"><span>Cost Mismatch</span><strong>${fmt(s.cost_mismatch)}</strong></div>
-                <div class="pcw-cdm-step-item"><span>Need to Review</span><strong>${fmt(s.ambiguous_match)}</strong></div>
+                <div class="pcw-cdm-step-item"><span>Need to Review</span><strong>${fmt(s.ambiguous_match ?? s.needs_review)}</strong></div>
                 <div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Items</span><strong>${fmt(s.total_records || detailRows.length)}</strong></div>
             `;
             rowsHtml = detailRows.map(rowLineHtml).join('');
@@ -675,32 +721,17 @@
             `;
             rowsHtml = mapRows.map(rowLineHtml).join('');
             rowCount = mapRows.length;
-        } else if (cardKey === 'status_mismatch') {
-            icon = 'error';
-            subtitle = 'Validation Overview';
-            title = 'Cost Mismatch';
-            val = fmt(s.cost_mismatch);
-            formula = 'Cost Mismatch = matched line but Actual &gt; Budget (red)';
-            showFilterBtn = true;
-            filterStatus = 'NOT_VALIDATED';
-            const mmRows = detailRows.filter((r) => statusDisplay(r).code === 'NOT_VALIDATED');
-            stepsHtml = `
-                <div class="pcw-cdm-step-item"><span>Condition</span><strong>Actual Cost &gt; Budget Cost per GMT</strong></div>
-                <div class="pcw-cdm-step-item"><span>Cost Mismatch</span><strong>${fmt(mmRows.length)} of ${fmt(detailRows.length)}</strong></div>
-            `;
-            rowsHtml = mmRows.map(rowLineHtml).join('');
-            rowCount = mmRows.length;
-        } else if (cardKey === 'status_ambiguous' || cardKey === 'status_review') {
+        } else if (cardKey === 'status_ambiguous' || cardKey === 'status_review' || cardKey === 'status_mismatch') {
             icon = 'layers';
             subtitle = 'Validation Overview';
             title = 'Need to Review';
             val = fmt(s.ambiguous_match ?? s.needs_review);
-            formula = 'Need to Review = uncertain mapping / needs review (yellow)';
+            formula = 'Need to Review = uncertain mapping, missing actual, or actual &gt; budget';
             showFilterBtn = true;
             filterStatus = 'NEEDS_REVIEW';
             const ambRows = detailRows.filter((r) => statusDisplay(r).code === 'NEEDS_REVIEW');
             stepsHtml = `
-                <div class="pcw-cdm-step-item"><span>Condition</span><strong>Uncertain family / zero budget / review needed</strong></div>
+                <div class="pcw-cdm-step-item"><span>Condition</span><strong>Uncertain mapping / actual &gt; budget / review needed</strong></div>
                 <div class="pcw-cdm-step-item"><span>Need to Review</span><strong>${fmt(ambRows.length)} of ${fmt(detailRows.length)}</strong></div>
             `;
             rowsHtml = ambRows.map(rowLineHtml).join('');
@@ -710,7 +741,7 @@
             subtitle = 'Validation Overview';
             title = 'Total PO Value';
             val = `${esc(s.currency || 'INR')} ${fmtDec(s.total_po_value, 2)}`;
-            formula = 'Total PO Value = Sum of PORATE × TOT_POQTY (unique PO items)';
+            formula = 'Total PO Value = ∑ TOTVALUE once per PO item (same as TOTVALUE footer)';
             stepsHtml = `
                 <div class="pcw-cdm-step-item"><span>Currency</span><strong>${esc(s.currency || 'INR')}</strong></div>
                 <div class="pcw-cdm-step-item"><span>Total PO Value</span><strong>${fmtDec(s.total_po_value, 2)}</strong></div>
@@ -787,23 +818,17 @@
             title = 'Total Net Value';
             val = fmt(s.total_po_value);
             unit = curr;
-            formula = 'Total Net Value = ∑ (TOT_POQTY × PORATE) once per PO item';
+            formula = 'Total Net Value = ∑ TOTVALUE once per PO item (SAP net; not PORATE × qty)';
             const seenIt = {};
             const itRows = detailRows.filter(r => {
                 const it = String(r.poitem || r.po_item || r.item || '').trim();
                 if (it && !seenIt[it]) { seenIt[it] = true; return true; }
                 return !it;
             });
-            const poLineNetOf = (r) => {
-                const rate = nVal(r.porate ?? r.po_unit_cost ?? r.net_price ?? r.actual_cost);
-                const q = Number(r.tot_poqty || r.order_qty || 0) || 0;
-                if (rate !== null && q > 0) return rate * q;
-                return Number(r.totvalue ?? r.net_value ?? r.so_wise_po_val ?? 0) || 0;
-            };
             stepsHtml = itRows.map(r => {
                 const q = Number(r.tot_poqty || r.order_qty || 0) || 0;
                 const rate = nVal(r.porate ?? r.po_unit_cost ?? r.net_price ?? r.actual_cost) || 0;
-                return `<div class="pcw-cdm-step-item"><span>PO Item #${esc(r.poitem || r.po_item || r.item)} (${qty(q)} × ₹${fmtDec(rate, 4)})</span><strong>₹${money(poLineNetOf(r))}</strong></div>`;
+                return `<div class="pcw-cdm-step-item"><span>PO Item #${esc(r.poitem || r.po_item || r.item)} · TOTVALUE</span><strong>₹${money(poLineNetValue(r))}</strong></div>`;
             }).join('')
                 + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Net Value</span><strong>₹${fmt(s.total_po_value)} ${esc(curr)}</strong></div>`;
             rowsHtml = itRows.map((r, i) => {
@@ -814,7 +839,7 @@
                 <td><strong>${esc(r.material)}</strong><br><small style="color:#64748b;">${esc(r.mat_desc || '')}</small></td>
                 <td class="num">${qty(q)} ${esc(r.ouom || uom)}</td>
                 <td class="num">₹${fmtDec(rate, 4)}</td>
-                <td class="num">₹${money(poLineNetOf(r))}</td>
+                <td class="num">₹${money(poLineNetValue(r))}</td>
                 <td>${statusPill(r.status, r)}</td>
             </tr>`;
             }).join('');
@@ -988,6 +1013,12 @@
     }
 
     function showSpinner(on) {
+        // Prefer shared rptLoader so % progress reaches 100% and hide clears cleanly
+        if (window.rptLoader && typeof window.rptLoader.show === 'function') {
+            if (on) window.rptLoader.show({ solid: true });
+            else window.rptLoader.hide(true);
+            return;
+        }
         if (spinner) spinner.hidden = !on;
         document.body.classList.toggle('rpt-loading', !!on);
     }
@@ -1015,22 +1046,6 @@
             return `${u.toString()}#page=${page}&toolbar=0&navpanes=0&scrollbar=0&view=FitH`;
         }
         return `${u.toString()}#page=${page}`;
-    }
-
-    /** Warm-cache PO PDF on first search (local EVOL folder; SAP only if missing). */
-    async function ensureLocalPoPdfCache(po) {
-        const digits = String(po || '').replace(/\D/g, '');
-        if (!/^\d{1,10}$/.test(digits)) return;
-        try {
-            const url = pdfUrlFor(digits, { ensure: true, clean: false });
-            await fetch(url, {
-                headers: { Accept: 'application/json' },
-                credentials: 'same-origin',
-                cache: 'no-store',
-            });
-        } catch (_) {
-            /* non-blocking */
-        }
     }
 
     let esignPdfBlobUrl = '';
@@ -1441,19 +1456,66 @@
     function formatEsignLogTime(raw) {
         const s = String(raw || '').trim();
         if (!s) return '—';
+        // Already Mumbai stamp (PDF / save): 26/05/2026 4:07 PM
+        if (/IST/i.test(s) || /^\d{2}\/\d{2}\/\d{4}\s+\d{1,2}:\d{2}\s*(AM|PM)\b/i.test(s)) return s;
         const d = new Date(s.replace(' ', 'T'));
         if (Number.isNaN(d.getTime())) return s;
+        return mumbaiLocalStampLabel(d);
+    }
+
+    /**
+     * Mumbai local for PDF next to signature — matches sample: 26/05/2026 4:07 PM
+     */
+    function mumbaiLocalStampLabel(dateObj) {
+        const d = dateObj instanceof Date ? dateObj : new Date();
         try {
-            return d.toLocaleString(undefined, {
-                year: 'numeric',
-                month: 'short',
+            const parts = new Intl.DateTimeFormat('en-GB', {
+                timeZone: 'Asia/Kolkata',
                 day: '2-digit',
-                hour: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: 'numeric',
                 minute: '2-digit',
-            });
+                hour12: true,
+            }).formatToParts(d);
+            const get = (type) => parts.find((p) => p.type === type)?.value || '';
+            const day = get('day');
+            const month = get('month');
+            const year = get('year');
+            let hour = get('hour');
+            const minute = get('minute');
+            const dayPeriod = (get('dayPeriod') || '').toUpperCase().replace(/\./g, '');
+            // Drop leading zero on hour to match sample "4:07 PM"
+            hour = String(Number(hour) || hour);
+            return `${day}/${month}/${year} ${hour}:${minute} ${dayPeriod}`.trim();
         } catch (_) {
-            return s;
+            return d.toISOString();
         }
+    }
+
+    /** Current Mumbai (Asia/Kolkata) local stamp for Signed already UI. */
+    function mumbaiLocalNowLabel() {
+        return mumbaiLocalStampLabel(new Date());
+    }
+
+    function showEsignSignedAlready(whenLabel, who) {
+        // Footer shows Save only — status goes to toast; modal auto-closes after save
+        const stamp = String(whenLabel || mumbaiLocalNowLabel()).trim();
+        const person = String(who || $('pcwEsignLoginUser')?.textContent || cfg.currentUser || 'User').trim();
+        setEsignLogDetails({
+            username: person,
+            created_at: stamp,
+            action: 'esign',
+            status: 'Signed already',
+            success: true,
+        });
+    }
+
+    function clearEsignSignedAlready() {
+        const saveBtn = $('pcwEsignSave');
+        if (saveBtn) saveBtn.classList.remove('is-signed');
+        const saveLabel = $('pcwEsignSaveLabel');
+        if (saveLabel && esignLaunchMode !== 'sent') saveLabel.textContent = 'Save';
     }
 
     function formatEsignLogAction(action) {
@@ -1462,7 +1524,7 @@
         if (a === 'pass' || a === 'pass_po') return 'Pass PO';
         if (a === 'esign' || a === 'e-sign' || a === 'sign') return 'E-Sign';
         if (a === 'approve' || a === 'approved') return 'Approved';
-        if (a === 'save' || a === 'save_signed') return 'Save signed';
+        if (a === 'save' || a === 'save_signed') return 'Save Signed PDF';
         return a.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
     }
 
@@ -1483,16 +1545,18 @@
             return;
         }
         const person = String(row.username || row.user_id || '').trim() || '—';
-        const status = String(row.status || (row.success ? 'OK' : 'Failed')).trim() || '—';
+        let status = String(row.status || (row.success ? 'OK' : 'Failed')).trim() || '—';
+        if (/e-?sign completed/i.test(status)) status = 'Signed already';
         const ok = row.success !== false && !/fail|error|reject/i.test(status);
+        const timeLabel = formatEsignLogTime(row.created_at || row.signed_at_mumbai || '');
         userEl.textContent = person;
-        timeEl.textContent = formatEsignLogTime(row.created_at);
+        timeEl.textContent = timeLabel;
         actionEl.textContent = formatEsignLogAction(row.action);
         statusEl.textContent = status;
         wrap?.classList.remove('is-empty');
         wrap?.classList.add(ok ? 'is-ok' : 'is-fail');
         userEl.title = person;
-        timeEl.title = String(row.created_at || '');
+        timeEl.title = String(row.created_at || row.signed_at_mumbai || '');
         statusEl.title = status;
     }
 
@@ -1527,11 +1591,43 @@
         }
     }
 
+    /** @type {'pass'|'esign'|'sent'} */
+    let esignLaunchMode = 'esign';
+
+    function applyEsignSaveLabel(mode) {
+        const label = $('pcwEsignSaveLabel');
+        const saveBtn = $('pcwEsignSave');
+        const sentHint = $('pcwEsignSentHint');
+        const assignBlock = $('pcwEsignAssignBlock');
+        const isSent = mode === 'sent';
+        if (label) label.textContent = isSent ? 'Send PO' : 'Save Signed PDF';
+        if (saveBtn) {
+            saveBtn.classList.remove('is-signed');
+            saveBtn.title = isSent
+                ? 'Sign PDF and send/forward to the selected user'
+                : 'Save the signed PDF to EVOL/uploads/po_esign (PO-{number}.pdf)';
+            const icon = saveBtn.querySelector('.material-icons-round');
+            if (icon) icon.textContent = isSent ? 'send' : 'save';
+        }
+        if (assignBlock) assignBlock.hidden = !isSent;
+        if (sentHint) sentHint.hidden = true;
+        if ($('pcwEsignSub')) {
+            $('pcwEsignSub').textContent = isSent
+                ? 'Sign and send this PO to the next user'
+                : 'Place signature, then click Save Signed PDF — unsigned views are never saved';
+        }
+        if ($('pcwEsignTitle')) {
+            $('pcwEsignTitle').textContent = isSent ? 'Send PO' : 'PO E-Signature';
+        }
+    }
+
     function openEsignModal(opts) {
         const po = String(opts?.po || headerPo() || '').replace(/\D/g, '');
         const requestId = String(opts?.requestId || '');
         // Approved button only after Pass PO click
         const showApprove = !!opts?.fromPassPo;
+        const fromSent = !!opts?.fromSent;
+        esignLaunchMode = fromSent ? 'sent' : (showApprove ? 'pass' : 'esign');
         const shell = $('pcwEsignModal');
         if (!shell || !po) return;
         if ($('pcwEsignPo')) $('pcwEsignPo').value = po;
@@ -1548,9 +1644,13 @@
             $('pcwEsignAssignUser').classList.remove('is-invalid');
         }
         resetEsignLogDetails();
+        clearEsignSignedAlready();
+        showEsignSapMessage('', '');
         void loadEsignLogDetails(po);
-        // eSign toolbar → hide Approved; Pass PO → show Approved
+        // eSign toolbar → hide Approved; Pass PO → show Approved; Sent → send mode
         shell.classList.toggle('is-from-pass-po', showApprove);
+        shell.classList.toggle('is-from-sent', fromSent);
+        applyEsignSaveLabel(esignLaunchMode);
         const approveBtn = $('pcwEsignApprove');
         const approveHint = $('pcwEsignApproveHint');
         if (approveBtn) {
@@ -1581,6 +1681,9 @@
         requestAnimationFrame(() => {
             shell.classList.add('is-open');
             void loadEsignPdfClean(po);
+            if (fromSent) {
+                $('pcwEsignAssignUser')?.focus();
+            }
         });
         initEsignCanvas();
         void loadUserEsignFromDb();
@@ -1609,13 +1712,19 @@
         const shell = $('pcwEsignModal');
         if (!shell) return;
         shell.classList.remove('is-from-pass-po');
+        shell.classList.remove('is-from-sent');
+        esignLaunchMode = 'esign';
+        applyEsignSaveLabel('esign');
+        showEsignSapMessage('', '');
         const approveBtn = $('pcwEsignApprove');
         const approveHint = $('pcwEsignApproveHint');
+        const sentHint = $('pcwEsignSentHint');
         if (approveBtn) {
             approveBtn.hidden = true;
             approveBtn.setAttribute('aria-hidden', 'true');
         }
         if (approveHint) approveHint.hidden = true;
+        if (sentHint) sentHint.hidden = true;
         esignPdfRenderToken += 1;
         esignPdfDoc = null;
         if (esignPdfResizeObs) {
@@ -1667,7 +1776,8 @@
     }
 
     /**
-     * Keep only signature ink — remove white/gray fill, border frame, then crop.
+     * Keep only signature ink — remove white/gray fill / black scan bg, then optional crop.
+     * Dark ink (e.g. public/Esign/suparna.png) must NOT be treated as background.
      */
     function makeSignatureTransparent(dataUrl, opts) {
         const doCrop = !opts || opts.crop !== false;
@@ -1694,10 +1804,28 @@
                     ctx.drawImage(img, 0, 0, w, h);
                     const imageData = ctx.getImageData(0, 0, w, h);
                     const d = imageData.data;
+
+                    // Sample corners to detect black-scan background vs white paper
+                    const sampleLum = (x, y) => {
+                        const i = (Math.min(h - 1, Math.max(0, y)) * w + Math.min(w - 1, Math.max(0, x))) * 4;
+                        if (d[i + 3] < 16) return null;
+                        return 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+                    };
+                    const cornerLums = [
+                        sampleLum(2, 2), sampleLum(w - 3, 2),
+                        sampleLum(2, h - 3), sampleLum(w - 3, h - 3),
+                        sampleLum(Math.floor(w / 2), 2), sampleLum(2, Math.floor(h / 2)),
+                    ].filter((v) => v != null);
+                    const avgCorner = cornerLums.length
+                        ? cornerLums.reduce((a, b) => a + b, 0) / cornerLums.length
+                        : 255;
+                    const darkBg = avgCorner <= 55;
+
                     let minX = w;
                     let minY = h;
                     let maxX = 0;
                     let maxY = 0;
+                    let kept = 0;
 
                     for (let y = 0; y < h; y++) {
                         for (let x = 0; x < w; x++) {
@@ -1706,26 +1834,41 @@
                             const g = d[i + 1];
                             const b = d[i + 2];
                             const a = d[i + 3];
-                            if (a === 0) continue;
-
-                            const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-                            const sat = Math.max(r, g, b) - Math.min(r, g, b);
-                            // White / gray fill + light border → fully transparent
-                            const isBg = lum >= 185 || (lum >= 155 && sat < 48);
-                            if (isBg) {
+                            if (a < 8) {
                                 d[i + 3] = 0;
                                 continue;
                             }
 
-                            const inkAlpha = Math.max(0, Math.min(255, Math.round((255 - lum) * 1.55)));
-                            if (inkAlpha < 36) {
+                            const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+                            const sat = Math.max(r, g, b) - Math.min(r, g, b);
+                            // White / light gray paper always transparent
+                            const isLightBg = lum >= 185 || (lum >= 155 && sat < 48);
+                            // Only strip near-black as background when the scan itself is dark-backed.
+                            // Pure black plate (lum≈0) goes; dark brown/burgundy ink stays.
+                            const isDarkPlate = darkBg && lum <= 18 && sat < 22;
+                            if (isLightBg || isDarkPlate) {
+                                d[i + 3] = 0;
+                                continue;
+                            }
+
+                            // Keep ink visible on white PDF (force near-black stroke)
+                            let inkAlpha;
+                            if (darkBg) {
+                                // Dark-bg scans: ink is often dark too — use distance from pure black + chroma
+                                inkAlpha = Math.max(sat * 2.2, (lum - 8) * 6, a * 0.85);
+                                inkAlpha = Math.max(0, Math.min(255, Math.round(inkAlpha)));
+                            } else {
+                                inkAlpha = Math.max(0, Math.min(255, Math.round((255 - lum) * 1.55)));
+                            }
+                            if (inkAlpha < 28) {
                                 d[i + 3] = 0;
                                 continue;
                             }
                             d[i] = 15;
                             d[i + 1] = 23;
                             d[i + 2] = 42;
-                            d[i + 3] = Math.min(a, inkAlpha);
+                            d[i + 3] = Math.min(255, Math.max(inkAlpha, 140));
+                            kept += 1;
 
                             if (x < minX) minX = x;
                             if (y < minY) minY = y;
@@ -1733,7 +1876,53 @@
                             if (y > maxY) maxY = y;
                         }
                     }
-                    ctx.putImageData(imageData, 0, 0);
+
+                    // If cleaning wiped the ink (dark burgundy on black scans), soft-fallback:
+                    // strip only near-pure black plate and force remaining pixels to dark ink.
+                    if (kept < 80) {
+                        ctx.clearRect(0, 0, w, h);
+                        ctx.drawImage(img, 0, 0, w, h);
+                        const raw = ctx.getImageData(0, 0, w, h);
+                        const rd = raw.data;
+                        kept = 0;
+                        minX = w; minY = h; maxX = 0; maxY = 0;
+                        for (let y = 0; y < h; y++) {
+                            for (let x = 0; x < w; x++) {
+                                const i = (y * w + x) * 4;
+                                const a = rd[i + 3];
+                                if (a < 8) {
+                                    rd[i + 3] = 0;
+                                    continue;
+                                }
+                                const lum = 0.299 * rd[i] + 0.587 * rd[i + 1] + 0.114 * rd[i + 2];
+                                const sat = Math.max(rd[i], rd[i + 1], rd[i + 2]) - Math.min(rd[i], rd[i + 1], rd[i + 2]);
+                                if (lum <= 12 && sat < 18) {
+                                    rd[i + 3] = 0;
+                                    continue;
+                                }
+                                if (lum >= 230 && sat < 30) {
+                                    rd[i + 3] = 0;
+                                    continue;
+                                }
+                                rd[i] = 15;
+                                rd[i + 1] = 23;
+                                rd[i + 2] = 42;
+                                rd[i + 3] = 230;
+                                kept += 1;
+                                if (x < minX) minX = x;
+                                if (y < minY) minY = y;
+                                if (x > maxX) maxX = x;
+                                if (y > maxY) maxY = y;
+                            }
+                        }
+                        if (kept < 40) {
+                            resolve(src);
+                            return;
+                        }
+                        ctx.putImageData(raw, 0, 0);
+                    } else {
+                        ctx.putImageData(imageData, 0, 0);
+                    }
 
                     // Keep full canvas size when burning to PDF so placement matches on-screen stamp
                     if (!doCrop) {
@@ -1813,6 +2002,11 @@
         }
         if (!(opts && opts.keepRaw) && $('pcwEsignRawSig')) {
             $('pcwEsignRawSig').value = dataUrl;
+        }
+        // Folder signatures: show raw ink in Saved box (cleaning runs only on PDF Save)
+        if (opts && opts.keepRawPreview) {
+            applyEsignSignatureUi(dataUrl, fromDb);
+            return;
         }
         void makeSignatureTransparent(dataUrl).then((transparentUrl) => {
             const out = transparentUrl || dataUrl;
@@ -1960,6 +2154,7 @@
 
     async function loadUserEsignFromDb() {
         const endpoint = cfg.esignSignatureUrl || 'purchase-order/esign-signature';
+        const loginUser = String($('pcwEsignLoginUser')?.textContent || cfg.currentUser || '').trim();
         try {
             const res = await fetch(`${endpoint}?_=${Date.now()}`, {
                 headers: { Accept: 'application/json' },
@@ -1969,10 +2164,59 @@
             const json = await res.json();
             const data = json?.data || {};
             if (res.ok && json.success !== false && data.found && data.signature_data) {
-                setEsignSignatureData(String(data.signature_data), true);
+                // Login username → Esign/{username}.png (or .cleaned.png)
+                const fromFile = String(data.source || '') === 'file';
+                setEsignSignatureData(String(data.signature_data), true, {
+                    skipDbSave: true,
+                    // Keep folder ink for Saved preview; PDF burn still cleans on Save
+                    keepRawPreview: fromFile,
+                });
+                const empty = $('pcwEsignSavedEmpty');
+                if (empty && data.file) {
+                    empty.title = `Loaded from Esign/${data.file} for ${loginUser || data.username || 'user'}`;
+                }
                 return true;
             }
         } catch (_) {}
+        // Fallback: try public/Esign/{username}.cleaned.png then .png directly in browser
+        if (loginUser) {
+            const safe = loginUser.toLowerCase().replace(/[^a-z0-9._-]/g, '');
+            const aliases = [safe];
+            if (safe === 'suprana') aliases.push('suparna');
+            if (safe === 'suparna') aliases.push('suprana');
+            if (safe === 'shanthi') aliases.push('santhi');
+            if (safe === 'santhi') aliases.push('shanthi');
+            const base = String(cfg.publicBase || cfg.assetBase || '').replace(/\/$/, '')
+                || new URL('.', window.location.href).pathname.replace(/\/reports\/?$/, '').replace(/\/$/, '');
+            // Typical: /sap_reports/public/Esign/...
+            const roots = [
+                '/sap_reports/public/Esign',
+                `${base}/public/Esign`,
+                '/sap_reports/Esign',
+            ];
+            for (const name of aliases) {
+                for (const root of roots) {
+                    for (const file of [`${name}.cleaned.png`, `${name}.png`]) {
+                        const url = `${root}/${file}?_=${Date.now()}`;
+                        try {
+                            const imgRes = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+                            if (!imgRes.ok) continue;
+                            const blob = await imgRes.blob();
+                            if (!blob || blob.size < 50) continue;
+                            const dataUrl = await new Promise((resolve, reject) => {
+                                const reader = new FileReader();
+                                reader.onload = () => resolve(String(reader.result || ''));
+                                reader.onerror = reject;
+                                reader.readAsDataURL(blob);
+                            });
+                            if (!dataUrl) continue;
+                            setEsignSignatureData(dataUrl, true, { skipDbSave: true, keepRawPreview: true });
+                            return true;
+                        } catch (_) { /* try next */ }
+                    }
+                }
+            }
+        }
         setEsignCreateMode(true);
         return false;
     }
@@ -2006,6 +2250,19 @@
             img.src = dataUrl;
             img.alt = 'Signature stamp';
         }
+        const when = mumbaiLocalStampLabel(new Date());
+        stamp.dataset.signedAt = when;
+        let timeEl = stamp.querySelector('.pcw-esign-stamp-time');
+        if (!timeEl) {
+            timeEl = document.createElement('span');
+            timeEl.className = 'pcw-esign-stamp-time';
+            const body = stamp.querySelector('.pcw-esign-stamp-body');
+            if (body) body.appendChild(timeEl);
+            else stamp.appendChild(timeEl);
+        }
+        timeEl.textContent = when;
+        timeEl.removeAttribute('aria-hidden');
+        timeEl.title = `Mumbai local · ${when}`;
         const rm = document.createElement('button');
         rm.type = 'button';
         rm.className = 'pcw-esign-stamp-remove';
@@ -2046,13 +2303,16 @@
         const w = canvas.clientWidth;
         const h = canvas.clientHeight;
         const count = liveEsignStamps().length;
-        const stampW = Math.min(120, Math.max(80, w * 0.14));
-        stamp.style.width = `${stampW}px`;
+        const imgW = Math.min(110, Math.max(72, w * 0.12));
+        const img = stamp.querySelector('img');
+        if (img) img.style.width = `${imgW}px`;
+        // Approx stamp width = signature + Mumbai time label
+        const stampW = imgW + 118;
         // Stagger each new place so multiple stamps don't stack exactly
         const slots = [
-            { x: 0.12, y: 0.78 }, // Prepared By
-            { x: 0.40, y: 0.78 }, // Checked By
-            { x: 0.70, y: 0.78 }, // Authorised Signatory
+            { x: 0.08, y: 0.78 }, // Prepared By
+            { x: 0.36, y: 0.78 }, // Checked By
+            { x: 0.64, y: 0.78 }, // Authorised Signatory
         ];
         const slot = slots[Math.min(count - 1, slots.length - 1)];
         const extra = Math.max(0, count - slots.length) * 18;
@@ -2074,15 +2334,24 @@
             const canvas = pageEl?.querySelector('canvas');
             if (!canvas) return;
             const cRect = canvas.getBoundingClientRect();
-            const sRect = stamp.getBoundingClientRect();
+            const img = stamp.querySelector('img');
+            const imgRect = (img || stamp).getBoundingClientRect();
+            const timeEl = stamp.querySelector('.pcw-esign-stamp-time');
+            const timeRect = timeEl?.getBoundingClientRect();
             const sw = cRect.width || 1;
             const sh = cRect.height || 1;
+            const signedAt = String(stamp.dataset.signedAt || timeEl?.textContent || mumbaiLocalStampLabel()).trim();
             const place = {
                 page: Number(pageEl?.dataset.page || 1),
-                x_pct: ((sRect.left - cRect.left) / sw) * 100,
-                y_pct: ((sRect.top - cRect.top) / sh) * 100,
-                w_pct: (sRect.width / sw) * 100,
-                h_pct: (sRect.height / sh) * 100,
+                // Image-only box so PDF burn matches signature ink (time drawn separately)
+                x_pct: ((imgRect.left - cRect.left) / sw) * 100,
+                y_pct: ((imgRect.top - cRect.top) / sh) * 100,
+                w_pct: (imgRect.width / sw) * 100,
+                h_pct: (imgRect.height / sh) * 100,
+                signed_at: signedAt,
+                time_x_pct: timeRect ? ((timeRect.left - cRect.left) / sw) * 100 : null,
+                time_y_pct: timeRect ? ((timeRect.top - cRect.top) / sh) * 100 : null,
+                time_h_pct: timeRect ? (timeRect.height / sh) * 100 : null,
             };
             if (place.w_pct > 0.5 && place.h_pct > 0.5) out.push(place);
         });
@@ -2106,9 +2375,12 @@
 
     function syncPassRevertButtons(summary) {
         const passBtn = $('pcwPassPoBtn');
+        const sentBtn = $('pcwSentPoBtn');
+        const sentToolbar = $('pcwOpenSentBtn');
         const el = $('pcwPassStatus');
         const po = headerPo();
         const mayPass = cfg.canPassPo !== false;
+        const mayEsign = cfg.canEsign !== false;
         const s = summary || {};
         const exceptions = Number(s.exceptions || 0);
         const review = Number(s.needs_review || 0);
@@ -2143,6 +2415,20 @@
                         : !canPassRows
                             ? 'All lines must Pass before Pass PO'
                             : 'Pass PO (Value = X)';
+        }
+        // SENT: allow as soon as a PO number is present (does not need compare rows loaded)
+        const enableSent = mayEsign && !!po;
+        if (sentBtn) {
+            sentBtn.disabled = !enableSent;
+            sentBtn.title = !mayEsign
+                ? 'No eSign / send permission'
+                : !po
+                    ? 'Enter / load a purchase order first'
+                    : 'Send / forward this PO to a user';
+        }
+        if (sentToolbar) {
+            sentToolbar.disabled = !enableSent;
+            sentToolbar.title = sentBtn?.title || 'Send this PO to a user';
         }
         if (!el) return;
         el.classList.remove('is-passed', 'is-partial', 'is-pending');
@@ -2188,21 +2474,40 @@
                         : `PASS/REVERT returned empty response (HTTP ${res.status}).`
                 );
             }
-            if (!res.ok || json.success === false) {
-                throw new Error(json.message || json.error || `HTTP ${res.status}`);
+            const sapMsg = String(
+                json?.message
+                || json?.data?.message
+                || json?.error
+                || ''
+            ).trim();
+            const sapType = String(
+                json?.message_type
+                || json?.data?.message_type
+                || ''
+            ).trim().toUpperCase().charAt(0);
+            if (!res.ok || json.success === false || sapType === 'E') {
+                applyApprovedStatus(po, 'NotApproved');
+                setPassStatus(summarizeRows(rows));
+                throw new Error(sapMsg || json.message || json.error || `HTTP ${res.status}`);
             }
             if (isRevert) {
                 applyApprovedStatus(po, 'NotApproved');
                 setPassStatus(summarizeRows(rows));
                 const toast = document.createElement('div');
                 toast.className = 'pcw-toast is-ok';
-                toast.textContent = `PO ${po} reverted (Value = blank)`;
+                toast.textContent = sapMsg || `PO ${po} reverted`;
                 document.body.appendChild(toast);
-                setTimeout(() => toast.remove(), 3200);
+                setTimeout(() => toast.remove(), 4200);
                 return;
             }
+            // MessageType S = approved
             applyApprovedStatus(po, 'Approved');
             setPassStatus(summarizeRows(rows));
+            const toast = document.createElement('div');
+            toast.className = 'pcw-toast is-ok';
+            toast.textContent = sapMsg || `PO ${po} approved`;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 4500);
             const pdfUrl = pdfUrlFor(po);
             const requestId = String(json?.data?.request_id || '');
             openEsignModal({ po, pdfUrl, requestId, fromPassPo: true });
@@ -2214,7 +2519,7 @@
         }
     }
 
-    /** Open e-sign page. Pass PO sets fromPassPo so Approved button shows. */
+    /** Open e-sign page. Pass PO sets fromPassPo so Approved button shows. Sent opens send/forward mode. */
     function passPoAndOpenEsign(opts = {}) {
         const po = headerPo();
         if (!po) {
@@ -2226,7 +2531,368 @@
             pdfUrl: pdfUrlFor(po),
             requestId: String(Date.now() % 1000000000),
             fromPassPo: !!opts.fromPassPo,
+            fromSent: !!opts.fromSent,
         });
+    }
+
+    /** Build workbench URL for this PO (optionally auto-open eSign / Pass PO). */
+    function workbenchActionUrl(action) {
+        const po = headerPo();
+        if (!po) return '';
+        const page = cfg.pageUrl || 'purchase-order';
+        const u = new URL(page, window.location.origin);
+        u.searchParams.set('view', 'costing');
+        u.searchParams.set('po', po);
+        const mat = selectedMat() || String(cfg.matCat || 'trims');
+        if (mat) u.searchParams.set('mat_cat', mat);
+        if (action === 'esign' || action === 'pass') {
+            u.searchParams.set('open', action);
+        }
+        return u.toString();
+    }
+
+    /** Open eSign / Pass PO flow in a new browser tab (falls back in-page if blocked). */
+    function openWorkbenchActionInNewTab(action) {
+        const po = headerPo();
+        if (!po) {
+            alert('Load a purchase order first.');
+            return;
+        }
+        if (action === 'esign' && cfg.canEsign === false) {
+            alert('You do not have eSign access for PO Costing.');
+            return;
+        }
+        if (action === 'pass' && cfg.canPassPo === false) {
+            alert('You do not have Pass PO access for PO Costing.');
+            return;
+        }
+        const url = workbenchActionUrl(action);
+        if (!url) return;
+        // Prefer a user-gesture <a> click — less likely to be blocked than window.open()
+        let opened = false;
+        try {
+            const a = document.createElement('a');
+            a.href = url;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            opened = true;
+        } catch (_) {
+            opened = false;
+        }
+        if (!opened) {
+            try {
+                opened = !!window.open(url, '_blank', 'noopener');
+            } catch (_) {
+                opened = false;
+            }
+        }
+        // Silent fallback: open the same eSign / Pass flow in this tab
+        if (!opened) {
+            passPoAndOpenEsign({ fromPassPo: action === 'pass' });
+        }
+    }
+
+    function sentShowError(msg) {
+        const el = $('pcwSentError');
+        if (!el) return;
+        el.textContent = msg || '';
+        el.hidden = !msg;
+    }
+
+    let sentUsersCache = [];
+    let sentUserActiveIdx = -1;
+
+    function sentComboEls() {
+        return {
+            combo: $('pcwSentUserCombo'),
+            hiddenId: $('pcwSentUser'),
+            hiddenName: $('pcwSentUsername'),
+            search: $('pcwSentUserSearch'),
+            list: $('pcwSentUserList'),
+            clearBtn: $('pcwSentUserClear'),
+            emailEl: $('pcwSentEmail'),
+        };
+    }
+
+    function clearSentUserSelection(keepQuery) {
+        const { combo, hiddenId, hiddenName, search, clearBtn, emailEl } = sentComboEls();
+        if (hiddenId) hiddenId.value = '';
+        if (hiddenName) hiddenName.value = '';
+        if (!keepQuery && search) search.value = '';
+        if (emailEl) emailEl.value = '';
+        if (clearBtn) clearBtn.hidden = true;
+        combo?.classList.remove('is-invalid');
+        sentShowError('');
+    }
+
+    function setSentUserSelection(user) {
+        const { combo, hiddenId, hiddenName, search, clearBtn, emailEl } = sentComboEls();
+        if (!user) {
+            clearSentUserSelection(false);
+            return;
+        }
+        if (hiddenId) hiddenId.value = String(user.id || '');
+        if (hiddenName) hiddenName.value = String(user.username || '');
+        if (search) search.value = String(user.username || '');
+        if (emailEl) emailEl.value = String(user.email || '');
+        if (clearBtn) clearBtn.hidden = !user.id;
+        combo?.classList.remove('is-invalid');
+        sentShowError('');
+        closeSentUserList();
+    }
+
+    function closeSentUserList() {
+        const { combo, search, list } = sentComboEls();
+        if (list) list.hidden = true;
+        combo?.classList.remove('is-open');
+        search?.setAttribute('aria-expanded', 'false');
+        sentUserActiveIdx = -1;
+    }
+
+    function openSentUserList() {
+        const { combo, search, list } = sentComboEls();
+        if (!list) return;
+        list.hidden = false;
+        combo?.classList.add('is-open');
+        search?.setAttribute('aria-expanded', 'true');
+    }
+
+    function filteredSentUsers(query) {
+        const q = String(query || '').trim().toLowerCase();
+        if (!q) return sentUsersCache.slice(0, 80);
+        return sentUsersCache.filter((u) => {
+            const hay = `${u.username} ${u.email} ${u.id}`.toLowerCase();
+            return hay.includes(q);
+        }).slice(0, 80);
+    }
+
+    function renderSentUserList(query, openIfNeeded) {
+        const { list } = sentComboEls();
+        if (!list) return;
+        const rows = filteredSentUsers(query);
+        const selectedId = String($('pcwSentUser')?.value || '');
+        if (!rows.length) {
+            list.innerHTML = '<li class="pcw-sent-combo-empty">No matching users</li>';
+        } else {
+            list.innerHTML = rows.map((u, i) => {
+                const selected = selectedId && selectedId === String(u.id);
+                return `<li class="pcw-sent-combo-option${selected ? ' is-selected' : ''}" role="option"
+                    data-idx="${i}" data-id="${esc(u.id)}" data-username="${esc(u.username)}" data-email="${esc(u.email)}"
+                    aria-selected="${selected ? 'true' : 'false'}">
+                    <span class="pcw-sent-combo-name">${esc(u.username)}</span>
+                    ${u.email ? `<span class="pcw-sent-combo-email">${esc(u.email)}</span>` : ''}
+                </li>`;
+            }).join('');
+        }
+        sentUserActiveIdx = rows.length ? 0 : -1;
+        highlightSentUserOption();
+        if (openIfNeeded !== false) openSentUserList();
+    }
+
+    function highlightSentUserOption() {
+        const { list } = sentComboEls();
+        if (!list) return;
+        list.querySelectorAll('.pcw-sent-combo-option').forEach((el, i) => {
+            el.classList.toggle('is-active', i === sentUserActiveIdx);
+        });
+        const active = list.querySelector('.pcw-sent-combo-option.is-active');
+        if (active && typeof active.scrollIntoView === 'function') {
+            active.scrollIntoView({ block: 'nearest' });
+        }
+    }
+
+    function pickSentUserFromOption(el) {
+        if (!el) return;
+        setSentUserSelection({
+            id: el.getAttribute('data-id') || '',
+            username: el.getAttribute('data-username') || '',
+            email: el.getAttribute('data-email') || '',
+        });
+    }
+
+    async function loadSentUsers() {
+        const search = $('pcwSentUserSearch');
+        if (!search) return;
+        const endpoint = cfg.usersUrl || 'purchase-order/users';
+        try {
+            const res = await fetch(`${endpoint}?limit=80&_=${Date.now()}`, {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+                cache: 'no-store',
+            });
+            const json = await res.json().catch(() => ({}));
+            const users = Array.isArray(json?.data?.users) ? json.data.users : [];
+            sentUsersCache = users.map((u) => ({
+                id: String(u.id ?? u.user_id ?? u.username ?? ''),
+                username: String(u.username || u.name || u.id || ''),
+                email: String(u.email || ''),
+            })).filter((u) => u.id || u.username);
+            const prevId = String($('pcwSentUser')?.value || '');
+            if (prevId) {
+                const match = sentUsersCache.find((u) => u.id === prevId);
+                if (match) setSentUserSelection(match);
+            }
+            renderSentUserList(search.value || '', false);
+            closeSentUserList();
+        } catch (_) {
+            /* keep existing options */
+        }
+    }
+
+    function openSentModal() {
+        const po = headerPo();
+        if (!po) {
+            alert('Load a purchase order first.');
+            return;
+        }
+        const shell = $('pcwSentModal');
+        if (!shell) return;
+        if ($('pcwSentPo')) $('pcwSentPo').value = po;
+        if ($('pcwSentPoLabel')) $('pcwSentPoLabel').textContent = `PO ${po}`;
+        if ($('pcwSentRemarks')) {
+            $('pcwSentRemarks').value = '';
+            $('pcwSentRemarks').classList.remove('is-invalid');
+        }
+        if ($('pcwSentStatus')) {
+            $('pcwSentStatus').value = '';
+            $('pcwSentStatus').classList.remove('is-invalid');
+        }
+        clearSentUserSelection(false);
+        $('pcwSentUserCombo')?.classList.remove('is-invalid');
+        sentShowError('');
+        shell.hidden = false;
+        shell.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('pcw-sent-open');
+        requestAnimationFrame(() => shell.classList.add('is-open'));
+        void loadSentUsers();
+        setTimeout(() => $('pcwSentUserSearch')?.focus(), 40);
+    }
+
+    function closeSentModal() {
+        const shell = $('pcwSentModal');
+        if (!shell) return;
+        closeSentUserList();
+        shell.classList.remove('is-open');
+        shell.setAttribute('aria-hidden', 'true');
+        document.body.classList.remove('pcw-sent-open');
+        setTimeout(() => { shell.hidden = true; }, 200);
+    }
+
+    async function submitSentMail() {
+        const po = String($('pcwSentPo')?.value || headerPo() || '').replace(/\D/g, '');
+        const userId = String($('pcwSentUser')?.value || '').trim();
+        const username = String($('pcwSentUsername')?.value || $('pcwSentUserSearch')?.value || '').trim();
+        const email = String($('pcwSentEmail')?.value || '').trim();
+        const remarks = String($('pcwSentRemarks')?.value || '').trim();
+        const statusSel = $('pcwSentStatus');
+        const status = String(statusSel?.value || '').trim();
+        $('pcwSentUserCombo')?.classList.remove('is-invalid');
+        statusSel?.classList.remove('is-invalid');
+        $('pcwSentRemarks')?.classList.remove('is-invalid');
+        sentShowError('');
+
+        if (!po) {
+            sentShowError('Purchase order is missing.');
+            return;
+        }
+        if (!userId && !username) {
+            $('pcwSentUserCombo')?.classList.add('is-invalid');
+            sentShowError('Select a username.');
+            $('pcwSentUserSearch')?.focus();
+            return;
+        }
+        if (!status) {
+            statusSel?.classList.add('is-invalid');
+            sentShowError('Enter a status.');
+            statusSel?.focus();
+            return;
+        }
+        if (!remarks) {
+            $('pcwSentRemarks')?.classList.add('is-invalid');
+            sentShowError('Note is required.');
+            $('pcwSentRemarks')?.focus();
+            return;
+        }
+
+        const btn = $('pcwSentSubmit');
+        if (btn?.classList.contains('is-loading') || btn?.disabled) return;
+        const label = btn?.querySelector('.pcw-sent-submit-label');
+        const cancelBtn = $('pcwSentCancel');
+        if (btn) {
+            btn.disabled = true;
+            btn.classList.add('is-loading');
+            btn.setAttribute('aria-busy', 'true');
+        }
+        if (label) label.textContent = 'Sending…';
+        if (cancelBtn) cancelBtn.disabled = true;
+        showSpinner(true);
+        try {
+            const endpoint = cfg.sendMailUrl || 'purchase-order/send-mail';
+            const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    po,
+                    user_id: userId,
+                    username,
+                    email,
+                    remarks,
+                    note: remarks,
+                    status,
+                }),
+            });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok || json.success === false) {
+                throw new Error(json.message || json.error || `HTTP ${res.status}`);
+            }
+            const toName = String(json?.data?.username || username);
+            const toEmail = String(json?.data?.email || email);
+            closeSentModal();
+            const toast = document.createElement('div');
+            const mailOk = json?.email_sent !== false && !json?.warning;
+            toast.className = mailOk ? 'pcw-toast is-ok' : 'pcw-toast is-warn';
+            toast.textContent = String(json?.message || (mailOk
+                ? `Mail sent to ${toName} (${toEmail})`
+                : `Saved for ${toName}, but email was not delivered`));
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), mailOk ? 4200 : 7000);
+            // Refresh activity feed if Status & Remarks is open / available
+            try {
+                if (typeof loadActivityFeed === 'function') {
+                    void loadActivityFeed(po);
+                }
+            } catch (_) {}
+        } catch (err) {
+            sentShowError(String(err.message || 'Could not send mail'));
+        } finally {
+            showSpinner(false);
+            if (btn) {
+                btn.disabled = false;
+                btn.classList.remove('is-loading');
+                btn.removeAttribute('aria-busy');
+            }
+            if (label) label.textContent = 'Send mail';
+            if (cancelBtn) cancelBtn.disabled = false;
+        }
+    }
+
+    function openSentPoFlow() {
+        if (cfg.canEsign === false) {
+            alert('You do not have send / eSign access for PO Costing.');
+            return;
+        }
+        const po = headerPo();
+        if (!po) {
+            alert('Enter a purchase order number first.');
+            $('po')?.focus();
+            return;
+        }
+        openSentModal();
     }
 
     async function revertPoApproval() {
@@ -2284,6 +2950,7 @@
             list.push({ page: pages.length, x_pct: 70, y_pct: 78, w_pct: 14, h_pct: 4.5 });
         }
 
+        const font = await pdfDoc.embedFont(PDFLib.StandardFonts.HelveticaBold);
         list.forEach((place) => {
             const pageIdx = Math.max(0, Math.min(pages.length - 1, (Number(place.page) || pages.length) - 1));
             const page = pages[pageIdx];
@@ -2299,13 +2966,145 @@
             x = Math.max(0, Math.min(x, width - sigW));
             y = Math.max(0, Math.min(y, height - sigH));
             page.drawImage(img, { x, y, width: sigW, height: sigH, opacity: 1 });
+
+            // Mumbai local date/time to the right of signature (sample: 26/05/2026 4:07 PM)
+            const when = String(place.signed_at || mumbaiLocalStampLabel()).trim();
+            if (when) {
+                const fontSize = Math.max(7, Math.min(10, height * 0.011));
+                let tx;
+                let ty;
+                if (place.time_x_pct != null && place.time_y_pct != null) {
+                    tx = width * (Number(place.time_x_pct) / 100);
+                    const timeH = height * (Number(place.time_h_pct || 1.2) / 100);
+                    ty = height - height * (Number(place.time_y_pct) / 100) - timeH + (timeH - fontSize) / 2;
+                } else {
+                    tx = x + sigW + Math.max(4, width * 0.006);
+                    ty = y + Math.max(0, (sigH - fontSize) / 2);
+                }
+                tx = Math.max(0, Math.min(tx, width - 8));
+                ty = Math.max(2, Math.min(ty, height - 2));
+                page.drawText(when, {
+                    x: tx,
+                    y: ty,
+                    size: fontSize,
+                    font,
+                    color: PDFLib.rgb(0.07, 0.07, 0.07),
+                });
+            }
         });
 
         const stamped = await pdfDoc.save({ useObjectStreams: false });
         return uint8ToBase64(stamped);
     }
 
-    /** Approved button: call POApprovalSet only (Value=X). No signed PDF. */
+    /** Build + POST signed PDF (shared by Save and Approved). */
+    async function postSignedPdfSave(po) {
+        const sig = String($('pcwEsignSigData')?.value || '');
+        if (!sig) {
+            throw new Error('Add a signature and place it on the PDF.');
+        }
+        const places = stampPlacementsAll();
+        if (!places.length) {
+            throw new Error('Click Place on PDF at least once, then drag each stamp where you want it.');
+        }
+        const place = places[0];
+        const cleanSig = await makeSignatureTransparent(sig, { crop: false });
+        const pdfUrl = pdfUrlFor(po, { page: 2 });
+        let signedPdf = '';
+        try {
+            signedPdf = await buildSignedPdfBase64(pdfUrl.split('#')[0], cleanSig || sig, places);
+        } catch (stampErr) {
+            throw new Error(String(stampErr.message || stampErr || 'Could not stamp signature onto PDF'));
+        }
+
+        const endpoint = cfg.esignSaveUrl || 'purchase-order/esign-save';
+        const requestId = $('pcwEsignRequestId')?.value || String(Date.now() % 1000000000);
+        const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+                po,
+                request_id: requestId,
+                signature_data: cleanSig || sig,
+                signed_pdf: signedPdf,
+                placement: 'multi',
+                placements: places,
+                assigned_user_id: '',
+                assigned_username: '',
+                assigned_email: '',
+                remarks: String($('pcwEsignRemarks')?.value || '').trim(),
+                send: false,
+                action: 'save_signed',
+                ...place,
+            }),
+        });
+        const rawText = await res.text();
+        let json = {};
+        try {
+            json = rawText ? JSON.parse(rawText) : {};
+        } catch (_) {
+            throw new Error(
+                rawText
+                    ? `E-sign save returned non-JSON (HTTP ${res.status}): ${rawText.slice(0, 180)}`
+                    : `E-sign save returned empty body (HTTP ${res.status}). Check PHP error log / post_max_size.`
+            );
+        }
+        if (!res.ok || json.success === false) {
+            throw new Error(json.message || json.error || `HTTP ${res.status}`);
+        }
+        return json;
+    }
+
+    /**
+     * Extract SAP MessageType / Message from approve API JSON.
+     * Sample E: { MessageType:"E", Message:"PO is not approved in SAP" }
+     * Sample S: { MessageType:"S", Message:"PO is approved in SAP" }
+     */
+    function extractSapApproveMessage(json) {
+        const dig = (obj, depth = 0) => {
+            if (!obj || typeof obj !== 'object' || depth > 8) return { type: '', message: '' };
+            const type = String(
+                obj.MessageType ?? obj.messageType ?? obj.message_type ?? obj.MsgType ?? ''
+            ).trim().toUpperCase().charAt(0);
+            const message = String(
+                obj.Message ?? obj.message ?? obj.MsgText ?? obj.error ?? ''
+            ).trim();
+            if (type || message) return { type, message };
+            for (const v of Object.values(obj)) {
+                if (v && typeof v === 'object') {
+                    const found = dig(v, depth + 1);
+                    if (found.type || found.message) return found;
+                }
+            }
+            return { type: '', message: '' };
+        };
+        const top = dig(json || {});
+        const nested = dig(json?.data?.approval?.body || json?.data?.approval || json?.data || {});
+        return {
+            type: top.type || nested.type || '',
+            message: top.message || nested.message || '',
+        };
+    }
+
+    function showEsignSapMessage(message, type) {
+        const el = $('pcwEsignSapMsg');
+        const text = String(message || '').trim();
+        if (!el) return;
+        if (!text) {
+            el.hidden = true;
+            el.textContent = '';
+            el.classList.remove('is-ok', 'is-err');
+            return;
+        }
+        const letter = String(type || '').trim().toUpperCase().charAt(0);
+        el.hidden = false;
+        el.textContent = text;
+        el.classList.toggle('is-ok', letter === 'S');
+        el.classList.toggle('is-err', letter === 'E' || letter !== 'S');
+    }
+
+    /** Approved: save signed PDF first, then call POApprovalSet (Value=X). */
     async function approveEsignOnly() {
         const po = String($('pcwEsignPo')?.value || headerPo() || '').replace(/\D/g, '');
         if (!po) {
@@ -2313,9 +3112,17 @@
             return;
         }
         const btn = $('pcwEsignApprove');
+        const saveBtn = $('pcwEsignSave');
         if (btn) btn.disabled = true;
+        if (saveBtn) saveBtn.disabled = true;
+        showEsignSapMessage('', '');
         showSpinner(true);
         try {
+            // 1) Save signed PDF
+            const saveJson = await postSignedPdfSave(po);
+            const mumbaiStamp = String(saveJson?.data?.signed_at_mumbai || '').trim() || mumbaiLocalNowLabel();
+
+            // 2) Approve in SAP
             const endpoint = cfg.passPoUrl || 'purchase-order/pass';
             const requestId = $('pcwEsignRequestId')?.value || String(Date.now() % 1000000000);
             const res = await fetch(endpoint, {
@@ -2341,25 +3148,49 @@
                         : `Approve API returned empty body (HTTP ${res.status}).`
                 );
             }
-            if (!res.ok || json.success === false) {
-                throw new Error(json.message || json.error || `HTTP ${res.status}`);
+            const sap = extractSapApproveMessage(json);
+            const sapMsg = sap.message
+                || String(json?.message || json?.data?.message || json?.error || '').trim();
+            const sapType = sap.type
+                || String(json?.message_type || json?.data?.message_type || '').trim().toUpperCase().charAt(0);
+
+            // MessageType E = unapproved / error — show SAP Message, keep modal open
+            if (!res.ok || json.success === false || sapType === 'E') {
+                applyApprovedStatus(po, 'NotApproved');
+                syncPassRevertButtons(summarizeRows(rows));
+                const errText = sapMsg || 'PO is not approved in SAP';
+                showEsignSapMessage(errText, 'E');
+                const toast = document.createElement('div');
+                toast.className = 'pcw-toast is-err';
+                toast.textContent = errText;
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 6000);
+                alert(errText);
+                if (btn) btn.disabled = false;
+                if (saveBtn) saveBtn.disabled = false;
+                return;
             }
-            // SAP Approve succeeded → APPROVEDSTATUS = Approved
+
+            // MessageType S = approved — show SAP Message
             applyApprovedStatus(po, 'Approved');
             syncPassRevertButtons(summarizeRows(rows));
+            const okText = sapMsg || 'PO is approved in SAP';
+            showEsignSapMessage(okText, 'S');
 
             const toast = document.createElement('div');
             toast.className = 'pcw-toast is-ok';
-            toast.textContent = `PO ${po} approved in SAP (POApprovalSet)`;
+            toast.textContent = `${okText} · ${mumbaiStamp}`;
             document.body.appendChild(toast);
-            setTimeout(() => toast.remove(), 3200);
-            closeEsignModal();
+            setTimeout(() => toast.remove(), 4500);
+            window.setTimeout(() => closeEsignModal(), 700);
         } catch (err) {
-            // Do not mark local APPROVED when SAP fails
-            alert(String(err.message || 'Approve API failed'));
+            const errText = String(err.message || 'Save / Approve failed');
+            showEsignSapMessage(errText, 'E');
+            alert(errText);
+            if (btn) btn.disabled = false;
+            if (saveBtn) saveBtn.disabled = false;
         } finally {
             showSpinner(false);
-            if (btn) btn.disabled = false;
         }
     }
 
@@ -2385,7 +3216,14 @@
         const assignName = String(assignOpt?.getAttribute('data-username') || assignOpt?.textContent || '').trim();
         const assignEmail = String($('pcwEsignAssignEmail')?.value || '').trim();
         const remarks = String($('pcwEsignRemarks')?.value || '').trim();
+        const isSendMode = esignLaunchMode === 'sent' || !!document.getElementById('pcwEsignModal')?.classList.contains('is-from-sent');
         assignSel?.classList.remove('is-invalid');
+        if (isSendMode && !assignId && !assignName) {
+            assignSel?.classList.add('is-invalid');
+            alert('Select a user in Assign to User before sending this PO.');
+            assignSel?.focus();
+            return;
+        }
         const place = places[0];
         const btn = $('pcwEsignSave');
         if (btn) btn.disabled = true;
@@ -2418,6 +3256,8 @@
                     assigned_username: assignName,
                     assigned_email: assignEmail,
                     remarks,
+                    send: isSendMode,
+                    action: isSendMode ? 'send' : 'save_signed',
                     ...place,
                 }),
             });
@@ -2438,41 +3278,410 @@
             // Save signed PDF only — does NOT approve in SAP and does NOT set local APPROVED
             syncPassRevertButtons(summarizeRows(rows));
 
-            // Open the signed PDF right after e-sign save (clean full-page view)
-            let fileUrl = String(json?.data?.file_url || '').trim()
-                || new URL(`purchase-order/signed-file?po=${encodeURIComponent(po)}`, window.location.href).toString();
-            if (fileUrl && !fileUrl.includes('#')) {
-                fileUrl += '#toolbar=0&navpanes=0&view=FitH';
-            }
-            try {
-                window.open(fileUrl, '_blank', 'noopener');
-            } catch (_) {}
+            const mumbaiStamp = String(json?.data?.signed_at_mumbai || '').trim() || mumbaiLocalNowLabel();
+            const signedBy = String(
+                $('pcwEsignLoginUser')?.textContent
+                || cfg.currentUser
+                || 'User'
+            ).trim();
+            showEsignSignedAlready(mumbaiStamp, signedBy);
+            if (btn) btn.disabled = true;
 
             const toast = document.createElement('div');
             toast.className = 'pcw-toast is-ok';
-            toast.innerHTML = '';
-            const msg = document.createElement('span');
-            msg.textContent = 'Signed PDF saved (not SAP approved)';
-            toast.appendChild(msg);
-            const link = document.createElement('a');
-            link.href = fileUrl;
-            link.target = '_blank';
-            link.rel = 'noopener';
-            link.textContent = 'Open PDF';
-            link.style.marginLeft = '10px';
-            link.style.color = '#fff';
-            link.style.fontWeight = '800';
-            link.style.textDecoration = 'underline';
-            toast.appendChild(link);
+            toast.textContent = isSendMode
+                ? `PO ${po} sent · ${mumbaiStamp}`
+                : `Save Signed PDF · PO-${String(po).replace(/^0+/, '') || po}.pdf · ${mumbaiStamp}`;
             document.body.appendChild(toast);
-            setTimeout(() => toast.remove(), 6000);
-            closeEsignModal();
+            setTimeout(() => toast.remove(), 4500);
+
+            // Close right after Save — footer stays Save-only (no Signed already UI)
+            window.setTimeout(() => {
+                closeEsignModal();
+            }, 400);
+
+            // Workflow: if current user is an assigned Viewer, mark Signed
+            try {
+                void workflowAckSigned(po);
+            } catch (_) {}
         } catch (err) {
             alert(String(err.message || 'Could not save e-sign'));
+            if (btn) btn.disabled = false;
         } finally {
             showSpinner(false);
-            if (btn) btn.disabled = false;
         }
+    }
+
+    /* ========== Workflow Assignment (Viewers / Approvers) ========== */
+    let wfViewers = [];
+    let wfApprovers = [];
+    let wfSelectedViewers = [];
+    let wfSelectedApprovers = [];
+    let wfSearchTimers = { viewer: null, approver: null };
+    let wfCurrentApprover = null;
+
+    function wfMsg(text, isErr) {
+        const el = $('pcwWorkflowMsg');
+        if (!el) return;
+        if (!text) {
+            el.hidden = true;
+            el.textContent = '';
+            return;
+        }
+        el.hidden = false;
+        el.textContent = text;
+        el.classList.toggle('is-err', !!isErr);
+    }
+
+    function wfStatusClass(status) {
+        const s = String(status || '');
+        if (/fail|reject/i.test(s)) return 'is-fail';
+        if (/approved|signed/i.test(s)) return 'is-ok';
+        if (/pending|e-sign|viewed|email/i.test(s)) return 'is-warn';
+        return 'is-info';
+    }
+
+    function wfUserKey(u) {
+        return String(u?.username || u?.id || '').trim().toLowerCase();
+    }
+
+    function renderWfChips(role) {
+        const isViewer = role === 'viewer';
+        const wrap = $(isViewer ? 'pcwWfViewerChips' : 'pcwWfApproverChips');
+        const list = isViewer ? wfSelectedViewers : wfSelectedApprovers;
+        if (!wrap) return;
+        if (!list.length) {
+            wrap.innerHTML = '<span style="font-size:11px;color:#94a3b8;font-weight:600;">No users selected</span>';
+            return;
+        }
+        wrap.innerHTML = list.map((u) => {
+            const name = esc(u.username || '');
+            const key = esc(wfUserKey(u));
+            return `<span class="pcw-wf-chip" data-user="${key}">${name}`
+                + `<button type="button" data-wf-remove="${key}" data-wf-role="${role}" title="Remove" aria-label="Remove">`
+                + `<span class="material-icons-round">close</span></button></span>`;
+        }).join('');
+    }
+
+    function renderWfStatusLists() {
+        const vEl = $('pcwWfViewerStatus');
+        const aEl = $('pcwWfApproverStatus');
+        const paint = (el, rows) => {
+            if (!el) return;
+            if (!rows.length) {
+                el.innerHTML = '<li><span class="pcw-wf-user" style="color:#94a3b8;font-weight:600;">No assignments yet</span></li>';
+                return;
+            }
+            el.innerHTML = rows.map((r) => {
+                const st = esc(r.status || 'Assigned');
+                return `<li><span class="pcw-wf-user">${esc(r.username || '—')}</span>`
+                    + `<span class="pcw-wf-st ${wfStatusClass(st)}">${st}</span></li>`;
+            }).join('');
+        };
+        paint(vEl, wfViewers);
+        paint(aEl, wfApprovers);
+        if ($('pcwWfViewerCount')) $('pcwWfViewerCount').textContent = String(wfViewers.length);
+        if ($('pcwWfApproverCount')) $('pcwWfApproverCount').textContent = String(wfApprovers.length);
+        const notifyBtn = $('pcwWfNotifyBtn');
+        if (notifyBtn) notifyBtn.disabled = !(wfViewers.length || wfApprovers.length || wfSelectedViewers.length || wfSelectedApprovers.length);
+
+        const decide = $('pcwWfDecideBox');
+        if (decide) {
+            const canDecide = wfCurrentApprover
+                && !/^(Approved|Rejected)$/i.test(String(wfCurrentApprover.status || ''));
+            decide.hidden = !canDecide;
+        }
+    }
+
+    function applyWorkflowData(data) {
+        wfViewers = Array.isArray(data?.viewers) ? data.viewers : [];
+        wfApprovers = Array.isArray(data?.approvers) ? data.approvers : [];
+        wfCurrentApprover = data?.current_user_approver || null;
+        wfSelectedViewers = wfViewers.map((r) => ({
+            id: r.user_id,
+            username: r.username,
+            email: r.email,
+        }));
+        wfSelectedApprovers = wfApprovers.map((r) => ({
+            id: r.user_id,
+            username: r.username,
+            email: r.email,
+        }));
+        renderWfChips('viewer');
+        renderWfChips('approver');
+        renderWfStatusLists();
+    }
+
+    async function loadWorkflow(poDigits) {
+        const po = String(poDigits || headerPo() || '').replace(/\D/g, '');
+        if (!po || !cfg.workflowUrl) return;
+        try {
+            const url = `${cfg.workflowUrl}?po=${encodeURIComponent(po)}&_=${Date.now()}`;
+            const res = await fetch(url, {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+                cache: 'no-store',
+            });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok || json.success === false) {
+                throw new Error(json.message || json.error || `HTTP ${res.status}`);
+            }
+            applyWorkflowData(json.data || {});
+        } catch (err) {
+            wfMsg(String(err.message || 'Could not load workflow'), true);
+        }
+    }
+
+    async function workflowAckOnOpen(poDigits) {
+        const po = String(poDigits || headerPo() || '').replace(/\D/g, '');
+        if (!po) return;
+        let wf = '';
+        let open = '';
+        try {
+            const sp = new URLSearchParams(window.location.search);
+            wf = String(sp.get('wf') || '').toLowerCase();
+            open = String(sp.get('open') || '').toLowerCase();
+        } catch (_) {}
+        if (wf === 'approver') {
+            window.setTimeout(() => {
+                $('pcwWfDecideBox')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 200);
+        }
+        if (!cfg.workflowAckUrl) return;
+        // Only ack when current user is likely a viewer (or opened via viewer/esign link)
+        if (wf !== 'viewer' && open !== 'esign' && wf !== '') {
+            // approver link — refresh only
+            return;
+        }
+        if (wf !== 'viewer' && open !== 'esign') {
+            // Normal open: still try ack (no-op if not assigned viewer)
+        }
+        const esignPending = wf === 'viewer' || open === 'esign';
+        try {
+            await fetch(cfg.workflowAckUrl, {
+                method: 'POST',
+                headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    po,
+                    action: esignPending ? 'esign_pending' : 'view',
+                    esign_pending: esignPending,
+                }),
+            });
+            await loadWorkflow(po);
+        } catch (_) {}
+    }
+
+    async function workflowAckSigned(poDigits) {
+        const po = String(poDigits || headerPo() || '').replace(/\D/g, '');
+        if (!po || !cfg.workflowAckUrl) return;
+        try {
+            await fetch(cfg.workflowAckUrl, {
+                method: 'POST',
+                headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ po, action: 'signed' }),
+            });
+            await loadWorkflow(po);
+        } catch (_) {}
+    }
+
+    async function searchWfUsers(q, role) {
+        const suggest = $(role === 'viewer' ? 'pcwWfViewerSuggest' : 'pcwWfApproverSuggest');
+        if (!suggest || !cfg.usersUrl) return;
+        const query = String(q || '').trim();
+        try {
+            const url = `${cfg.usersUrl}?q=${encodeURIComponent(query)}&limit=20`;
+            const res = await fetch(url, {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+            });
+            const json = await res.json().catch(() => ({}));
+            const users = Array.isArray(json?.data?.users) ? json.data.users : [];
+            const selected = role === 'viewer' ? wfSelectedViewers : wfSelectedApprovers;
+            const selectedKeys = new Set(selected.map(wfUserKey));
+            const filtered = users.filter((u) => !selectedKeys.has(wfUserKey(u)));
+            if (!filtered.length) {
+                suggest.innerHTML = '<button type="button" disabled>No users found</button>';
+                suggest.hidden = false;
+                return;
+            }
+            suggest.innerHTML = filtered.map((u) => {
+                const uname = esc(u.username || '');
+                const email = esc(u.email || '');
+                const id = esc(u.id ?? '');
+                return `<button type="button" role="option" data-wf-add="${uname}" data-wf-role="${role}"`
+                    + ` data-id="${id}" data-email="${email}" data-username="${uname}">`
+                    + `<strong>${uname}</strong><span>${email || 'no email'}</span></button>`;
+            }).join('');
+            suggest.hidden = false;
+        } catch (_) {
+            suggest.hidden = true;
+        }
+    }
+
+    function addWfUser(role, user) {
+        const list = role === 'viewer' ? wfSelectedViewers : wfSelectedApprovers;
+        const key = wfUserKey(user);
+        if (!key) return;
+        if (list.some((u) => wfUserKey(u) === key)) return;
+        list.push({
+            id: user.id ?? null,
+            username: String(user.username || '').trim(),
+            email: String(user.email || '').trim(),
+        });
+        renderWfChips(role);
+        renderWfStatusLists();
+    }
+
+    function removeWfUser(role, key) {
+        const k = String(key || '').toLowerCase();
+        if (role === 'viewer') {
+            wfSelectedViewers = wfSelectedViewers.filter((u) => wfUserKey(u) !== k);
+        } else {
+            wfSelectedApprovers = wfSelectedApprovers.filter((u) => wfUserKey(u) !== k);
+        }
+        renderWfChips(role);
+        renderWfStatusLists();
+    }
+
+    function setWfBtnLoading(btn, on, labelIdle) {
+        if (!btn) return;
+        btn.classList.toggle('is-loading', !!on);
+        btn.disabled = !!on;
+        const label = btn.querySelector('.pcw-wf-label');
+        if (label && on) label.textContent = 'Working…';
+        if (label && !on && labelIdle) label.textContent = labelIdle;
+    }
+
+    async function saveWorkflowAssignments() {
+        const po = headerPo();
+        if (!po) {
+            wfMsg('Load a purchase order first.', true);
+            return;
+        }
+        if (cfg.canAssign === false) {
+            wfMsg('You do not have assign access for PO Costing.', true);
+            return;
+        }
+        const btn = $('pcwWfSaveBtn');
+        setWfBtnLoading(btn, true, 'Save Assignment');
+        wfMsg('');
+        try {
+            const endpoint = cfg.workflowSaveUrl || 'purchase-order/workflow/save';
+            const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    po,
+                    viewers: wfSelectedViewers,
+                    approvers: wfSelectedApprovers,
+                }),
+            });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok || json.success === false) {
+                throw new Error(json.message || json.error || `HTTP ${res.status}`);
+            }
+            applyWorkflowData(json.data || {});
+            wfMsg(String(json.message || 'Assignments saved'));
+        } catch (err) {
+            wfMsg(String(err.message || 'Save failed'), true);
+        } finally {
+            setWfBtnLoading(btn, false, 'Save Assignment');
+            const notifyBtn = $('pcwWfNotifyBtn');
+            if (notifyBtn) notifyBtn.disabled = !(wfViewers.length || wfApprovers.length);
+        }
+    }
+
+    async function notifyWorkflowAssignments() {
+        const po = headerPo();
+        if (!po) {
+            wfMsg('Load a purchase order first.', true);
+            return;
+        }
+        if (cfg.canAssign === false) {
+            wfMsg('You do not have assign access for PO Costing.', true);
+            return;
+        }
+        const btn = $('pcwWfNotifyBtn');
+        setWfBtnLoading(btn, true, 'Send Notification');
+        wfMsg('');
+        try {
+            // Ensure latest selection is saved before notify
+            if (wfSelectedViewers.length || wfSelectedApprovers.length) {
+                const saveEndpoint = cfg.workflowSaveUrl || 'purchase-order/workflow/save';
+                const saveRes = await fetch(saveEndpoint, {
+                    method: 'POST',
+                    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        po,
+                        viewers: wfSelectedViewers,
+                        approvers: wfSelectedApprovers,
+                    }),
+                });
+                const saveJson = await saveRes.json().catch(() => ({}));
+                if (!saveRes.ok || saveJson.success === false) {
+                    throw new Error(saveJson.message || saveJson.error || 'Could not save before notify');
+                }
+                applyWorkflowData(saveJson.data || {});
+            }
+            const endpoint = cfg.workflowNotifyUrl || 'purchase-order/workflow/notify';
+            const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ po }),
+            });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok || json.success === false) {
+                throw new Error(json.message || json.error || `HTTP ${res.status}`);
+            }
+            applyWorkflowData(json.data || {});
+            wfMsg(String(json.message || 'Notifications sent'), !!json.warning);
+        } catch (err) {
+            wfMsg(String(err.message || 'Notify failed'), true);
+        } finally {
+            setWfBtnLoading(btn, false, 'Send Notification');
+            if (btn) btn.disabled = !(wfViewers.length || wfApprovers.length);
+        }
+    }
+
+    async function decideWorkflow(decision) {
+        const po = headerPo();
+        if (!po) return;
+        const remarks = String($('pcwWfDecideRemarks')?.value || '').trim();
+        if (decision === 'reject' && !remarks) {
+            wfMsg('Remarks are required when rejecting.', true);
+            $('pcwWfDecideRemarks')?.focus();
+            return;
+        }
+        try {
+            const endpoint = cfg.workflowDecideUrl || 'purchase-order/workflow/decide';
+            const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ po, decision, remarks }),
+            });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok || json.success === false) {
+                throw new Error(json.message || json.error || `HTTP ${res.status}`);
+            }
+            applyWorkflowData(json.data || {});
+            wfMsg(String(json.message || 'Decision saved'));
+            if ($('pcwWfDecideRemarks')) $('pcwWfDecideRemarks').value = '';
+        } catch (err) {
+            wfMsg(String(err.message || 'Decision failed'), true);
+        }
+    }
+
+    function bindWorkflowUi() {
+        // Global config UI lives on po-costing?panel=workflow.
+        // Workbench keeps per-PO status load + Approver decide + Viewer ack/signed.
+        $('pcwWfApproveBtn')?.addEventListener('click', () => { void decideWorkflow('approve'); });
+        $('pcwWfRejectBtn')?.addEventListener('click', () => { void decideWorkflow('reject'); });
     }
 
     function bindEsignUi() {
@@ -2682,8 +3891,46 @@
     }
 
     function isFooterRow(r) {
+        // Real PO lines must always show in the grid.
+        // Numeric PONO + (POITEM or MATERIAL) ⇒ detail (never charge/footer).
+        const itemDigits = String(r?.poitem ?? r?.po_item ?? '').replace(/\D/g, '');
+        const ponoDigits = String(r?.pono ?? r?.purchase_order ?? '').replace(/\D/g, '');
+        const material = String(r?.material || '').trim();
+        if (ponoDigits !== '' && (itemDigits !== '' || material !== '')) return false;
         const kind = String(r?.row_kind || '');
         return kind === 'footer' || kind === 'charge' || kind === 'tax' || kind === 'total' || kind === 'subtotal';
+    }
+
+    function healDetailRow(r) {
+        if (!r || typeof r !== 'object') return r;
+        if (isFooterRow(r)) return r;
+        r.row_kind = 'detail';
+        // Fill PORATE when TEMPFIN sent 0 but TOTVALUE / qty exist
+        const rate = nVal(r.porate);
+        if (rate === null || rate <= 0) {
+            const tot = nVal(r.totvalue ?? r.net_value);
+            const q = nVal(r.tot_poqty ?? r.order_qty ?? r.po_qty);
+            if (tot !== null && tot > 0 && q !== null && q > 0) {
+                r.porate = Math.round((tot / q) * 10000) / 10000;
+                if (!nVal(r.net_price) || nVal(r.net_price) <= 0) r.net_price = r.porate;
+            }
+        }
+        const st = String(r.status || '').toUpperCase();
+        if (st === 'FOOTER' || st === '') {
+            const budget = budgetForCompare(r);
+            const actual = actualForCompare(r);
+            if (budget !== null && budget > 0 && actual !== null && actual > 0 && actual <= budget + 0.005) {
+                r.status = 'PASS';
+                r.cost_mismatch = false;
+            } else if (budget !== null && budget > 0 && actual !== null && actual > budget + 0.005) {
+                r.status = 'EXCEPTION';
+                r.cost_mismatch = true;
+            } else {
+                r.status = 'NEEDS_REVIEW';
+                r.cost_mismatch = false;
+            }
+        }
+        return r;
     }
 
     const FOOTER_SUM_KEYS = [
@@ -2790,8 +4037,49 @@
      */
     const FOOT_TOTALINR = new Set(['budget_cost_per_gmt']);
 
+    /**
+     * Unique PO line key for footer totals.
+     * Never include SALORDNO — TOTVALUE / TOT_POQTY repeat on every SO split of the same PO item.
+     */
+    function footPoLineKey(r) {
+        const pono = String(r?.pono || r?.purchase_order || '').replace(/\D/g, '');
+        let item = String(r?.poitem || r?.po_item || r?.item || '').replace(/\D/g, '');
+        item = item.replace(/^0+/, '') || item;
+        if (item) return `${pono}|${item}`;
+        const mat = String(r?.material || '').trim().toUpperCase();
+        const tot = nVal(r?.totvalue ?? r?.net_value);
+        const qty = nVal(r?.tot_poqty ?? r?.order_qty ?? r?.po_qty);
+        // Fingerprint without SO — same material+value+qty counts once
+        return `${pono}|MAT:${mat}|V:${tot === null ? '' : tot.toFixed(2)}|Q:${qty === null ? '' : qty.toFixed(3)}`;
+    }
+
+    /**
+     * PO line net value (Total Net Value source of truth).
+     * Prefer SAP TOTVALUE / net_value — never recompute PORATE×QTY when totvalue exists
+     * (derived PORATE is rounded to 4dp and recreating tot causes 0.01–0.04 drift).
+     */
+    function poLineNetValue(r) {
+        if (!r || isFooterRow(r)) return 0;
+        const fromTot = nVal(r.totvalue ?? r.net_value);
+        if (fromTot !== null && fromTot > 0) {
+            return Math.round(fromTot * 100) / 100;
+        }
+        const rate = nVal(r.porate ?? r.po_unit_cost ?? r.net_price ?? r.actual_cost);
+        const qty = nVal(r.tot_poqty ?? r.order_qty ?? r.po_qty);
+        if (rate !== null && rate > 0 && qty !== null && qty > 0) {
+            return Math.round(rate * qty * 100) / 100;
+        }
+        const soVal = nVal(r.so_wise_po_val);
+        return (soVal !== null && soVal > 0) ? (Math.round(soVal * 100) / 100) : 0;
+    }
+
     function footRawNumber(key, r) {
         if (!r) return null;
+        // Keep Total Net Value / TOTVALUE footer aligned with hero TOTAL P.O VALUE
+        if (key === 'totvalue' || key === 'so_wise_po_val') {
+            const net = poLineNetValue(r);
+            return net > 0 ? net : null;
+        }
         return nVal(cellValue(key, r, 0));
     }
 
@@ -2807,6 +4095,10 @@
 
     function formatFootVal(key, n) {
         if (!Number.isFinite(n)) return '';
+        // TOTVALUE / money: always 2dp so footer matches TOTAL P.O VALUE
+        if (key === 'totvalue' || key === 'so_wise_po_val') {
+            return Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
         if (FOOT_MONEY.has(key) || FOOT_TOTALINR.has(key)) {
             return Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
         }
@@ -2830,14 +4122,18 @@
         const seenItem = {};
         (detailRows || []).forEach((r) => {
             if (!r || isFooterRow(r)) return;
-            const item = String(r.poitem || r.po_item || '').trim()
-                || ('__' + String(r.material || '') + '_' + String(r.salordno || r.sales_order || ''));
+            const lineKey = footPoLineKey(r);
 
             FOOT_ONCE_PER_ITEM.forEach((k) => {
-                const seenKey = item + '|' + k;
+                const seenKey = lineKey + '|' + k;
                 if (seenItem[seenKey]) return;
                 const n = footRawNumber(k, r);
                 if (n === null) return;
+                // Don't lock the line on a zero TOTVALUE / qty — wait for a real value
+                if ((k === 'totvalue' || k === 'so_wise_po_val' || k === 'tot_poqty' || k === 'so_wise_poqty'
+                    || k === 'budget_inr' || k === 'budget_cost_per_piece') && n <= 0) {
+                    return;
+                }
                 seenItem[seenKey] = true;
                 sums[k] = (sums[k] || 0) + n;
             });
@@ -2849,10 +4145,10 @@
             });
 
             FOOT_AVG.forEach((k) => {
-                const seenKey = item + '|avg|' + k;
+                const seenKey = lineKey + '|avg|' + k;
                 if (seenItem[seenKey]) return;
                 const n = footRawNumber(k, r);
-                if (n === null) return;
+                if (n === null || n <= 0) return;
                 seenItem[seenKey] = true;
                 avgSum[k] = (avgSum[k] || 0) + n;
                 avgCount[k] = (avgCount[k] || 0) + 1;
@@ -2860,10 +4156,10 @@
 
             // BUDGET_COST_PER_GMT footer = Σ TOTALINR (once per PO item)
             FOOT_TOTALINR.forEach((k) => {
-                const seenKey = item + '|totalinr|' + k;
+                const seenKey = lineKey + '|totalinr|' + k;
                 if (seenItem[seenKey]) return;
                 const n = footTotalInr(r);
-                if (n === null) return;
+                if (n === null || n <= 0) return;
                 seenItem[seenKey] = true;
                 sums[k] = (sums[k] || 0) + n;
             });
@@ -2880,8 +4176,13 @@
     function updateTableFooter(detailRows) {
         const foot = document.getElementById('pcwTableFoot');
         if (!foot) return;
-        const sums = computeFootTotals(detailRows);
-        const count = (detailRows || []).length;
+        // Visible rows for most columns; full PO detail for net value so footer matches TOTAL P.O VALUE
+        const visible = detailRows || [];
+        const allDetails = (rows || []).filter((r) => r && !isFooterRow(r));
+        const sumsVisible = computeFootTotals(visible);
+        const sumsAll = computeFootTotals(allDetails.length ? allDetails : visible);
+        const netKeys = new Set(['totvalue', 'so_wise_po_val', 'tot_poqty', 'so_wise_poqty']);
+        const count = visible.length;
         const label = document.getElementById('pcwFootTotalLabel');
         if (label) {
             label.textContent = count ? `TOTAL (${count})` : 'TOTAL';
@@ -2897,12 +4198,15 @@
                 return;
             }
             if (isFootTotalKey(key)) {
-                const n = sums[key];
+                const n = netKeys.has(key) ? sumsAll[key] : sumsVisible[key];
                 const text = (n != null && Number.isFinite(n)) ? formatFootVal(key, n) : '';
                 th.textContent = text;
                 th.classList.toggle('has-val', !!text);
                 if (text) {
                     let tip = `Total: ${text}`;
+                    if (key === 'totvalue' || key === 'tot_poqty' || key === 'so_wise_po_val') {
+                        tip = `Total Net Value (once per PO item, full PO): ${text}`;
+                    }
                     if (FOOT_AVG.has(key)) tip = `Average: ${text}`;
                     if (FOOT_TOTALINR.has(key)) tip = `Total in INR (TOTALINR): ${text}`;
                     th.setAttribute('title', tip);
@@ -2998,12 +4302,11 @@
             } else if (st === 'NOT_MATCHED') {
                 mappingRequired += 1;
                 exceptions += 1;
-            } else if (st === 'NOT_VALIDATED') {
-                costMismatch += 1;
-                exceptions += 1;
-            } else if (st === 'NEEDS_REVIEW') {
+            } else if (st === 'NEEDS_REVIEW' || st === 'NOT_VALIDATED') {
+                // Cost mismatch folded into Need to Review
                 ambiguousMatch += 1;
                 needsReview += 1;
+                if (st === 'NOT_VALIDATED') costMismatch += 1;
             } else {
                 mappingRequired += 1;
                 exceptions += 1;
@@ -3017,25 +4320,18 @@
 
             const rowSoQty = Number(r.so_qty ?? r.prwise_so_qty ?? 0) || 0;
             const rowOrderQty = Number(r.tot_poqty ?? r.order_qty ?? r.po_qty ?? 0) || 0;
-            // PO net = PORATE × TOT_POQTY (fallback TOTVALUE). Costing net = BUDGET × SO_QTY (per GMT).
+            // PO net = SAP TOTVALUE once per line (not PORATE×QTY — that drifts after rate round).
             const poRate = nVal(r.porate ?? r.po_unit_cost ?? r.net_price ?? r.actual_cost);
             const budget = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost);
             const actual = nVal(r.porate ?? r.actual_cost ?? r.po_unit_cost);
             const poQty = rowOrderQty > 0 ? rowOrderQty : (rowSoQty > 0 ? rowSoQty : 0);
             const garmentQty = rowSoQty > 0 ? rowSoQty : (rowOrderQty > 0 ? rowOrderQty : 1);
-            const poLineNet = (poRate !== null && poQty > 0)
-                ? (poRate * poQty)
-                : (Number(r.totvalue ?? r.net_value ?? r.so_wise_po_val ?? 0) || 0);
+            const poLineNet = poLineNetValue(r);
 
-            // Once per PO item — TOTVALUE / TOT_POQTY repeat on every SO line
-            if (item && !seenValue[item]) {
-                seenValue[item] = true;
-                totalValue += poLineNet;
-                totalOrderQty += poQty;
-                poSoQty += poQty;
-                if (budget !== null) totalExpected += budget * garmentQty;
-                if (actual !== null) totalActual += actual * garmentQty;
-            } else if (!item) {
+            // Once per PO line — TOTVALUE / TOT_POQTY repeat on every SO split
+            const valueKey = footPoLineKey(r);
+            if (!seenValue[valueKey]) {
+                seenValue[valueKey] = true;
                 totalValue += poLineNet;
                 totalOrderQty += poQty;
                 poSoQty += poQty;
@@ -3070,15 +4366,16 @@
         const zcostMatCount = Object.keys(zMaterials).length;
 
         const charges = summarizeCharges(list || []);
+        const detailOnlyCount = (list || []).filter((r) => !isFooterRow(r)).length;
         return {
-            total_records: (list || []).length,
-            po_items: Object.keys(items).length || (list || []).length,
+            total_records: detailOnlyCount,
+            po_items: detailOnlyCount || Object.keys(items).length || 0,
             materials: Object.keys(materials).length,
             sales_orders: Object.keys(salesOrders).length,
             total_order_qty: totalOrderQty,
             total_so_qty: poSoQty,
-            total_po_value: totalValue,
-            sub_total: totalValue,
+            total_po_value: Math.round(totalValue * 100) / 100,
+            sub_total: Math.round(totalValue * 100) / 100,
             charges,
             charges_total: charges.total,
             grand_total: Math.round((totalValue + charges.total) * 100) / 100,
@@ -3251,6 +4548,10 @@
         }
         // Always prefer row-derived qty/value cards (API summary used wrong fields)
         if (rows.length) {
+            const detailN = rows.filter((r) => !isFooterRow(r)).length;
+            s.total_records = detailN;
+            s.po_items = detailN;
+            s.materials = fromRows.materials;
             s.total_order_qty = fromRows.total_order_qty;
             s.total_so_qty = fromRows.total_so_qty;
             s.total_po_value = fromRows.total_po_value;
@@ -3303,19 +4604,19 @@
         const mapping = Number(s.mapping_required ?? fromRows.mapping_required) || 0;
         const mismatch = Number(s.cost_mismatch ?? fromRows.cost_mismatch) || 0;
         const ambiguous = Number(s.ambiguous_match ?? fromRows.ambiguous_match) || 0;
-        const statusTotal = (Number(s.passed) || 0) + mapping + mismatch + ambiguous
-            || total || rows.filter((r) => !isFooterRow(r)).length || 0;
-        if ($('pcwKpiTotal')) $('pcwKpiTotal').textContent = fmt(statusTotal);
+        const detailRowCount = rows.filter((r) => !isFooterRow(r)).length;
+        // TOTAL ITEMS = every real PO line in the grid (must match "Showing X of Y")
+        if ($('pcwKpiTotal')) $('pcwKpiTotal').textContent = fmt(detailRowCount);
         if ($('pcwKpiPassed')) $('pcwKpiPassed').textContent = fmt(s.passed || 0);
         if ($('pcwKpiMapping')) $('pcwKpiMapping').textContent = fmt(mapping);
-        if ($('pcwKpiMismatch')) $('pcwKpiMismatch').textContent = fmt(mismatch);
         if ($('pcwKpiAmbiguous')) $('pcwKpiAmbiguous').textContent = fmt(ambiguous);
-        // legacy ids (if present)
-        if ($('pcwKpiExceptions')) $('pcwKpiExceptions').textContent = fmt(mapping + mismatch);
+        // legacy ids (if present) — Cost Mismatch card removed; fold into Need to Review
+        if ($('pcwKpiMismatch')) $('pcwKpiMismatch').textContent = fmt(0);
+        if ($('pcwKpiExceptions')) $('pcwKpiExceptions').textContent = fmt(mapping);
         if ($('pcwKpiReview')) $('pcwKpiReview').textContent = fmt(ambiguous || s.needs_review || 0);
 
-        // Row 2 Left: PO Data — Total PO Qty uses TOT_POQTY
-        const poItems = Number(s.po_items) > 0 ? s.po_items : (s.unique_po_items || rows.length || 0);
+        // Row 2 Left: PO Data — Total Items = detail row count (same as TOTAL ITEMS card)
+        const poItems = detailRowCount || Number(s.po_items) || 0;
         const poMaterials = Number(s.materials) > 0 ? s.materials : 0;
         const poSoQty = Number(s.total_order_qty) > 0 ? Number(s.total_order_qty) : (Number(s.total_so_qty) || 0);
         const poNetVal = Number(s.total_po_value) >= 0 ? s.total_po_value : 0;
@@ -3380,7 +4681,7 @@
                 }
                 if (st === 'FOOTER') return { label: '—', cls: 'is-footer' };
                 if (st === 'EXCEPTION' || st === 'FAIL' || st === 'NOT_VALIDATED') {
-                    return { label: 'Cost Mismatch', cls: 'is-mismatch' };
+                    return { label: 'Need to Review', cls: 'is-ambiguous' };
                 }
                 return { label: 'Mapping Required', cls: 'is-mapping' };
             })();
@@ -4113,7 +5414,7 @@
         if (!r.buom) {
             r.buom = String(line.unit || '');
         }
-        // ACTUAL = PORATE × Curr Rate × PO consumption (never zCOST Gross)
+        // ACTUAL = PORATE (already INR) × PO consumption (never zCOST Gross / Curr Rate)
         const inrActual = actualCostInr(r);
         if (inrActual !== null) {
             r.actual_cost = inrActual;
@@ -4122,21 +5423,25 @@
         let variancePct = null;
         let status = priorStatus || 'PASS';
         let result = String(r.validation_result || 'PASS — manually matched to zCOST line');
-        if (finalBudget !== null && finalBudget > 0 && inrActual !== null) {
+        if (finalBudget !== null && finalBudget > 0 && inrActual !== null && inrActual > 0) {
             variancePct = roundPct(((inrActual - finalBudget) / finalBudget) * 100);
             if (inrActual <= finalBudget + 0.005) {
                 status = 'PASS';
                 result = 'PASS — manually matched to zCOST line';
+                r.cost_mismatch = false;
             } else {
                 status = 'EXCEPTION';
                 result = 'NOT VALIDATED — actual cost exceeds Total INR / Gross budget';
+                r.cost_mismatch = true;
             }
         } else if (finalBudget !== null && finalBudget > 0) {
-            status = 'PASS';
-            result = 'PASS — manually matched to zCOST line';
+            status = 'NEEDS_REVIEW';
+            result = 'Matched zCOST line but actual cost is missing — Needs Review';
+            r.cost_mismatch = false;
         } else {
             status = 'NEEDS_REVIEW';
             result = 'Matched zCOST line but Total INR / Gross budget is zero — Needs Review';
+            r.cost_mismatch = false;
         }
         r.variance_pct = variancePct;
         r.status = status;
@@ -4480,8 +5785,21 @@
                 return r.so_wise_po_val ?? r.totvalue ?? r.net_value;
             case 'ouom':
                 return r.ouom || r.unit || '';
-            case 'porate':
-                return r.porate ?? r.po_unit_cost ?? r.net_price;
+            case 'porate': {
+                let rate = nVal(r.porate);
+                if (rate === null || rate <= 0) {
+                    rate = nVal(r.net_price);
+                }
+                // TEMPFIN often sends PORATE=0 while TOTVALUE is filled — derive unit rate
+                if (rate === null || rate <= 0) {
+                    const tot = nVal(r.totvalue ?? r.net_value);
+                    const q = nVal(r.tot_poqty ?? r.order_qty ?? r.po_qty);
+                    if (tot !== null && tot > 0 && q !== null && q > 0) {
+                        rate = Math.round((tot / q) * 10000) / 10000;
+                    }
+                }
+                return (rate !== null && rate > 0) ? rate : null;
+            }
             case 'totvalue':
                 return r.totvalue ?? r.net_value;
             case 'mat_desc':
@@ -4521,7 +5839,7 @@
             case 'buom':
                 return r.buom || r.ouom || r.unit || '';
             case 'actual_cost':
-                // INR actual (PORATE × Curr Rate) — never show raw foreign PORATE
+                // INR actual from TEMPFIN PORATE (already INR — do not × Curr Rate)
                 return actualCostInr(r);
             case 'variance_pct':
                 return r.variance_pct;
@@ -4588,7 +5906,12 @@
         if (NUM_COLS.has(key) || key === 'sno') classes.push('num');
         if (key === 'sno') classes.push('sno');
         classes.push(`pcw-col-${group}`);
-        if (HIGHLIGHT_COLS.has(key) && !isFooterRow(r)) classes.push('pcw-hl-cost');
+        if (HIGHLIGHT_COLS.has(key) && !isFooterRow(r)) {
+            classes.push('pcw-hl-cost');
+            const tone = resultCostTone(r);
+            if (tone === 'under') classes.push('is-cost-under');
+            if (tone === 'over') classes.push('is-cost-over');
+        }
         if (EXPLAIN_COLS.has(key) && !isFooterRow(r)) classes.push('is-explainable');
         const cls = classes.length ? ` class="${classes.join(' ')}"` : '';
         let inner = '—';
@@ -4752,8 +6075,13 @@
             case 'budget_cost_per_piece':
             case 'conv':
             case 'actual_cost': {
-                const mismatch = !!r.cost_mismatch && (key === 'budget_cost_per_gmt' || key === 'budget_cost_per_piece' || key === 'actual_cost');
-                const shown = wrapExplain(key, index, num(cellValue(key, r, index), 4));
+                const disp = statusDisplay(r);
+                const mismatch = disp.code === 'NOT_VALIDATED'
+                    && (key === 'budget_cost_per_gmt' || key === 'budget_cost_per_piece' || key === 'actual_cost');
+                const rawVal = cellValue(key, r, index);
+                const hideZero = (key === 'actual_cost' || key === 'budget_cost_per_gmt' || key === 'budget_cost_per_piece' || key === 'porate')
+                    && (rawVal === null || rawVal === '' || Number(rawVal) <= 0);
+                const shown = wrapExplain(key, index, hideZero ? '—' : num(rawVal, 4));
                 inner = mismatch ? `<span class="pcw-cost-mismatch">${shown}</span>` : shown;
                 break;
             }
@@ -4851,18 +6179,23 @@
         const query = searchQuery();
         const filters = colFilters();
         const indexed = rows.map((row, index) => ({ row, index }));
-        const matchedDetails = sortedRows(
-            indexed.filter(({ row, index }) => !isFooterRow(row) && matchRow(row, index, query, filters))
+        const allDetails = indexed.filter(({ row }) => !isFooterRow(row));
+        let matchedDetails = sortedRows(
+            allDetails.filter(({ row, index }) => matchRow(row, index, query, filters))
         );
+        // Safety: if nothing explicit filtered but some detail rows vanished, show all
+        const isFiltered = query !== '' || filters.length > 0 || !!tableStatusFilter;
+        if (!isFiltered && matchedDetails.length < allDetails.length) {
+            matchedDetails = sortedRows(allDetails);
+        }
         const matched = appendFooterBlock(matchedDetails);
 
         const noMatch = $('rptNoMatchRow');
         const countEl = $('rptTableCount');
         const badge = $('rptActiveFilterBadge');
         const clearBtn = $('rptClearAllFilters');
-        const isFiltered = query !== '' || filters.length > 0 || !!tableStatusFilter;
         const detailCount = matchedDetails.length;
-        const detailTotal = rows.filter((r) => !isFooterRow(r)).length;
+        const detailTotal = allDetails.length;
 
         if (countEl) {
             const statusHint = tableStatusFilter ? ` · ${statusFilterLabel(tableStatusFilter)}` : '';
@@ -4908,15 +6241,29 @@
                 const disp = statusDisplay(row);
                 const st = disp.code;
                 const open = needsDropdown(row) ? ' is-open' : '';
-                const mapping = st === 'NOT_MATCHED' || isUnmatchedZcost(row);
-                const mismatch = !mapping && (st === 'NOT_VALIDATED' || (!!row.cost_mismatch && st !== 'PASS')
-                    || st === 'EXCEPTION' || st === 'FAIL');
-                const ambiguous = !mapping && !mismatch && st === 'NEEDS_REVIEW';
-                // Cell colors ONLY on BUDGET/ACTUAL: green=pass, yellow=mapping/ambiguous, red=cost mismatch
-                const pass = st === 'PASS' ? ' is-pass-row' : '';
-                const review = (mapping || ambiguous) ? ' is-review-row' : '';
-                const fail = mismatch ? ' is-fail-row is-cost-mismatch' : '';
-                const unmatchedCls = mapping ? ' is-unmatched-row' : '';
+                const tone = resultCostTone(row);
+                const mapping = st === 'NOT_MATCHED' || (isUnmatchedZcost(row) && tone === '');
+                // Color from BUDGET_COST_PER_GARMENT vs ACTUAL_COST (e.g. 2.2491 vs 1.8 → green)
+                let pass = '';
+                let review = '';
+                let fail = '';
+                let unmatchedCls = '';
+                if (tone === 'under') {
+                    pass = ' is-pass-row';
+                    row.cost_mismatch = false;
+                } else if (tone === 'over') {
+                    fail = ' is-fail-row is-cost-mismatch';
+                    row.cost_mismatch = true;
+                } else if (mapping) {
+                    review = ' is-review-row';
+                    unmatchedCls = ' is-unmatched-row';
+                } else if (st === 'NOT_VALIDATED' || st === 'EXCEPTION' || st === 'FAIL') {
+                    fail = ' is-fail-row is-cost-mismatch';
+                } else if (st === 'PASS') {
+                    pass = ' is-pass-row';
+                } else if (st === 'NEEDS_REVIEW') {
+                    review = ' is-review-row';
+                }
                 const sel = row.selected ? ' is-selected' : '';
                 return `<tr class="pcw-row${open}${pass}${review}${fail}${unmatchedCls}${sel}" data-idx="${index}" data-row-kind="${esc(kind)}">${COLS.map((k) => renderCell(k, row, index)).join('')}</tr>`;
             })
@@ -4961,7 +6308,14 @@
                 throw new Error(json.message || json.error || `HTTP ${res.status}`);
             }
             const data = json.data || {};
-            rows = Array.isArray(data.records) ? data.records : [];
+            // Clear any leftover search / status / column filters so all API lines show
+            tableStatusFilter = '';
+            const searchEl = $('rptTableSearch');
+            if (searchEl) searchEl.value = '';
+            document.querySelectorAll('#rptFilterRow .rpt-col-input').forEach((i) => { i.value = ''; });
+            if ($('rptTableSearchClear')) $('rptTableSearchClear').style.display = 'none';
+
+            rows = (Array.isArray(data.records) ? data.records : []).map(healDetailRow);
             costLines = Array.isArray(data.cost_lines) ? data.cost_lines : [];
             quoteOptions = Array.isArray(data.quote_options) ? data.quote_options : [];
             validatedQuotes = Array.isArray(data.validated_quotations) ? data.validated_quotations : [];
@@ -4969,8 +6323,18 @@
             currentMode = data.mode || mode;
             selectedCustomer = String(data.customer_quotation || customer || '');
             selectedEndUser = String(data.end_user_quotation || endUser || '');
+            // Z_QUOTATIONZCOSTCOM empty (same as Postman) → never show stale TEMPFIN costing columns
+            const cdsEmpty = !costLines.length;
             rows.forEach((r) => {
                 if (typeof r.selected !== 'boolean') r.selected = false;
+                if (isFooterRow(r)) return;
+                if (cdsEmpty) {
+                    emptyZcostDisplayFields(r);
+                    r.status = 'NOT_MATCHED';
+                    r.needs_manual_match = true;
+                    r.validation_result = 'No zCOST lines from Z_QUOTATIONZCOSTCOM_CDS — Mapping Required';
+                    return;
+                }
                 // First load: zCOST section/matrix vs PO matgroup + mat_desc
                 enforceFirstLoadZcostMatch(r);
                 // Unmatched → keep costing cells empty (no ACTUAL/BUDGET until dropdown select)
@@ -4979,9 +6343,9 @@
                     r.status = 'NOT_MATCHED';
                     return;
                 }
-                // Normalize ACTUAL_COST to INR via Curr × Rate (matched rows only)
+                // Normalize ACTUAL_COST from TEMPFIN PORATE (already INR; matched rows only)
                 const inr = actualCostInr(r);
-                if (inr !== null) {
+                if (inr !== null && inr > 0) {
                     r.actual_cost = inr;
                     r.po_unit_cost = inr;
                     const budget = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost);
@@ -5000,15 +6364,29 @@
                             }
                         }
                     }
+                } else {
+                    r.actual_cost = null;
+                    if (!r.family_mismatch && !r.needs_manual_match) {
+                        const budget = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost);
+                        if (budget !== null && budget > 0) {
+                            r.status = 'NEEDS_REVIEW';
+                            r.cost_mismatch = false;
+                        }
+                    }
                 }
             });
 
-            // Auto-map SIZE LABEL / style codes (VVVVSWH096 ↔ 30SIZSTNSIZNTN#L-16)
-            autoMapUnmatchedFromCostLines();
+            // Auto-map only when live CDS lines exist (never invent costing when API is [])
+            if (!cdsEmpty) {
+                autoMapUnmatchedFromCostLines();
+            }
             rows.forEach((r) => {
-                if (isFooterRow(r) || isUnmatchedZcost(r)) return;
+                if (isFooterRow(r) || isUnmatchedZcost(r) || cdsEmpty) return;
                 const inr = actualCostInr(r);
-                if (inr === null) return;
+                if (inr === null || inr <= 0) {
+                    r.actual_cost = null;
+                    return;
+                }
                 r.actual_cost = inr;
                 r.po_unit_cost = inr;
                 const budget = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost);
@@ -5018,6 +6396,9 @@
                         r.status = 'PASS';
                         r.cost_mismatch = false;
                         r.needs_manual_match = false;
+                    } else {
+                        r.status = 'EXCEPTION';
+                        r.cost_mismatch = true;
                     }
                 }
             });
@@ -5025,6 +6406,30 @@
             applyApprovedStatus(po, data.approved_status || 'NotApproved');
             fillKpis(data.summary || {});
             renderTable();
+
+            // API-only: Postman-empty Z_QuotationZCostCom → empty workbench (no TEMPFIN)
+            if (!rows.length || cdsEmpty) {
+                const apiMsg = String(data.error || data.costing?.error || '').trim();
+                const hint = apiMsg || `No Z_QuotationZCostCom rows for PO ${po} (API results: []).`;
+                const emptyEl = $('pcwEmptyHint') || $('pcwTableHint');
+                if (emptyEl) {
+                    emptyEl.hidden = false;
+                    emptyEl.textContent = hint;
+                }
+            } else {
+                const emptyEl = $('pcwEmptyHint') || $('pcwTableHint');
+                if (emptyEl) {
+                    emptyEl.hidden = true;
+                    emptyEl.textContent = '';
+                }
+            }
+
+            let openAction = '';
+            try {
+                openAction = String(new URLSearchParams(window.location.search).get('open') || '').toLowerCase();
+            } catch (_) {
+                openAction = '';
+            }
 
             const page = cfg.pageUrl || 'purchase-order';
             const next = new URL(page, window.location.origin);
@@ -5042,13 +6447,38 @@
                 root.dataset.so = so;
                 root.dataset.mat = mat;
             }
-            // First-time PO search: ensure local PDF (SAP only if missing; never overwrite signed)
-            void ensureLocalPoPdfCache(po);
+            // Workflow Assignment: load statuses + ack if assigned viewer opened via link
+            void loadWorkflow(po).then(() => workflowAckOnOpen(po));
+
+            // New-tab launch: ?open=esign|pass → open the modal after data is ready
+            if (openAction === 'esign' || openAction === 'pass') {
+                window.setTimeout(() => {
+                    if (openAction === 'esign') {
+                        if (cfg.canEsign === false) {
+                            alert('You do not have eSign access for PO Costing.');
+                            return;
+                        }
+                        passPoAndOpenEsign({ fromPassPo: false });
+                        return;
+                    }
+                    if (cfg.canPassPo === false) {
+                        alert('You do not have Pass PO access for PO Costing.');
+                        return;
+                    }
+                    passPoAndOpenEsign({ fromPassPo: true });
+                }, 150);
+            }
         } catch (err) {
             rows = [];
             costLines = [];
             fillKpis({});
             renderTable();
+            const msg = String(err?.message || err || 'Could not load PO costing data');
+            try {
+                alert(msg);
+            } catch (_) {
+                console.error(msg);
+            }
         } finally {
             showSpinner(false);
         }
@@ -5648,12 +7078,43 @@
             openPdfTab(headerPo());
         });
         $('pcwOpenEsignBtn')?.addEventListener('click', () => {
-            if (cfg.canEsign === false) {
+            if ($('pcwOpenEsignBtn')?.disabled || cfg.canEsign === false) {
                 alert('You do not have eSign access for PO Costing.');
                 return;
             }
-            // Direct e-sign open — no Approved button
-            passPoAndOpenEsign({ fromPassPo: false });
+            openWorkbenchActionInNewTab('esign');
+        });
+        $('pcwEsignBarBtn')?.addEventListener('click', () => {
+            if ($('pcwEsignBarBtn')?.disabled || cfg.canEsign === false) {
+                alert('You do not have eSign access for PO Costing.');
+                return;
+            }
+            openWorkbenchActionInNewTab('esign');
+        });
+        $('pcwValidateBarBtn')?.addEventListener('click', () => {
+            if ($('pcwValidateBarBtn')?.disabled || cfg.canValidate === false) {
+                alert('You do not have Validate access for PO Costing.');
+                return;
+            }
+            $('pcwOpenValidateBtn')?.click();
+        });
+        $('pcwOpenValidateBtn')?.addEventListener('click', (e) => {
+            if ($('pcwOpenValidateBtn')?.disabled || cfg.canValidate === false) {
+                e.preventDefault();
+                alert('You do not have Validate access for PO Costing.');
+            }
+        }, true);
+        $('pcwOpenWorkflowBtn')?.addEventListener('click', (e) => {
+            if (cfg.canAssign === false || $('pcwOpenWorkflowBtn')?.getAttribute('aria-disabled') === 'true') {
+                e.preventDefault();
+                alert('You do not have Assign access for PO Costing.');
+            }
+        });
+        $('pcwAssignBtn')?.addEventListener('click', (e) => {
+            if (cfg.canAssign === false || $('pcwAssignBtn')?.getAttribute('aria-disabled') === 'true') {
+                e.preventDefault();
+                alert('You do not have Assign access for PO Costing.');
+            }
         });
         $('pcwPdfClose')?.addEventListener('click', closePdfModal);
         $('pcwPdfBackdrop')?.addEventListener('click', closePdfModal);
@@ -5881,9 +7342,97 @@
             document.title = 'EVOLV | PO Costing';
         });
         $('pcwPassPoBtn')?.addEventListener('click', () => {
-            if (cfg.canPassPo === false) return;
-            // PASS PO → e-sign + show Approved (Approve API only)
-            passPoAndOpenEsign({ fromPassPo: true });
+            if (cfg.canPassPo === false || $('pcwPassPoBtn')?.getAttribute('data-no-access') === '1') {
+                alert('You do not have Pass PO access for PO Costing.');
+                return;
+            }
+            // PASS PO → new tab with e-sign + Approved button
+            openWorkbenchActionInNewTab('pass');
+        });
+        $('pcwSentPoBtn')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openSentPoFlow();
+        });
+        $('pcwOpenSentBtn')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openSentPoFlow();
+        });
+        // Keep Sent enabled when PO is typed/changed in the header
+        $('po')?.addEventListener('input', () => {
+            syncPassRevertButtons(summarizeRows(rows || []));
+        });
+        $('po')?.addEventListener('change', () => {
+            syncPassRevertButtons(summarizeRows(rows || []));
+        });
+        // Initial enable if PO already in URL/header
+        syncPassRevertButtons(summarizeRows(rows || []));
+        $('pcwSentClose')?.addEventListener('click', closeSentModal);
+        $('pcwSentCancel')?.addEventListener('click', closeSentModal);
+        $('pcwSentBackdrop')?.addEventListener('click', closeSentModal);
+        $('pcwSentUserSearch')?.addEventListener('focus', () => {
+            renderSentUserList($('pcwSentUserSearch')?.value || '', true);
+        });
+        $('pcwSentUserSearch')?.addEventListener('input', () => {
+            const q = String($('pcwSentUserSearch')?.value || '');
+            const selectedName = String($('pcwSentUsername')?.value || '');
+            if (selectedName && q !== selectedName) {
+                if ($('pcwSentUser')) $('pcwSentUser').value = '';
+                if ($('pcwSentUsername')) $('pcwSentUsername').value = '';
+                if ($('pcwSentEmail')) $('pcwSentEmail').value = '';
+                if ($('pcwSentUserClear')) $('pcwSentUserClear').hidden = true;
+            }
+            $('pcwSentUserCombo')?.classList.remove('is-invalid');
+            sentShowError('');
+            renderSentUserList(q, true);
+        });
+        $('pcwSentUserSearch')?.addEventListener('keydown', (e) => {
+            const list = $('pcwSentUserList');
+            const options = list ? Array.from(list.querySelectorAll('.pcw-sent-combo-option')) : [];
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (list?.hidden) renderSentUserList($('pcwSentUserSearch')?.value || '', true);
+                if (!options.length) return;
+                sentUserActiveIdx = Math.min(options.length - 1, Math.max(0, sentUserActiveIdx + 1));
+                highlightSentUserOption();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (!options.length) return;
+                sentUserActiveIdx = Math.max(0, sentUserActiveIdx - 1);
+                highlightSentUserOption();
+            } else if (e.key === 'Enter') {
+                if (!list?.hidden && options[sentUserActiveIdx]) {
+                    e.preventDefault();
+                    pickSentUserFromOption(options[sentUserActiveIdx]);
+                }
+            } else if (e.key === 'Escape') {
+                if (!list?.hidden) {
+                    e.preventDefault();
+                    closeSentUserList();
+                }
+            }
+        });
+        $('pcwSentUserList')?.addEventListener('mousedown', (e) => {
+            const opt = e.target?.closest?.('.pcw-sent-combo-option');
+            if (!opt) return;
+            e.preventDefault();
+            pickSentUserFromOption(opt);
+        });
+        $('pcwSentUserClear')?.addEventListener('click', () => {
+            clearSentUserSelection(false);
+            closeSentUserList();
+            $('pcwSentUserSearch')?.focus();
+        });
+        document.addEventListener('click', (e) => {
+            const combo = $('pcwSentUserCombo');
+            if (!combo || combo.contains(e.target)) return;
+            closeSentUserList();
+        });
+        $('pcwSentSubmit')?.addEventListener('click', () => { void submitSentMail(); });
+        $('pcwSentRemarks')?.addEventListener('input', () => {
+            $('pcwSentRemarks')?.classList.remove('is-invalid');
+            sentShowError('');
         });
         $('pcwPdfContinuePass')?.addEventListener('click', () => {
             continuePassFromPdf();
@@ -5892,6 +7441,7 @@
             closePdfModal();
         });
         bindEsignUi();
+        bindWorkflowUi();
         controlBar?.querySelectorAll('input[name="mat_cat"]').forEach((el) => {
             el.addEventListener('change', () => {
                 if (!headerPo()) return;
@@ -6069,15 +7619,32 @@
     }
 
     bind();
-    if (headerPo() || cfg.po) {
-        void runValidate({
-            mode: selectedCustomer ? 'non_validated' : 'validated',
-            customer: selectedCustomer,
-            endUser: selectedEndUser,
-            forceValidated: !selectedCustomer,
-        });
-    } else {
-        showSpinner(false);
-        renderTable();
-    }
+
+    // New-tab / deep-link: ensure header PO is filled from URL/config, then auto-load
+    (function bootWorkbenchFromUrl() {
+        let bootPo = '';
+        try {
+            bootPo = String(new URLSearchParams(window.location.search).get('po') || '').replace(/\D/g, '');
+        } catch (_) {
+            bootPo = '';
+        }
+        if (!bootPo) bootPo = String(cfg.po || root?.dataset?.po || '').replace(/\D/g, '');
+        if (!bootPo) bootPo = headerPo();
+        if (bootPo && $('po') && String($('po').value || '').replace(/\D/g, '') !== bootPo) {
+            $('po').value = bootPo;
+        }
+        if (bootPo && root) root.dataset.po = bootPo;
+
+        if (bootPo || headerPo() || cfg.po) {
+            void runValidate({
+                mode: selectedCustomer ? 'non_validated' : 'validated',
+                customer: selectedCustomer,
+                endUser: selectedEndUser,
+                forceValidated: !selectedCustomer,
+            });
+        } else {
+            showSpinner(false);
+            renderTable();
+        }
+    })();
 })();

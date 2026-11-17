@@ -81,6 +81,9 @@ return [
     'max_rows'         => 10000,
     // PO list is item-level CDS; one month can exceed 1k lines — allow a higher ceiling.
     'po_max_rows'      => 25000,
+    // Unbounded costing list (range=all): hard caps so the API always returns JSON.
+    'po_all_max_rows'  => 5000,
+    'po_all_max_pos'   => 600,
     'timeout'          => 60,
     'cache_ttl'        => 0,
     'cache_version'    => 8,

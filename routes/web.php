@@ -110,6 +110,27 @@ if (method_exists(ReportsController::class, 'purchaseOrderValidationLog')) {
 if (method_exists(ReportsController::class, 'purchaseOrderValidationLogSave')) {
     $router->post('purchase-order/validation-log', [ReportsController::class, 'purchaseOrderValidationLogSave']);
 }
+if (method_exists(ReportsController::class, 'purchaseOrderSendMail')) {
+    $router->post('purchase-order/send-mail', [ReportsController::class, 'purchaseOrderSendMail']);
+}
+if (method_exists(ReportsController::class, 'purchaseOrderWorkflow')) {
+    $router->get('purchase-order/workflow', [ReportsController::class, 'purchaseOrderWorkflow']);
+}
+if (method_exists(ReportsController::class, 'purchaseOrderWorkflowSave')) {
+    $router->post('purchase-order/workflow/save', [ReportsController::class, 'purchaseOrderWorkflowSave']);
+}
+if (method_exists(ReportsController::class, 'purchaseOrderWorkflowNotify')) {
+    $router->post('purchase-order/workflow/notify', [ReportsController::class, 'purchaseOrderWorkflowNotify']);
+}
+if (method_exists(ReportsController::class, 'purchaseOrderWorkflowDecide')) {
+    $router->post('purchase-order/workflow/decide', [ReportsController::class, 'purchaseOrderWorkflowDecide']);
+}
+if (method_exists(ReportsController::class, 'purchaseOrderWorkflowAck')) {
+    $router->post('purchase-order/workflow/ack', [ReportsController::class, 'purchaseOrderWorkflowAck']);
+}
+if (method_exists(ReportsController::class, 'purchaseOrderSentBox')) {
+    $router->get('purchase-order/sent-box', [ReportsController::class, 'purchaseOrderSentBox']);
+}
 $router->get('purchase-order', [ReportsController::class, 'showPurchaseOrder']);
 $router->get('api/user/table-preferences/{tableKey}', [TablePreferencesController::class, 'show']);
 $router->put('api/user/table-preferences/{tableKey}', [TablePreferencesController::class, 'update']);

@@ -99,6 +99,8 @@
         if (!a || e.defaultPrevented || e.button !== 0) return;
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         if (a.target && a.target !== '_self') return;
+        // In-page panel tabs / soft links — JS handles them; never leave spinner stuck at 90%
+        if (a.hasAttribute('data-poc-panel') || a.hasAttribute('data-rpt-no-loader')) return;
         const href = a.getAttribute('href') || '';
         if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
         try {
@@ -106,6 +108,15 @@
             if (url.origin !== window.location.origin) return;
             if (!/\/sap_reports(\/|$)/i.test(url.pathname)) return;
             if (url.href.split('#')[0] === window.location.href.split('#')[0]) return;
+            // Same path with only ?panel= change is also soft-nav in PO Costing
+            if (url.pathname === window.location.pathname) {
+                const nextPanel = url.searchParams.get('panel');
+                const curPanel = new URL(window.location.href).searchParams.get('panel');
+                if (nextPanel !== null || curPanel !== null) {
+                    // Soft panel switch — do not show full-page loader
+                    return;
+                }
+            }
             show({ solid: true });
         } catch (err) { /* ignore */ }
     }, true);

@@ -68,15 +68,8 @@ $wbLoginUser = trim((string) (
 ));
 ?>
 <section class="pcw" id="poCostingWorkbench" data-po="<?= e($wbPo) ?>" data-so="<?= e($wbSo) ?>" data-mat="<?= e($wbMat) ?>">
-    <!-- Row 1: Status overview (classic portal cards) -->
+    <!-- Row 1: Status overview — Passed / Mapping Required / Need to Review only -->
     <div class="pcw-status-kpis" id="pcwStatusKpis" aria-label="Validation Status Overview">
-        <article class="pcb-kpi is-total" data-card-key="status_total" title="Click to view details & calculation">
-            <span class="pcb-kpi-icon material-icons-round">description</span>
-            <div class="pcb-kpi-body">
-                <b id="pcwKpiTotal">—</b>
-                <small>Total Items</small>
-            </div>
-        </article>
         <article class="pcb-kpi is-pass" data-card-key="status_pass" title="Passed — actual ≤ budget">
             <span class="pcb-kpi-icon material-icons-round">check_circle</span>
             <div class="pcb-kpi-body">
@@ -91,25 +84,11 @@ $wbLoginUser = trim((string) (
                 <small>Mapping Required</small>
             </div>
         </article>
-        <article class="pcb-kpi is-fail" data-card-key="status_mismatch" title="Cost Mismatch — actual &gt; budget">
-            <span class="pcb-kpi-icon material-icons-round">error</span>
-            <div class="pcb-kpi-body">
-                <b id="pcwKpiMismatch">—</b>
-                <small>Cost Mismatch</small>
-            </div>
-        </article>
-        <article class="pcb-kpi is-ambiguous" data-card-key="status_ambiguous" title="Need to Review — uncertain mapping">
+        <article class="pcb-kpi is-ambiguous" data-card-key="status_ambiguous" title="Need to Review — uncertain mapping or actual &gt; budget">
             <span class="pcb-kpi-icon material-icons-round">rate_review</span>
             <div class="pcb-kpi-body">
                 <b id="pcwKpiAmbiguous">—</b>
                 <small>Need to Review</small>
-            </div>
-        </article>
-        <article class="pcb-kpi is-value" data-card-key="status_po_value" title="Total PO Value">
-            <span class="pcb-kpi-icon material-icons-round">payments</span>
-            <div class="pcb-kpi-body">
-                <b id="pcwKpiStatusPoValue">—</b>
-                <small>Total PO Value</small>
             </div>
         </article>
     </div>
@@ -249,12 +228,13 @@ $wbLoginUser = trim((string) (
                 <span>Open PDF</span>
             </button>
 
-            <button type="button" class="rpt-tb-btn rpt-tb-btn-primary" id="pcwOpenValidateBtn" title="Status &amp; Remarks">
-                <span class="material-icons-round">forum</span>
-                <span>Status &amp; Remarks</span>
-            </button>
-
             <?php
+                $canValidateBtn = true;
+                if (isset($canValidate)) {
+                    $canValidateBtn = (bool) $canValidate;
+                } elseif (function_exists('sap_reports_user_can')) {
+                    $canValidateBtn = sap_reports_user_can('po-costing', 'validate');
+                }
                 $canEsignBtn = true;
                 if (isset($canEsign)) {
                     $canEsignBtn = (bool) $canEsign;
@@ -262,12 +242,25 @@ $wbLoginUser = trim((string) (
                     $canEsignBtn = sap_reports_user_can('po-costing', 'esign');
                 }
             ?>
-            <?php if ($canEsignBtn): ?>
-            <button type="button" class="rpt-tb-btn pcw-esign-toolbar-btn" id="pcwOpenEsignBtn" title="Open PO E-Signature">
+            <button type="button" class="rpt-tb-btn rpt-tb-btn-primary" id="pcwOpenValidateBtn"
+                    title="<?= $canValidateBtn ? 'Status &amp; Remarks' : 'Remarks permission required' ?>"
+                    <?= $canValidateBtn ? '' : 'disabled' ?>>
+                <span class="material-icons-round">forum</span>
+                <span>Remarks</span>
+            </button>
+
+            <button type="button" class="rpt-tb-btn pcw-esign-toolbar-btn" id="pcwOpenEsignBtn"
+                    title="<?= $canEsignBtn ? 'Open PO E-Signature' : 'eSign permission required' ?>"
+                    <?= $canEsignBtn ? '' : 'disabled' ?>>
                 <span class="material-icons-round">draw</span>
                 <span>eSign</span>
             </button>
-            <?php endif; ?>
+            <button type="button" class="rpt-tb-btn pcw-sent-toolbar-btn" id="pcwOpenSentBtn"
+                    title="<?= $canEsignBtn ? ($wbPo !== '' ? 'Send this PO to a user' : 'Enter a purchase order first') : 'eSign / send permission required' ?>"
+                    <?= ($canEsignBtn && $wbPo !== '') ? '' : 'disabled' ?>>
+                <span class="material-icons-round">send</span>
+                <span>Sent</span>
+            </button>
         </div>
     </div>
 
@@ -350,6 +343,7 @@ $wbLoginUser = trim((string) (
         require base_path('app/views/reports/partials/po_validation_offcanvas.php');
         $esignUser = $wbLoginUser;
         require base_path('app/views/reports/partials/po_esign_modal.php');
+        require base_path('app/views/reports/partials/po_sent_modal.php');
     ?>
 
     <div class="pcw-same-val-backdrop" id="pcwSameValBackdrop" hidden></div>

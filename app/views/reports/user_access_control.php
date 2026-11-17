@@ -123,7 +123,7 @@ $extraHead = '
                 </div>
                 <div class="uac-legend">
                     <span><i class="uac-dot is-view"></i> Reports · View</span>
-                    <span><i class="uac-dot is-pass"></i> PO Costing · View / Pass PO / Assign / Validate / eSign</span>
+                    <span><i class="uac-dot is-pass"></i> PO Costing · View / Pass PO / Assign / Validate / eSign + Receive / Sent / Workflow / Approved</span>
                     <span><i class="uac-dot is-zcost"></i> ZCOST · Add / Update / Copy / Approve</span>
                 </div>
             </header>

@@ -42,10 +42,9 @@ class PoCostValidationService
     }
 
     /**
-     * Full validation pipeline:
-     *  1) Primary: Fetch from Z_QUOTATIONZCOSTCOM_CDS (PO + Items + Quotation + SO + Fabric/Trim/Packing/Special)
-     *  2) Fallback: Fetch PO items from ZI_PURCHASEORDERAPI_HUB -> Quotations from hub -> ZCOST sheets
-     *  3) Item-wise compare Material Group / Description / Trim code / Material Code
+     * Full validation pipeline — API only:
+     * Z_QuotationZCostCom?$filter=PurchaseOrder eq '{po}'&$expand=to_Fabric,to_Trim,to_Packing,to_Special
+     * No TEMPFIN / PASSPO / hub / local store fallbacks.
      *
      * @return array{success:bool,purchase_order:string,category:string,header:array,summary:array,records:array,flow:array,error:?string}
      */
@@ -84,185 +83,8 @@ class PoCostValidationService
             $customerQuote = $quotationOverride;
         }
 
-        // Prefer classic TEMPFIN / PASSPO grid (PONO, SALORDNO, BUDGET_COST_PER_GMT, ACTUAL_COST, …)
-        require_once __DIR__ . '/PoTempfinCostingService.php';
-        $tempfinType = $category === 'fabric' ? 'fabric' : ($category === 'trims' ? 'trims' : 'all');
-        $tempfin = (new PoTempfinCostingService())->fetchForPurchaseOrder($poDigits, $tempfinType);
-        if (!empty($tempfin['success']) && !empty($tempfin['records'])) {
-            // Also load ZCOST candidates so unmatched TEMPFIN rows can be matched manually
-            $quoteToUse = $customerQuote !== '' ? $customerQuote : ($quotationOverride ?? null);
-            $cds = $this->fetchQuotationZCost($poDigits, $itemOverride, $quoteToUse, $soOverride !== '' ? $soOverride : null);
-            $costLines = [];
-            $quoteOptions = [];
-            $validatedQuotes = [];
-            $nonValidatedQuotes = [];
-            $sapApprovedStatus = 'NotApproved';
-            if (!empty($cds['success'])) {
-                $costLines = is_array($cds['cost_lines'] ?? null) ? $cds['cost_lines'] : [];
-                if ($category !== 'all') {
-                    $costLines = array_values(array_filter(
-                        $costLines,
-                        static fn (array $l): bool => ($l['mat_category'] ?? '') === $category
-                            || ($category === 'fabric' && ($l['section'] ?? '') === 'Fabric')
-                            || ($category === 'trims' && in_array((string) ($l['section'] ?? ''), ['Trim', 'Packing', 'Special'], true))
-                    ));
-                }
-                $quoteOptions = is_array($cds['quote_options'] ?? null) ? $cds['quote_options'] : [];
-                $validatedQuotes = is_array($cds['validated_quotations'] ?? null) ? $cds['validated_quotations'] : [];
-                $nonValidatedQuotes = is_array($cds['non_validated_quotations'] ?? null) ? $cds['non_validated_quotations'] : [];
-                if (($cds['approved_status'] ?? '') === 'Approved') {
-                    $sapApprovedStatus = 'Approved';
-                }
-            }
-
-            // Fallback: if no cost lines found from CDS directly by PO, try searching by linked sales orders
-            if (empty($costLines)) {
-                $linkedSo = array_values(array_unique(array_filter(array_map(
-                    static fn ($r) => trim((string) ($r['salordno'] ?? '')),
-                    $tempfin['records']
-                ))));
-                if ($soOverride !== '' && !in_array($soOverride, $linkedSo, true)) {
-                    $linkedSo[] = $soOverride;
-                }
-                foreach ($linkedSo as $soCandidate) {
-                    if ($soCandidate === '') {
-                        continue;
-                    }
-                    $soCds = $this->fetchQuotationZCost($poDigits, null, null, $soCandidate);
-                    if (($soCds['approved_status'] ?? '') === 'Approved') {
-                        $sapApprovedStatus = 'Approved';
-                    }
-                    if (!empty($soCds['cost_lines'])) {
-                        $costLines = array_merge($costLines, $soCds['cost_lines']);
-                        $quoteOptions = array_merge($quoteOptions, $soCds['quote_options'] ?? []);
-                        $validatedQuotes = array_merge($validatedQuotes, $soCds['validated_quotations'] ?? []);
-                        $nonValidatedQuotes = array_merge($nonValidatedQuotes, $soCds['non_validated_quotations'] ?? []);
-                    }
-                }
-            }
-
-            // Fallback 2: if still empty, check SAP costService for quotation or SO
-            if (empty($costLines)) {
-                $candidates = array_values(array_unique(array_filter(array_merge(
-                    $quoteToUse ? [$quoteToUse] : [],
-                    $linkedSo ?? []
-                ))));
-                if (!empty($candidates)) {
-                    $costing = $this->costService->fetchForSalesOrders($candidates);
-                    if (!empty($costing['records'])) {
-                        $costLines = $costing['records'];
-                    }
-                }
-            }
-
-            // Overlay SAP Cond* pricing conditions (CondOTHR / CondFRB* / CondZB00 / CondZSCI / CondZBCR)
-            // onto TEMPFIN lines when PASSPO does not already carry them.
-            $sapCondByItem = $this->fetchPoConditionCharges($poDigits);
-
-            $records = [];
-            foreach ($tempfin['records'] as $rec) {
-                $kind = (string) ($rec['row_kind'] ?? 'detail');
-                if (in_array($kind, ['footer', 'charge', 'tax'], true)) {
-                    $rec['needs_manual_match'] = false;
-                    $rec['selected'] = false;
-                    $rec['manual_match'] = false;
-                    $records[] = $rec;
-                    continue;
-                }
-                $itemKey = ltrim((string) ($rec['poitem'] ?? $rec['po_item'] ?? ''), '0');
-                if ($itemKey === '') {
-                    $itemKey = '0';
-                }
-                if ($sapCondByItem !== [] && isset($sapCondByItem[$itemKey])) {
-                    $c = $sapCondByItem[$itemKey];
-                    foreach (['cond_othr', 'cond_frb1', 'cond_frb2', 'cond_zb00', 'cond_zsci', 'cond_zbcr'] as $ck) {
-                        $have = isset($rec[$ck]) && $rec[$ck] !== null && $rec[$ck] !== '' && (float) $rec[$ck] != 0.0;
-                        if (!$have && isset($c[$ck]) && (float) $c[$ck] != 0.0) {
-                            $rec[$ck] = $c[$ck];
-                        }
-                    }
-                }
-                // TEMPFIN already has budget+actual in INR (PORATE × Curr Rate).
-                // Do NOT force "needs review" just because zCOST ITEM is empty.
-                // Do NOT overwrite actual_cost with raw PORATE (breaks USD→INR).
-                $budget = $rec['budget_cost_per_gmt'] ?? $rec['expected_unit_cost'] ?? null;
-                $actual = $rec['actual_cost'] ?? $rec['po_unit_cost'] ?? null;
-                if ($actual !== null && $actual !== '') {
-                    $rec['po_unit_cost'] = (float) $actual;
-                }
-                $hasCosts = $budget !== null && $budget !== '' && (float) $budget > 0.0
-                    && $actual !== null && $actual !== '';
-                $st = strtoupper((string) ($rec['status'] ?? ''));
-                $familyMismatch = !empty($rec['family_mismatch']);
-                // Classic portal tolerance: actual ≤ budget + 0.005 → PASS
-                // Never auto-PASS when PASSPO linked the wrong trim family (BUTTON↔ELASTIC).
-                if (!$familyMismatch && $hasCosts && (float) $actual <= ((float) $budget + 0.005)) {
-                    $rec['status'] = 'PASS';
-                    $rec['validation_result'] = 'PASS — actual cost within budget';
-                    $st = 'PASS';
-                    $rec['cost_mismatch'] = false;
-                }
-                $needsManual = $familyMismatch
-                    || !$hasCosts
-                    || ($st === 'EXCEPTION' && preg_match('/no matching|no linked|cannot load|no budget/i', (string) ($rec['validation_result'] ?? '')))
-                    || ($st === 'NEEDS_REVIEW' && preg_match('/does not match MATGROUP|family/i', (string) ($rec['validation_result'] ?? '')));
-                $rec['needs_manual_match'] = (bool) $needsManual;
-                $rec['selected'] = false;
-                $rec['manual_match'] = false;
-                $records[] = $rec;
-            }
-
-            $summary = is_array($tempfin['summary'] ?? null) ? $tempfin['summary'] : [];
-            // Always rebuild Cond* + PASSPO tax/charge footers (IGST/SGST/CGST) so PDF Total PO Value matches
-            $rolled = $this->rollConditionCharges($records);
-            $prior = is_array($summary['charges'] ?? null) ? $summary['charges'] : [];
-            $summary['charges'] = $this->mergeChargeBuckets($prior, $rolled);
-            $summary['sub_total'] = (float) ($summary['total_po_value'] ?? 0);
-            $summary['charges_total'] = (float) (($summary['charges']['total'] ?? 0));
-            $summary['grand_total'] = round(
-                (float) ($summary['sub_total'] ?? 0) + (float) ($summary['charges_total'] ?? 0),
-                2
-            );
-
-            return [
-                'success'                  => true,
-                'purchase_order'           => $this->displayNumber($purchaseOrder),
-                'category'                 => $category,
-                'mode'                     => $mode,
-                'customer_quotation'       => $customerQuote,
-                'end_user_quotation'       => $endUserQuote,
-                'header'                   => [
-                    'purchase_order'  => $this->displayNumber($purchaseOrder),
-                    'sales_orders'    => array_values(array_unique(array_filter(array_map(
-                        static fn ($r) => (string) ($r['salordno'] ?? ''),
-                        $records
-                    )))),
-                    'approved_status' => $sapApprovedStatus,
-                ],
-                'approved_status'          => $sapApprovedStatus,
-                'summary'                  => $summary,
-                'records'                  => $records,
-                'quote_options'            => $quoteOptions,
-                'validated_quotations'     => $validatedQuotes,
-                'non_validated_quotations' => $nonValidatedQuotes,
-                'costing'                  => [
-                    'sales_orders' => $tempfin['summary']['sales_orders'] ?? 0,
-                    'quotations'   => $validatedQuotes,
-                    'sheets'       => $quoteOptions,
-                    'cost_lines'   => count($costLines),
-                    'error'        => $cds['error'] ?? null,
-                ],
-                'cost_lines'               => $costLines,
-                'flow'                     => [
-                    'source'   => 'TEMPFIN_PASSPO',
-                    'mat_type' => $tempfin['mat_type'] ?? $tempfinType,
-                ],
-                'error'                    => null,
-            ];
-        }
-
-        // Fallback: Z_QuotationZCostCom OData (validated + non-validated quote options)
-        $cds = $this->fetchQuotationZCost($poDigits, $itemOverride, null, $soOverride !== '' ? $soOverride : null);
+        // ONLY this API (same as Postman PO search) — never TEMPFIN / other stores
+        $cds = $this->fetchQuotationZCostByPurchaseOrderOnly($poDigits, $itemOverride);
 
         if ($cds['success'] && !empty($cds['po_items'])) {
             $poItems = $cds['po_items'];
@@ -472,138 +294,285 @@ class PoCostValidationService
             ];
         }
 
-        // ── Fallback Path: Multi-hop PO -> Quotation Hub -> ZCOST ──────────
-        // Used when PO has no records in Z_QUOTATIONZCOSTCOM_CDS
-        $poReport = $this->poService->report($purchaseOrder);
-        if (($poReport['error'] ?? null) !== null) {
+        // Postman-empty: do not use TEMPFIN / hub / local store — show empty workbench
+        $apiError = (string) ($cds['error'] ?? 'No records found in Z_QUOTATIONZCOSTCOM_CDS for this purchase order.');
+        return [
+            'success'                  => true,
+            'purchase_order'           => $this->displayNumber($purchaseOrder),
+            'category'                 => $category,
+            'mode'                     => $mode,
+            'customer_quotation'       => $customerQuote,
+            'end_user_quotation'       => $endUserQuote,
+            'header'                   => [
+                'purchase_order'  => $this->displayNumber($purchaseOrder),
+                'sales_orders'    => [],
+                'approved_status' => 'NotApproved',
+            ],
+            'approved_status'          => 'NotApproved',
+            'summary'                  => $this->emptySummary(),
+            'records'                  => [],
+            'quote_options'            => [],
+            'validated_quotations'     => [],
+            'non_validated_quotations' => [],
+            'costing'                  => [
+                'sales_orders' => [],
+                'quotations'   => [],
+                'sheets'       => [],
+                'cost_lines'   => 0,
+                'error'        => $apiError,
+            ],
+            'cost_lines'               => [],
+            'flow'                     => [
+                'source'     => 'Z_QUOTATIONZCOSTCOM_CDS',
+                'step1_po'   => $this->displayNumber($purchaseOrder),
+                'step3_lines'=> 0,
+                'step3_error'=> $apiError,
+            ],
+            'error'                    => $apiError,
+        ];
+    }
+
+    /**
+     * Bulk PO list from Z_QuotationZCostCom only:
+     * $filter=ApprovedStatus eq 'NotApproved' (or PurchaseOrder eq '{po}' when searching)
+     * &$expand=to_Fabric,to_Trim,to_Packing,to_Special
+     *
+     * @param array<string,mixed> $filters
+     * @return array{records:list,total:int,totals:array,range:array,error:?string}
+     */
+    public function listNotApprovedPurchaseOrders(array $filters = []): array
+    {
+        $service = (string) ($this->cfg['quotation_costing_service']
+            ?? '/sap/opu/odata/sap/Z_QUOTATIONZCOSTCOM_CDS/Z_QuotationZCostCom');
+
+        $searchPo = preg_replace('/\D/', '', (string) ($filters['po'] ?? $filters['purchase_order'] ?? $filters['q'] ?? '')) ?? '';
+        if ($searchPo !== '' && !preg_match('/^\d{1,10}$/', $searchPo)) {
+            $searchPo = '';
+        }
+
+        $matCat = strtolower(trim((string) ($filters['mat_cat'] ?? $filters['category'] ?? 'all')));
+        if (!in_array($matCat, ['all', 'fabric', 'trims'], true)) {
+            $matCat = 'all';
+        }
+        $brand = SapPurchaseOrderService::normalizeBrand((string) ($filters['brand'] ?? $filters['brand_name'] ?? ''));
+
+        $pageSize = (int) ($filters['page_size'] ?? $filters['limit'] ?? 25);
+        $page = (int) ($filters['page'] ?? 1);
+        if ($pageSize < 1) {
+            $pageSize = 25;
+        }
+        if ($pageSize > 100) {
+            $pageSize = 100;
+        }
+        if ($page < 1) {
+            $page = 1;
+        }
+
+        if ($searchPo !== '') {
+            $poDisplay = $this->displayNumber($searchPo);
+            $poPadded = preg_match('/^\d+$/', $poDisplay)
+                ? str_pad($poDisplay, 10, '0', STR_PAD_LEFT)
+                : $poDisplay;
+            $filter = ($poPadded !== '' && $poPadded !== $poDisplay)
+                ? "(PurchaseOrder eq '{$poDisplay}' or PurchaseOrder eq '{$poPadded}')"
+                : "PurchaseOrder eq '{$poDisplay}'";
+        } else {
+            $filter = "ApprovedStatus eq 'NotApproved'";
+        }
+
+        $res = $this->odata->fetchResults($service, [
+            '$filter' => $filter,
+            '$expand' => 'to_Fabric,to_Trim,to_Packing,to_Special',
+        ], 5000);
+
+        $emptyTotals = [
+            'pos_count'       => 0,
+            'items_count'     => 0,
+            'total_qty'       => 0,
+            'total_value'     => 0,
+            'currency'        => 'INR',
+            'suppliers_count' => 0,
+        ];
+
+        if (!empty($res['error']) && empty($res['rows'])) {
             return [
-                'success'        => false,
-                'purchase_order' => $this->displayNumber($purchaseOrder),
-                'category'       => $category,
-                'header'         => [],
-                'summary'        => $this->emptySummary(),
-                'records'        => [],
-                'flow'           => ['step' => 1, 'error' => $poReport['error']],
-                'error'          => $poReport['error'],
+                'records'       => [],
+                'total'         => 0,
+                'totals'        => $emptyTotals,
+                'range'         => ['preset' => 'all', 'from' => '', 'to' => ''],
+                'truncated'     => false,
+                'items_fetched' => 0,
+                'error'         => $res['error'],
+                'source'        => 'Z_QUOTATIONZCOSTCOM_CDS',
             ];
         }
 
-        $poItems = is_array($poReport['records'] ?? null) ? $poReport['records'] : [];
-        if ($category !== 'all') {
-            $poItems = array_values(array_filter(
-                $poItems,
-                static fn (array $r): bool => ($r['mat_category'] ?? '') === $category
-            ));
-        }
+        /** @var array<string, array<string,mixed>> $pos */
+        $pos = [];
+        foreach ($res['rows'] ?? [] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $po = $this->displayNumber((string) ($row['PurchaseOrder'] ?? ''));
+            if ($po === '') {
+                continue;
+            }
+            $key = ltrim(preg_replace('/\D/', '', $po) ?? '', '0');
+            if ($key === '') {
+                $key = $po;
+            }
 
-        $extraSos = [];
-        if ($soOverride !== '' && $soOverride !== '0') {
-            $extraSos[] = $soOverride;
-        }
+            $matType = trim((string) ($row['MaterialType'] ?? ''));
+            $matTypeDesc = trim((string) ($row['MatTypeDesc'] ?? ''));
+            $matGroup = trim((string) ($row['MaterialGroup'] ?? ''));
+            $cat = SapPurchaseOrderService::classifyMaterial($matType, $matTypeDesc, $matGroup);
+            if ($matCat === 'fabric' && $cat !== 'fabric') {
+                continue;
+            }
+            if ($matCat === 'trims' && $cat !== 'trims') {
+                continue;
+            }
 
-        $salesOrders = $extraSos;
-        foreach ($poItems as $item) {
-            foreach ((array) ($item['sales_orders'] ?? []) as $so) {
-                $so = $this->displayNumber((string) $so);
-                if ($so !== '' && !in_array($so, $salesOrders, true)) {
-                    $salesOrders[] = $so;
-                }
+            $brandName = trim((string) ($row['BrandName'] ?? $row['brand_name'] ?? ''));
+            if ($brand !== '' && strcasecmp($brandName, $brand) !== 0
+                && stripos($brandName, $brand) === false) {
+                continue;
+            }
+
+            $qty = $this->sapNumber($row['OrderQuantity'] ?? 0);
+            $net = $this->sapNumber($row['NetPriceAmount'] ?? 0);
+            $itemNo = $this->displayNumber((string) ($row['PurchaseOrderItem'] ?? ''));
+            $material = trim((string) ($row['Material'] ?? ''));
+            $currency = trim((string) ($row['DocumentCurrency'] ?? 'INR')) ?: 'INR';
+            $supplier = $this->displayNumber((string) ($row['Supplier'] ?? ''));
+            $supplierName = trim((string) ($row['SupplierFullName'] ?? ''));
+            $poDate = $this->sapDate($row['PurchaseOrderDate'] ?? null);
+            $approved = $this->normalizeApprovedStatus($row['ApprovedStatus'] ?? null);
+
+            if (!isset($pos[$key])) {
+                $pos[$key] = [
+                    'purchase_order'     => $po,
+                    'po_date'            => $poDate,
+                    'supplier'           => $supplier,
+                    'supplier_full_name' => $supplierName,
+                    'brand_name'         => $brandName !== '' ? $brandName : '—',
+                    'brand_code'         => $brandName,
+                    'currency'           => $currency,
+                    'approved_status'    => $approved,
+                    'items_count'        => 0,
+                    'total_qty'          => 0.0,
+                    'total_value'        => 0.0,
+                    'materials'          => [],
+                    'material_types'     => [],
+                    'mat_categories'     => [],
+                    'plants'             => [],
+                    '_items'             => [],
+                ];
+            }
+
+            if ($itemNo !== '' && !isset($pos[$key]['_items'][$itemNo])) {
+                $pos[$key]['_items'][$itemNo] = true;
+                $pos[$key]['items_count']++;
+                $pos[$key]['total_qty'] += $qty;
+                $pos[$key]['total_value'] += $net;
+            }
+            if ($material !== '') {
+                $pos[$key]['materials'][$material] = true;
+            }
+            if ($matType !== '') {
+                $pos[$key]['material_types'][$matType] = true;
+            }
+            if ($cat !== '') {
+                $pos[$key]['mat_categories'][$cat] = true;
+            }
+            $plant = trim((string) ($row['Plant'] ?? ''));
+            if ($plant !== '') {
+                $pos[$key]['plants'][$plant] = true;
+            }
+            if ($approved === 'Approved') {
+                $pos[$key]['approved_status'] = 'Approved';
+            }
+            if ($brandName !== '' && ($pos[$key]['brand_name'] === '—' || $pos[$key]['brand_name'] === '')) {
+                $pos[$key]['brand_name'] = $brandName;
             }
         }
-        foreach ((array) ($poReport['header']['sales_orders'] ?? []) as $so) {
-            $so = $this->displayNumber((string) $so);
-            if ($so !== '' && !in_array($so, $salesOrders, true)) {
-                $salesOrders[] = $so;
-            }
-        }
 
-        // Sales Order → Quotation Number
-        $quoteMap = $this->resolveQuotationsForSalesOrders($salesOrders);
-        $quotations = array_values(array_unique(array_filter(array_map(
-            static fn ($row) => trim((string) ($row['quotation'] ?? '')),
-            $quoteMap
-        ))));
-
-        // ZCOST by Quotation (preferred) then Sales Order
-        $docKeys = array_values(array_unique(array_filter(array_merge($quotations, $salesOrders))));
-        $costing = $this->costService->fetchForSalesOrders($docKeys);
-        $costLines = is_array($costing['records'] ?? null) ? $costing['records'] : [];
-
-        // Item-wise validation
         $records = [];
-        foreach ($poItems as $item) {
-            $records[] = $this->validateItem(
-                $item,
-                $costLines,
-                $category,
-                (string) ($poReport['purchase_order'] ?? $purchaseOrder),
-                $quoteMap
-            );
+        foreach ($pos as $r) {
+            $cats = array_keys($r['mat_categories']);
+            $matCategory = count($cats) > 1 ? 'mixed' : ($cats[0] ?? 'other');
+            $records[] = [
+                'purchase_order'     => $r['purchase_order'],
+                'po_date'            => $r['po_date'],
+                'supplier'           => $r['supplier'],
+                'supplier_full_name' => $r['supplier_full_name'],
+                'brand_name'         => $r['brand_name'],
+                'brand_code'         => $r['brand_code'],
+                'currency'           => $r['currency'],
+                'approved_status'    => $r['approved_status'],
+                'items_count'        => $r['items_count'],
+                'total_qty'          => round($r['total_qty'], 3),
+                'total_value'        => round($r['total_value'], 2),
+                'materials_count'    => count($r['materials']),
+                'material'           => implode(', ', array_keys($r['materials'])),
+                'material_type'      => implode(', ', array_keys($r['material_types'])),
+                'mat_category'       => $matCategory,
+                'plant'              => implode(', ', array_keys($r['plants'])),
+                'status_bucket'      => 'not_started',
+                'validation_status'  => 'MAPPING_REQUIRED',
+            ];
         }
 
-        $summary = $this->summarize($records);
-        $header = is_array($poReport['header'] ?? null) ? $poReport['header'] : [];
-        $header['cost_sheets'] = (int) ($costing['summary']['sheets'] ?? 0);
-        $header['cost_error'] = $costing['error'] ?? null;
-        $header['quotations'] = $quotations;
-        $header['sales_orders'] = $salesOrders;
+        usort($records, static function (array $a, array $b): int {
+            return strcmp((string) ($b['po_date'] ?? ''), (string) ($a['po_date'] ?? ''))
+                ?: strcmp((string) ($b['purchase_order'] ?? ''), (string) ($a['purchase_order'] ?? ''));
+        });
 
-        $flowError = null;
-        if ($salesOrders === []) {
-            $flowError = 'No linked sales order on PO lines — cannot resolve quotation / ZCOST.';
-        } elseif ($quotations === [] && $costLines === []) {
-            $flowError = $quoteMap[0]['error']
-                ?? $costing['error']
-                ?? 'No quotation found for linked sales orders and ZCOST returned no lines.';
-        } elseif ($costLines === [] && ($costing['error'] ?? null)) {
-            $flowError = $costing['error'];
+        $total = count($records);
+        $offset = ($page - 1) * $pageSize;
+        $pageRows = array_slice($records, $offset, $pageSize);
+
+        $totalQty = 0.0;
+        $totalVal = 0.0;
+        $totalItems = 0;
+        $suppliers = [];
+        $currencies = [];
+        foreach ($records as $r) {
+            $totalQty += (float) ($r['total_qty'] ?? 0);
+            $totalVal += (float) ($r['total_value'] ?? 0);
+            $totalItems += (int) ($r['items_count'] ?? 0);
+            $sup = trim((string) ($r['supplier'] ?? ''));
+            if ($sup !== '') {
+                $suppliers[$sup] = true;
+            }
+            $cur = trim((string) ($r['currency'] ?? ''));
+            if ($cur !== '') {
+                $currencies[$cur] = ($currencies[$cur] ?? 0) + 1;
+            }
         }
+        arsort($currencies);
+        $primaryCurrency = key($currencies) ?: 'INR';
 
         return [
-            'success'        => true,
-            'purchase_order' => (string) ($poReport['purchase_order'] ?? $this->displayNumber($purchaseOrder)),
-            'category'       => $category,
-            'mode'           => $mode,
-            'customer_quotation' => $customerQuote,
-            'end_user_quotation' => $endUserQuote,
-            'header'         => $header,
-            'summary'        => $summary,
-            'records'        => $records,
-            'quote_options'  => array_map(static function (string $q): array {
-                return [
-                    'quotation'         => $q,
-                    'costing_quotation' => '',
-                    'is_validated'      => false,
-                    'sales_order'       => '',
-                    'fabric_lines'      => 0,
-                    'trim_lines'        => 0,
-                    'packing_lines'     => 0,
-                    'special_lines'     => 0,
-                ];
-            }, $quotations),
-            'validated_quotations' => [],
-            'non_validated_quotations' => $quotations,
-            'costing'        => [
-                'sales_orders' => $salesOrders,
-                'quotations'   => $quotations,
-                'sheets'       => $costing['sheets'] ?? [],
-                'error'        => $costing['error'] ?? null,
+            'records'       => $pageRows,
+            'total'         => $total,
+            'page'          => $page,
+            'page_size'     => $pageSize,
+            'page_count'    => max(1, (int) ceil($total / $pageSize)),
+            'totals'        => [
+                'pos_count'       => $total,
+                'items_count'     => $totalItems,
+                'total_qty'       => round($totalQty, 3),
+                'total_value'     => round($totalVal, 2),
+                'currency'        => $primaryCurrency,
+                'suppliers_count' => count($suppliers),
             ],
-            'cost_lines'     => $costLines,
-            'flow'           => [
-                'source'            => 'FALLBACK_HUB',
-                'mode'              => $mode,
-                'customer_quotation'=> $customerQuote,
-                'end_user_quotation'=> $endUserQuote,
-                'step1_po'          => (string) ($poReport['purchase_order'] ?? $purchaseOrder),
-                'step2_sales_orders'=> $salesOrders,
-                'step2_quotations'  => $quotations,
-                'step2_links'       => $quoteMap,
-                'step3_docs'        => $docKeys,
-                'step3_lines'       => count($costLines),
-                'step3_error'       => $costing['error'] ?? null,
-            ],
-            'error'          => $flowError,
+            'range'         => ['preset' => 'all', 'from' => '', 'to' => ''],
+            'truncated'     => false,
+            'items_fetched' => (int) ($res['row_count'] ?? 0),
+            'error'         => null,
+            'source'        => 'Z_QUOTATIONZCOSTCOM_CDS',
+            'approved_status' => $searchPo !== '' ? '' : 'NotApproved',
         ];
     }
 
@@ -1211,6 +1180,13 @@ class PoCostValidationService
     ): array {
         $poUnit = (float) ($item['net_price'] ?? 0);
         $qty = (float) ($item['order_qty'] ?? 0);
+        // When unit price is 0 but line net value exists, derive PORATE = net ÷ qty
+        if ($poUnit <= 0) {
+            $netVal = (float) ($item['net_value'] ?? $item['totvalue'] ?? 0);
+            if ($netVal > 0 && $qty > 0) {
+                $poUnit = round($netVal / $qty, 4);
+            }
+        }
         $material = trim((string) ($item['material'] ?? ''));
         $description = trim((string) ($item['material_desc'] ?? $item['description'] ?? ''));
         $materialType = trim((string) ($item['material_type'] ?? ''));
@@ -1453,7 +1429,9 @@ class PoCostValidationService
         } elseif ($poCurrUpper === 'INR' && $unitConv > 20) {
             $unitConv = 1.0;
         }
-        $baseRate = ($poCurrUpper !== 'INR') ? ($poRate * $budgetConvRt) : $poRate;
+        // TEMPFIN/list PORATE is already INR. Only × Curr Rate when explicitly flagged.
+        $needsFx = !empty($item['porate_needs_fx']);
+        $baseRate = ($needsFx && $poCurrUpper !== 'INR') ? ($poRate * $budgetConvRt) : $poRate;
         $midActual = $baseRate * $unitConv * $consForActual;
         // Classic calc-columns: GRO÷144 only for button-like groups (not every GRO UOM)
         $isButtonGro = ($ouom === 'GRO' || $buom === 'GRO') && (
@@ -1597,6 +1575,103 @@ class PoCostValidationService
             'needs_manual_match'  => $match === null
                 || $status === 'EXCEPTION' && preg_match('/no matching|no linked|cannot load|no reliable/i', (string) $result),
         ];
+    }
+
+    /**
+     * Z_QuotationZCostCom by PurchaseOrder only — same filter as Postman.
+     * Quotation/SO args left null so the SO/quote fallback inside fetchQuotationZCost
+     * does not invent Costing Data when the PO filter returns [].
+     *
+     * @return array<string,mixed>
+     */
+    private function fetchQuotationZCostByPurchaseOrderOnly(string $poDigits, ?string $item = null): array
+    {
+        return $this->fetchQuotationZCost($poDigits, $item, null, null);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $records
+     * @param array<string,mixed> $base
+     * @return array<string,mixed>
+     */
+    private function recountTempfinStatusSummary(array $records, array $base): array
+    {
+        $passed = 0;
+        $exceptions = 0;
+        $needsReview = 0;
+        $matched = 0;
+        $detail = 0;
+        foreach ($records as $r) {
+            $kind = (string) ($r['row_kind'] ?? 'detail');
+            if (in_array($kind, ['footer', 'charge', 'tax'], true)) {
+                continue;
+            }
+            $st = strtoupper(str_replace(' ', '_', (string) ($r['status'] ?? '')));
+            if ($st === 'FOOTER') {
+                continue;
+            }
+            $detail++;
+            if ($st === 'PASS') {
+                $passed++;
+            } elseif ($st === 'NEEDS_REVIEW') {
+                $needsReview++;
+            } else {
+                // NOT_MATCHED / EXCEPTION / other → Mapping Required bucket
+                $exceptions++;
+            }
+            if (($r['maktx'] ?? '') !== '' || ($r['cost_item'] ?? '') !== '' || !empty($r['manual_match'])) {
+                $matched++;
+            }
+        }
+        $base['passed'] = $passed;
+        $base['exceptions'] = $exceptions;
+        $base['needs_review'] = $needsReview;
+        $base['zcost_matched'] = $matched;
+        $base['can_pass_po'] = $detail > 0 && $exceptions === 0 && $needsReview === 0 && $passed > 0;
+        return $base;
+    }
+
+    /**
+     * Strip Costing Data columns from a TEMPFIN row when Z_QUOTATIONZCOSTCOM_CDS
+     * has no matching lines (Postman empty / stale PASSPO link).
+     * PO Data fields (PORATE, qty, material, …) are kept.
+     *
+     * @param array<string,mixed> $rec
+     * @return array<string,mixed>
+     */
+    private function clearTempfinCostingFields(array $rec, string $reason): array
+    {
+        $rec['cost_item'] = '';
+        $rec['zcost_item'] = '';
+        $rec['costing_item_no'] = '';
+        $rec['costing_quotation_no'] = '';
+        $rec['matched_quotation'] = '';
+        $rec['quotation'] = '';
+        $rec['maktx'] = '';
+        $rec['cost_description'] = '';
+        $rec['zsection'] = '';
+        $rec['cost_section'] = '';
+        $rec['cost_nav'] = '';
+        $rec['budget_cost_per_gmt'] = null;
+        $rec['budget_cost_per_piece'] = null;
+        $rec['expected_unit_cost'] = null;
+        $rec['budget_inr'] = null;
+        $rec['cost_total_inr'] = null;
+        $rec['total_inr'] = null;
+        $rec['gross'] = null;
+        $rec['budgeted_cons'] = null;
+        $rec['variance_pct'] = null;
+        $rec['cost_mismatch'] = false;
+        $rec['cost_matrix'] = null;
+        $rec['tempfin_budget_locked'] = false;
+        $rec['family_mismatch'] = false;
+        // Hide costing ACTUAL until a live CDS line is mapped (keep PORATE for PO Data)
+        $rec['actual_cost'] = null;
+        $rec['status'] = 'NOT_MATCHED';
+        $rec['validation_result'] = $reason;
+        $rec['needs_manual_match'] = true;
+        $rec['_zcost_pending'] = true;
+        return $rec;
     }
 
     private function costNavName(string $section): string

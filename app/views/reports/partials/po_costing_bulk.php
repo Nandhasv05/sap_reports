@@ -6,41 +6,62 @@
 <section class="pcb" id="poCostingBulk" aria-label="Bulk PO Costing Validation">
     <div class="pcb-toast" id="pcbToast" hidden role="status" aria-live="polite"></div>
 
+    <div class="pcb-rules-popover" id="pcbRemarksPopover" hidden role="dialog" aria-labelledby="pcbRemarksTitle" aria-modal="true">
+        <div class="pcb-rules-card pcb-remarks-card">
+            <div class="pcb-rules-head">
+                <div>
+                    <span class="pcb-rules-kicker" id="pcbRemarksKicker">Status &amp; Remarks</span>
+                    <h3 id="pcbRemarksTitle">Remarks</h3>
+                </div>
+                <button type="button" class="pcb-rules-close" id="pcbRemarksClose" aria-label="Close remarks">&times;</button>
+            </div>
+            <div class="pcb-remarks-meta" id="pcbRemarksMeta"></div>
+            <div class="pcb-remarks-list" id="pcbRemarksList" role="list"></div>
+        </div>
+    </div>
+
+    <div class="pcb-rules-popover" id="pcbMailPopover" hidden role="dialog" aria-labelledby="pcbMailTitle" aria-modal="true">
+        <div class="pcb-mail-card">
+            <div class="pcb-mail-head">
+                <div class="pcb-mail-head-main">
+                    <span class="pcb-mail-head-ico material-icons-round" aria-hidden="true">send</span>
+                    <div>
+                        <span class="pcb-mail-kicker">Sent / Receive</span>
+                        <h3 id="pcbMailTitle">Mailbox details</h3>
+                    </div>
+                </div>
+                <button type="button" class="pcb-rules-close" id="pcbMailClose" aria-label="Close sent details">&times;</button>
+            </div>
+            <div class="pcb-mail-body" id="pcbMailBody"></div>
+        </div>
+    </div>
+
     <div class="pcb-rules-popover" id="pcbRulesPopover" hidden role="dialog" aria-labelledby="pcbRulesTitle" aria-modal="false">
         <div class="pcb-rules-card">
             <div class="pcb-rules-head">
                 <div>
-                    <span class="pcb-rules-kicker">PO vs zCOST</span>
-                    <h3 id="pcbRulesTitle">Compare rules &amp; status decode</h3>
+                    <span class="pcb-rules-kicker">PO Validation</span>
+                    <h3 id="pcbRulesTitle">Validation status decode</h3>
                 </div>
                 <button type="button" class="pcb-rules-close" id="pcbRulesClose" aria-label="Close rules">&times;</button>
             </div>
             <div class="pcb-rules-body">
                 <section>
-                    <h4>How values are compared</h4>
-                    <ol>
-                        <li>Load PO items from SAP (TEMPFIN / PO hub).</li>
-                        <li>Link each PO line to Sales Order → Quotation → zCOST sheet.</li>
-                        <li>Match lines by Material Group / Description / Trim code / Material Code.</li>
-                        <li>Compare <strong>Actual Cost (PO)</strong> vs <strong>Budget Cost (zCOST)</strong>.</li>
-                        <li>Classic tolerance: Actual ≤ Budget + <strong>0.005</strong> → Passed.</li>
-                        <li>Match score ≥ <strong>90</strong> → automatic Pass / Unmatched decision.</li>
-                        <li>Match score <strong>40–89</strong> → Needs Review (uncertain mapping).</li>
-                        <li>Match score &lt; <strong>40</strong> or no zCOST link → Unmatched.</li>
-                    </ol>
-                </section>
-                <section>
-                    <h4>Status decode</h4>
+                    <h4>Validation Status (workflow)</h4>
+                    <p>List badges and KPI cards follow the PO e-sign / validation workflow for each purchase order.</p>
                     <ul class="pcb-rules-status">
-                        <li><span class="pcb-badge is-pass">PASSED</span> PO actual cost is within budget / matched successfully.</li>
-                        <li><span class="pcb-badge is-fail">UNMATCHED</span> No matching zCOST line, missing budget, or cost above budget.</li>
-                        <li><span class="pcb-badge is-review">NEEDS REVIEW</span> Partial match — confirm material mapping manually.</li>
-                        <li><span class="pcb-badge is-pending">PENDING</span> Not validated yet. Click <strong>Validated</strong> or row <strong>Validate</strong>.</li>
+                        <li><span class="pcb-badge is-pass">PASSED</span> Workflow completed — fully signed &amp; validated.</li>
+                        <li><span class="pcb-badge is-review">NEED TO REVIEW</span> In checker / authorised review, or rejected and needs attention.</li>
+                        <li><span class="pcb-badge is-pending">MAPPING REQUIRED</span> Not started or pending required upload / preparer steps.</li>
                     </ul>
                 </section>
                 <section>
-                    <h4>Unmatched means</h4>
-                    <p>Count of POs (or lines) where PO value could not be matched to zCOST under the rules above. Click this card anytime to reopen these rules.</p>
+                    <h4>Workflow stages</h4>
+                    <ol>
+                        <li><strong>Mapping Required</strong> — no request yet, pending upload, or pending preparer signature.</li>
+                        <li><strong>Need to Review</strong> — pending checker, signed awaiting final, pending authorised signatory, or rejected.</li>
+                        <li><strong>Passed</strong> — completed after all required signatures.</li>
+                    </ol>
                 </section>
             </div>
         </div>
@@ -63,12 +84,12 @@
             </div>
             <div class="pcb-kpi-bar" aria-hidden="true" style="display:none;"><i id="pcbKpiPassedBar" style="width:0%"></i></div>
         </article>
-        <article class="pcb-kpi is-fail pcb-kpi-rules" id="pcbUnmatchedKpi" role="button" tabindex="0" title="Click to view PO vs zCOST compare rules" aria-controls="pcbRulesPopover" aria-expanded="false">
-            <span class="pcb-kpi-icon material-icons-round">error</span>
+        <article class="pcb-kpi is-review pcb-kpi-rules" id="pcbUnmatchedKpi" role="button" tabindex="0" title="Click to view validation status rules" aria-controls="pcbRulesPopover" aria-expanded="false">
+            <span class="pcb-kpi-icon material-icons-round">rate_review</span>
             <div class="pcb-kpi-body">
                 <b id="pcbKpiExceptions">—</b>
                 <small id="pcbKpiExcPct">
-                    Data Not Matched
+                    Need to Review
                     <span class="material-icons-round pcb-kpi-help" aria-hidden="true">info</span>
                 </small>
             </div>
@@ -78,7 +99,7 @@
             <span class="pcb-kpi-icon material-icons-round">schedule</span>
             <div class="pcb-kpi-body">
                 <b id="pcbKpiPending">—</b>
-                <small id="pcbKpiPendPct">Pending</small>
+                <small id="pcbKpiPendPct">Mapping Required</small>
             </div>
             <div class="pcb-kpi-bar" aria-hidden="true" style="display:none;"><i id="pcbKpiPendBar" style="width:0%"></i></div>
         </article>
@@ -96,7 +117,7 @@
         <div class="rpt-table-toolbar pcb-table-toolbar">
             <div class="rpt-tb-search">
                 <span class="material-icons-round rpt-search-ico">search</span>
-                <input type="search" id="pcbQuickSearch" class="rpt-tb-input" placeholder="Quick search PO #, Vendor…" autocomplete="off" spellcheck="false">
+                <input type="search" id="pcbQuickSearch" class="rpt-tb-input" placeholder="Quick search PO #, Vendor, Brand…" autocomplete="off" spellcheck="false">
                 <button type="button" id="pcbQuickSearchClear" class="rpt-tb-clear" title="Clear search" aria-label="Clear search" style="display:none;">
                     <i class="fas fa-times"></i>
                 </button>
@@ -182,7 +203,7 @@
                     </tr>
                 </thead>
                 <tbody id="pcbTableBody">
-                    <tr class="pcb-empty"><td colspan="<?= (int) $bulkColCount ?>">Select a date range to load purchase orders.</td></tr>
+                    <tr class="pcb-empty"><td colspan="<?= (int) $bulkColCount ?>">Loading purchase orders…</td></tr>
                 </tbody>
             </table>
             </div>

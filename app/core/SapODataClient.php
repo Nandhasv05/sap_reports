@@ -82,12 +82,16 @@ class SapODataClient
                 break;
             }
 
-            $onBatch($batch);
+            $continue = $onBatch($batch);
             $batchCount = count($batch);
             $total += $batchCount;
             $skip += $batchCount;
             unset($batch);
 
+            // Callback may return false to stop early (e.g. enough unique POs aggregated).
+            if ($continue === false) {
+                break;
+            }
             if ($batchCount < $top) {
                 break;
             }

@@ -34,6 +34,8 @@ $salesOrder = (string) ($salesOrder ?? '');
 $poType = (string) ($poType ?? '');
 $poTypes = is_array($poTypes ?? null) ? $poTypes : array_values(array_filter(array_map('trim', explode(',', $poType))));
 $matCat = (string) ($matCat ?? 'all');
+$brand = (string) ($brand ?? '');
+$brands = is_array($brands ?? null) ? $brands : SapPurchaseOrderService::brands();
 $approvedStatus = (string) ($approvedStatus ?? '');
 $matCategories = is_array($matCategories ?? null) ? $matCategories : SapPurchaseOrderService::materialCategories();
 $docTypes = is_array($docTypes ?? null) ? $docTypes : SapPurchaseOrderService::documentTypes();
@@ -51,6 +53,7 @@ $csvUrl = $pageUrl . '?' . http_build_query(array_filter([
     'so'       => $salesOrder,
     'po_type'  => $poType,
     'mat_cat'  => $matCat !== 'all' ? $matCat : '',
+    'brand'    => $brand,
     'export'   => 'csv',
 ], static fn ($v): bool => $v !== null && $v !== ''));
 
@@ -134,15 +137,17 @@ $listCards = $isCostingView
                     <button type="submit" class="pcw-cb-btn" id="pcwSearchBtn" title="Search">
                         <i class="fas fa-search"></i> SEARCH
                     </button>
-                    <button type="button" class="pcw-cb-btn" id="pcwResetBtn" title="Reset">RESET</button>
-                    <button type="button" class="pcw-cb-btn is-pass" id="pcwPassPoBtn" disabled title="Pass PO (Value = X)">PASS PO</button>
+                    <?php
+                        $canPassPoBar = function_exists('sap_reports_user_can')
+                            ? sap_reports_user_can('po-costing', 'approve')
+                            : true;
+                    ?>
+                    <button type="button" class="pcw-cb-btn is-pass" id="pcwPassPoBtn" disabled
+                            title="<?= $canPassPoBar ? 'Pass PO — opens eSign in a new tab' : 'Pass PO permission required' ?>"
+                            <?= $canPassPoBar ? '' : 'data-no-access="1"' ?>>PASS PO</button>
                     <div class="pcw-cb-status" id="pcwPassStatus">STATUS : NotApproved</div>
                 </form>
             <?php elseif ($isCostingBulk): ?>
-                <a href="<?= e($costingHomeUrl) ?>" class="po-back-nav" id="pcbBackBtn" title="Back to PO Costing">
-                    <span class="material-icons-round">arrow_back</span>
-                    <span>Back</span>
-                </a>
                 <div class="rpt-name pcb-bar-title">
                     <strong><?= e($pageHeading) ?></strong>
                 </div>
@@ -155,18 +160,13 @@ $listCards = $isCostingView
             <?php require base_path('app/views/partials/header_nav_right.php'); ?>
         <?php elseif ($isCostingBulk): ?>
             <?php
-                $bulkPresets = is_array($presets ?? null) && $presets !== [] ? $presets : SapPurchaseOrderService::rangePresets();
-                $bulkRangePreset = (string) ($rangePreset ?? ($range['preset'] ?? 'today'));
-                if (!array_key_exists($bulkRangePreset, $bulkPresets)) {
-                    $bulkRangePreset = 'today';
-                }
                 $bulkMatHeader = (string) ($matCat ?? 'all');
                 $bulkApprovedHeader = (string) ($approvedStatus ?? '');
                 if (!in_array($bulkApprovedHeader, ['Approved', 'NotApproved'], true)) {
-                    $bulkApprovedHeader = 'Approved';
+                    $bulkApprovedHeader = 'NotApproved';
                 }
-                $dateMin = date('Y-m-d', strtotime('-' . SapPurchaseOrderService::MAX_RANGE_DAYS . ' days'));
-                $dateMax = date('Y-m-d');
+                $bulkBrandHeader = (string) ($brand ?? '');
+                $bulkBrandOptions = is_array($brands ?? null) ? $brands : [];
             ?>
             <form class="rpt-search prod-filters po-filters pcb-header-filters" id="pcbFilterForm" autocomplete="off" novalidate>
                 <input type="hidden" name="view" value="costing">
@@ -196,16 +196,25 @@ $listCards = $isCostingView
                     </label>
                 </div>
                 <input type="hidden" id="pcbMat" name="mat_cat" value="<?= e(in_array($bulkMatHeader, ['fabric', 'trims'], true) ? $bulkMatHeader : 'all') ?>">
-                <label class="rpt-field rpt-field-range" title="PO creation date range">
-                    <span class="material-icons-round">date_range</span>
-                    <select id="pcbRange" name="range" aria-label="PO date range">
-                        <?php foreach ($bulkPresets as $key => $label): ?>
-                            <option value="<?= e($key) ?>"<?= $key === $bulkRangePreset ? ' selected' : '' ?>><?= e($label) ?></option>
+                <label class="rpt-field pcb-header-brand" title="Filter by brand name">
+                    <span class="material-icons-round">sell</span>
+                    <select id="pcbBrand" name="brand" aria-label="Brand name">
+                        <option value="">All Brands</option>
+                        <?php foreach ($bulkBrandOptions as $b): ?>
+                            <?php
+                            $bCode = (string) ($b['code'] ?? '');
+                            $bName = (string) ($b['name'] ?? $bCode);
+                            if ($bCode === '') {
+                                continue;
+                            }
+                            ?>
+                            <option value="<?= e($bCode) ?>"<?= strcasecmp($bulkBrandHeader, $bCode) === 0 ? ' selected' : '' ?>><?= e($bName) ?> (<?= e($bCode) ?>)</option>
                         <?php endforeach; ?>
                     </select>
                 </label>
-                <input type="hidden" id="pcbFrom" name="from" value="<?= e($range['from'] ?? '') ?>">
-                <input type="hidden" id="pcbTo" name="to" value="<?= e($range['to'] ?? '') ?>">
+                <input type="hidden" id="pcbRange" name="range" value="all">
+                <input type="hidden" id="pcbFrom" name="from" value="">
+                <input type="hidden" id="pcbTo" name="to" value="">
                 <label class="rpt-field po-direct-search pcb-header-search" title="Search PO number (Press Enter to search)">
                     <span class="material-icons-round">search</span>
                     <input type="search" id="pcbPoSearch" value="" placeholder="Search PO #" inputmode="numeric" maxlength="10" autocomplete="off" aria-label="Search purchase order number">
@@ -709,6 +718,8 @@ $pcbCurrentUserEmail = trim((string) (
     'salesOrder'         => $salesOrder,
     'poType'             => $poType,
     'matCat'             => $matCat,
+    'brand'              => $brand ?? '',
+    'brands'             => is_array($brands ?? null) ? $brands : [],
     'approvedStatus'     => $approvedStatus ?? '',
     'presetDates'        => $presetDates,
     'dataUrl'            => url('purchase-order/data'),
@@ -719,6 +730,12 @@ $pcbCurrentUserEmail = trim((string) (
     'esignSaveUrl'       => url('purchase-order/esign-save'),
     'esignSignatureUrl'  => url('purchase-order/esign-signature'),
     'passLogUrl'         => url('purchase-order/pass-log'),
+    'sendMailUrl'        => url('purchase-order/send-mail'),
+    'workflowUrl'        => url('purchase-order/workflow'),
+    'workflowSaveUrl'    => url('purchase-order/workflow/save'),
+    'workflowNotifyUrl'  => url('purchase-order/workflow/notify'),
+    'workflowDecideUrl'  => url('purchase-order/workflow/decide'),
+    'workflowAckUrl'     => url('purchase-order/workflow/ack'),
     'zcostUrl'           => url('zcost'),
     'zcostAppUrl'        => url('zcost'),
     'usersUrl'           => url('purchase-order/users'),
@@ -735,6 +752,7 @@ $pcbCurrentUserEmail = trim((string) (
     'canAssign'          => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'assign') : true,
     'canValidate'        => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'validate') : true,
     'canEsign'           => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'esign') : true,
+    'canWorkbench'       => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'workbench') : true,
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
 <?php if ($isCostingWorkbench): ?>
 <?php
@@ -748,7 +766,7 @@ $pcbCurrentUserEmail = trim((string) (
 window.pdfjsLib && (pdfjsLib.GlobalWorkerOptions.workerSrc =
     'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js');
 </script>
-<script src="<?= e(asset('js/po-costing-workbench.js')) ?>"></script>
+<script src="<?= e(asset('js/po-costing-workbench.js')) ?>?v=<?= @filemtime(base_path('public/js/po-costing-workbench.js')) ?: time() ?>"></script>
 <?php elseif ($isCostingBulk): ?>
 <?php
     require_once base_path('app/services/TableColumnRegistry.php');

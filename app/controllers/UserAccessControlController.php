@@ -6,7 +6,7 @@ declare(strict_types=1);
  * DATE : 03/11/2026
  * DESCRIPTION : SAP Reports User Access Control Controller
  *               Restricted to: admin, saravan, nandhakumar
- *               Reports: View · PO Costing: View/Pass PO/Assign/Validate/eSign · ZCOST: Add/Update/Copy/Approve
+ *               Reports: View · PO Costing: View/Pass PO/Assign/Validate/eSign + Receive/Sent/Workflow/Approved pages · ZCOST: Add/Update/Copy/Approve
  *               Persisted to dbo.sap_report_userascesscontrol
 */
 
@@ -76,14 +76,21 @@ class UserAccessControlController extends Controller
                 'icon'        => 'fa-file-invoice-dollar',
                 'icon_color'  => '#10b981',
                 'icon_bg'     => '#ecfdf5',
-                'description' => '',
+                'description' => 'Workbench actions + aside pages (Receive / Sent / Workflow / Approved)',
                 'actions'     => [
                     ['key' => 'view', 'label' => 'View', 'column' => 'can_view'],
+                    // Stored in can_add (unused for PO Costing otherwise)
+                    ['key' => 'workbench', 'label' => 'Workbench', 'column' => 'can_add'],
                     ['key' => 'pass_po', 'label' => 'Pass PO', 'column' => 'can_approve'],
                     ['key' => 'assign', 'label' => 'Assign', 'column' => 'can_assign'],
                     ['key' => 'validate', 'label' => 'Validate', 'column' => 'can_validate'],
                     // Stored in can_copy (unused for PO Costing otherwise)
                     ['key' => 'esign', 'label' => 'eSign', 'column' => 'can_copy'],
+                    // Aside page access (PO Costing sidenav)
+                    ['key' => 'receive', 'label' => 'Receive', 'column' => 'can_receive'],
+                    ['key' => 'sent', 'label' => 'Sent', 'column' => 'can_sent'],
+                    ['key' => 'workflow', 'label' => 'Workflow', 'column' => 'can_workflow'],
+                    ['key' => 'approved', 'label' => 'Approved', 'column' => 'can_approved'],
                 ],
             ],
             $report([
@@ -240,6 +247,9 @@ class UserAccessControlController extends Controller
 
         try {
             $pdo = Database::connection();
+            // Force aside-page columns before SELECT (prod table may predate can_receive…)
+            $this->ensureBitColumns($pdo);
+
             $username = '';
             try {
                 $uStmt = $pdo->prepare("SELECT TOP 1 UserName FROM [dbo].[users] WHERE Id = ?");
@@ -250,38 +260,40 @@ class UserAccessControlController extends Controller
             }
 
             $table = self::ACCESS_TABLE;
+            $cols = $this->accessTableColumnMap($pdo);
+            $bitSelect = static function (string $col) use ($cols): string {
+                if (isset($cols[$col])) {
+                    return "CAST(ISNULL([{$col}], 0) AS INT) AS [{$col}]";
+                }
+                return "CAST(0 AS INT) AS [{$col}]";
+            };
             // Do not SELECT page_name/page_route — ODBC can raise 22001 on fetch for wide NVARCHAR cols,
             // and the API response only needs page_no + bit flags.
-            $stmt = $pdo->prepare("
+            $selectSql = "
                 SELECT page_no,
                        CAST(can_add AS INT) AS can_add,
                        CAST(can_view AS INT) AS can_view,
                        CAST(can_edit AS INT) AS can_edit,
                        CAST(can_approve AS INT) AS can_approve,
-                       CAST(ISNULL(can_copy, 0) AS INT) AS can_copy,
-                       CAST(ISNULL(can_assign, 0) AS INT) AS can_assign,
-                       CAST(ISNULL(can_validate, 0) AS INT) AS can_validate
+                       {$bitSelect('can_copy')},
+                       {$bitSelect('can_assign')},
+                       {$bitSelect('can_validate')},
+                       {$bitSelect('can_receive')},
+                       {$bitSelect('can_sent')},
+                       {$bitSelect('can_workflow')},
+                       {$bitSelect('can_approved')}
                 FROM [dbo].[{$table}]
-                WHERE user_id = ?
-            ");
+            ";
+            $stmt = $pdo->prepare($selectSql . ' WHERE user_id = ?');
             $stmt->bindValue(1, $userId, PDO::PARAM_INT);
             $stmt->execute();
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             // Fallback: match by username if this user_id has no rows yet
             if (!$rows && $username !== '') {
-                $stmt2 = $pdo->prepare("
-                    SELECT page_no,
-                           CAST(can_add AS INT) AS can_add,
-                           CAST(can_view AS INT) AS can_view,
-                           CAST(can_edit AS INT) AS can_edit,
-                           CAST(can_approve AS INT) AS can_approve,
-                           CAST(ISNULL(can_copy, 0) AS INT) AS can_copy,
-                           CAST(ISNULL(can_assign, 0) AS INT) AS can_assign,
-                           CAST(ISNULL(can_validate, 0) AS INT) AS can_validate
-                    FROM [dbo].[{$table}]
-                    WHERE username IS NOT NULL AND LOWER(LTRIM(RTRIM(username))) = ?
-                ");
+                $stmt2 = $pdo->prepare(
+                    $selectSql . ' WHERE username IS NOT NULL AND LOWER(LTRIM(RTRIM(username))) = ?'
+                );
                 $stmt2->bindValue(1, $username, PDO::PARAM_STR);
                 $stmt2->execute();
                 $rows = $stmt2->fetchAll(PDO::FETCH_ASSOC);
@@ -297,7 +309,8 @@ class UserAccessControlController extends Controller
                     $permissions[$pNo] = [
                         'add' => 0, 'view' => 0, 'edit' => 0, 'approve' => 0,
                         'copy' => 0, 'pass_po' => 0, 'update' => 0,
-                        'assign' => 0, 'validate' => 0, 'esign' => 0,
+                        'assign' => 0, 'validate' => 0, 'esign' => 0, 'workbench' => 0,
+                        'receive' => 0, 'sent' => 0, 'workflow' => 0, 'approved' => 0,
                     ];
                 }
                 $permissions[$pNo]['add'] = max($permissions[$pNo]['add'], (int) $row['can_add']);
@@ -307,9 +320,14 @@ class UserAccessControlController extends Controller
                 $permissions[$pNo]['approve'] = max($permissions[$pNo]['approve'], (int) $row['can_approve']);
                 $permissions[$pNo]['copy'] = max($permissions[$pNo]['copy'], (int) ($row['can_copy'] ?? 0));
                 $permissions[$pNo]['esign'] = $permissions[$pNo]['copy']; // PO Costing eSign uses can_copy
+                $permissions[$pNo]['workbench'] = $permissions[$pNo]['add']; // PO Costing Workbench uses can_add
                 $permissions[$pNo]['pass_po'] = $permissions[$pNo]['approve'];
                 $permissions[$pNo]['assign'] = max($permissions[$pNo]['assign'], (int) ($row['can_assign'] ?? 0));
                 $permissions[$pNo]['validate'] = max($permissions[$pNo]['validate'], (int) ($row['can_validate'] ?? 0));
+                $permissions[$pNo]['receive'] = max($permissions[$pNo]['receive'], (int) ($row['can_receive'] ?? 0));
+                $permissions[$pNo]['sent'] = max($permissions[$pNo]['sent'], (int) ($row['can_sent'] ?? 0));
+                $permissions[$pNo]['workflow'] = max($permissions[$pNo]['workflow'], (int) ($row['can_workflow'] ?? 0));
+                $permissions[$pNo]['approved'] = max($permissions[$pNo]['approved'], (int) ($row['can_approved'] ?? 0));
             }
 
             $this->jsonResponse([
@@ -453,19 +471,36 @@ class UserAccessControlController extends Controller
         } catch (Throwable $ignored) {
         }
 
+        // Re-ensure bit columns outside the write transaction (DDL may auto-commit)
+        $this->ensureBitColumns($pdo);
+        $colMap = $this->accessTableColumnMap($pdo);
+        $optionalBits = [
+            'can_copy', 'can_assign', 'can_validate',
+            'can_receive', 'can_sent', 'can_workflow', 'can_approved',
+        ];
+        $bitCols = [];
+        foreach ($optionalBits as $c) {
+            if (isset($colMap[$c])) {
+                $bitCols[] = $c;
+            }
+        }
+
         $pdo->beginTransaction();
         try {
             $del = $pdo->prepare('DELETE FROM [dbo].[' . $table . '] WHERE user_id = ?');
             $del->bindValue(1, (int) $userId, PDO::PARAM_INT);
             $del->execute();
 
-            // Plain binds + PHP clip (no CAST) — CAST(? AS NVARCHAR(n)) itself can raise 22001 under ODBC
+            // Dynamic INSERT — only columns that exist (avoids Invalid column name can_receive)
+            $colList = ['user_id', 'username', 'page_no', 'page_name', 'page_route',
+                'can_add', 'can_view', 'can_edit', 'can_approve'];
+            $colList = array_merge($colList, $bitCols);
+            $placeholders = implode(', ', array_fill(0, count($colList), '?'))
+                . ', GETDATE(), GETDATE()';
             $ins = $pdo->prepare(
                 'INSERT INTO [dbo].[' . $table . ']
-                    (user_id, username, page_no, page_name, page_route,
-                     can_add, can_view, can_edit, can_approve, can_copy, can_assign, can_validate,
-                     created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE(), GETDATE())'
+                    (' . implode(', ', $colList) . ', created_at, updated_at)
+                 VALUES (' . $placeholders . ')'
             );
 
             foreach ($catalogMap as $pageNo => $meta) {
@@ -477,24 +512,26 @@ class UserAccessControlController extends Controller
                     $flags = [
                         'can_add' => 0, 'can_view' => 0, 'can_edit' => 0, 'can_approve' => 0,
                         'can_copy' => 0, 'can_assign' => 0, 'can_validate' => 0,
+                        'can_receive' => 0, 'can_sent' => 0, 'can_workflow' => 0, 'can_approved' => 0,
                     ];
                 }
 
                 $pageName = $this->clip((string) ($meta['name'] ?? ('Page ' . $pageNo)), $nameMax);
                 $pageRoute = $this->clip((string) ($meta['route'] ?? ''), $routeMax);
 
-                $ins->bindValue(1, (int) $userId, PDO::PARAM_INT);
-                $ins->bindValue(2, $safeUser, PDO::PARAM_STR);
-                $ins->bindValue(3, $pageNo, PDO::PARAM_INT);
-                $ins->bindValue(4, $pageName, PDO::PARAM_STR);
-                $ins->bindValue(5, $pageRoute, PDO::PARAM_STR);
-                $ins->bindValue(6, (int) $flags['can_add'], PDO::PARAM_INT);
-                $ins->bindValue(7, (int) $flags['can_view'], PDO::PARAM_INT);
-                $ins->bindValue(8, (int) $flags['can_edit'], PDO::PARAM_INT);
-                $ins->bindValue(9, (int) $flags['can_approve'], PDO::PARAM_INT);
-                $ins->bindValue(10, (int) $flags['can_copy'], PDO::PARAM_INT);
-                $ins->bindValue(11, (int) $flags['can_assign'], PDO::PARAM_INT);
-                $ins->bindValue(12, (int) $flags['can_validate'], PDO::PARAM_INT);
+                $bind = 1;
+                $ins->bindValue($bind++, (int) $userId, PDO::PARAM_INT);
+                $ins->bindValue($bind++, $safeUser, PDO::PARAM_STR);
+                $ins->bindValue($bind++, $pageNo, PDO::PARAM_INT);
+                $ins->bindValue($bind++, $pageName, PDO::PARAM_STR);
+                $ins->bindValue($bind++, $pageRoute, PDO::PARAM_STR);
+                $ins->bindValue($bind++, (int) $flags['can_add'], PDO::PARAM_INT);
+                $ins->bindValue($bind++, (int) $flags['can_view'], PDO::PARAM_INT);
+                $ins->bindValue($bind++, (int) $flags['can_edit'], PDO::PARAM_INT);
+                $ins->bindValue($bind++, (int) $flags['can_approve'], PDO::PARAM_INT);
+                foreach ($bitCols as $bc) {
+                    $ins->bindValue($bind++, (int) ($flags[$bc] ?? 0), PDO::PARAM_INT);
+                }
                 $ins->execute();
                 $savedCount++;
 
@@ -607,7 +644,7 @@ class UserAccessControlController extends Controller
     /**
      * @param array<string, mixed> $p
      * @param array<string, mixed> $meta
-     * @return array{can_add:int,can_view:int,can_edit:int,can_approve:int,can_copy:int,can_assign:int,can_validate:int}
+     * @return array{can_add:int,can_view:int,can_edit:int,can_approve:int,can_copy:int,can_assign:int,can_validate:int,can_receive:int,can_sent:int,can_workflow:int,can_approved:int}
      */
     private function normalizePagePermissions(array $p, array $meta): array
     {
@@ -620,6 +657,10 @@ class UserAccessControlController extends Controller
             'can_copy' => 0,
             'can_assign' => 0,
             'can_validate' => 0,
+            'can_receive' => 0,
+            'can_sent' => 0,
+            'can_workflow' => 0,
+            'can_approved' => 0,
         ];
         $actions = is_array($meta['actions'] ?? null) ? $meta['actions'] : [];
         foreach ($actions as $act) {
@@ -641,17 +682,33 @@ class UserAccessControlController extends Controller
             $flags['can_copy'] = 0;
             $flags['can_assign'] = 0;
             $flags['can_validate'] = 0;
+            $flags['can_receive'] = 0;
+            $flags['can_sent'] = 0;
+            $flags['can_workflow'] = 0;
+            $flags['can_approved'] = 0;
         } elseif ($kind === 'po-costing') {
-            $flags['can_add'] = 0;
             $flags['can_edit'] = 0;
-            // can_copy stores eSign for PO Costing
-            // View can stand alone; Pass PO / Assign / Validate / eSign keep their own bits
-            if ($flags['can_approve'] === 1 || $flags['can_assign'] === 1 || $flags['can_validate'] === 1 || $flags['can_copy'] === 1) {
+            // can_add stores Workbench; can_copy stores eSign; page bits gate aside nav
+            if (
+                $flags['can_add'] === 1
+                || $flags['can_approve'] === 1
+                || $flags['can_assign'] === 1
+                || $flags['can_validate'] === 1
+                || $flags['can_copy'] === 1
+                || $flags['can_receive'] === 1
+                || $flags['can_sent'] === 1
+                || $flags['can_workflow'] === 1
+                || $flags['can_approved'] === 1
+            ) {
                 $flags['can_view'] = 1;
             }
         } elseif ($kind === 'zcost') {
             $flags['can_assign'] = 0;
             $flags['can_validate'] = 0;
+            $flags['can_receive'] = 0;
+            $flags['can_sent'] = 0;
+            $flags['can_workflow'] = 0;
+            $flags['can_approved'] = 0;
             $flags['can_view'] = (
                 $flags['can_add'] === 1
                 || $flags['can_edit'] === 1
@@ -704,21 +761,80 @@ class UserAccessControlController extends Controller
         return $defaults;
     }
 
+    /**
+     * Lowercased column names currently on dbo.sap_report_userascesscontrol.
+     *
+     * @return array<string,true>
+     */
+    private function accessTableColumnMap(PDO $pdo): array
+    {
+        $table = self::ACCESS_TABLE;
+        $map = [];
+        try {
+            $stmt = $pdo->prepare("
+                SELECT LOWER(COLUMN_NAME) AS col_name
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = N'dbo'
+                  AND LOWER(TABLE_NAME) = LOWER(?)
+            ");
+            $stmt->execute([$table]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $name = strtolower(trim((string) ($row['col_name'] ?? '')));
+                if ($name !== '') {
+                    $map[$name] = true;
+                }
+            }
+        } catch (Throwable $e) {
+            error_log('accessTableColumnMap: ' . $e->getMessage());
+        }
+        return $map;
+    }
+
+    /**
+     * Add missing PO Costing aside/action BIT columns (can_receive, can_sent, …).
+     * Uses INFORMATION_SCHEMA + single-statement ALTER — ODBC often fails on batched IF/BEGIN DDL.
+     */
     private function ensureBitColumns(PDO $pdo): void
     {
         $table = self::ACCESS_TABLE;
-        $suffix = substr(sha1((string) microtime(true)), 0, 8);
-        foreach (['can_copy', 'can_assign', 'can_validate'] as $bitCol) {
+        $needed = [
+            'can_copy', 'can_assign', 'can_validate',
+            'can_receive', 'can_sent', 'can_workflow', 'can_approved',
+        ];
+        $existing = $this->accessTableColumnMap($pdo);
+        foreach ($needed as $bitCol) {
+            if (isset($existing[$bitCol])) {
+                continue;
+            }
+            $suffix = bin2hex(random_bytes(4));
+            $constraint = 'DF_uac_' . preg_replace('/[^a-z0-9_]/i', '', $bitCol) . '_' . $suffix;
             try {
-                $pdo->exec("
-                    IF COL_LENGTH('dbo.{$table}', '{$bitCol}') IS NULL
-                    BEGIN
-                        ALTER TABLE [dbo].[{$table}] ADD [{$bitCol}] BIT NOT NULL
-                            CONSTRAINT [DF_uac_{$bitCol}_{$suffix}] DEFAULT 0;
-                    END
-                ");
+                // Single statement — fills existing rows via DEFAULT
+                $pdo->exec(
+                    "ALTER TABLE [dbo].[{$table}] ADD [{$bitCol}] BIT NOT NULL "
+                    . "CONSTRAINT [{$constraint}] DEFAULT (0)"
+                );
+                $existing[$bitCol] = true;
             } catch (Throwable $e) {
                 error_log("ensureBitColumns {$bitCol}: " . $e->getMessage());
+                // Retry without named constraint (some hosts block long constraint names)
+                try {
+                    $pdo->exec(
+                        "ALTER TABLE [dbo].[{$table}] ADD [{$bitCol}] BIT NULL"
+                    );
+                    $pdo->exec(
+                        "UPDATE [dbo].[{$table}] SET [{$bitCol}] = 0 WHERE [{$bitCol}] IS NULL"
+                    );
+                    try {
+                        $pdo->exec(
+                            "ALTER TABLE [dbo].[{$table}] ALTER COLUMN [{$bitCol}] BIT NOT NULL"
+                        );
+                    } catch (Throwable $ignored) {
+                    }
+                    $existing[$bitCol] = true;
+                } catch (Throwable $e2) {
+                    error_log("ensureBitColumns {$bitCol} retry: " . $e2->getMessage());
+                }
             }
         }
     }
@@ -756,6 +872,10 @@ class UserAccessControlController extends Controller
                 [can_copy] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_copy] DEFAULT 0,
                 [can_assign] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_assign] DEFAULT 0,
                 [can_validate] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_validate] DEFAULT 0,
+                [can_receive] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_receive] DEFAULT 0,
+                [can_sent] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_sent] DEFAULT 0,
+                [can_workflow] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_workflow] DEFAULT 0,
+                [can_approved] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_approved] DEFAULT 0,
                 [created_at] DATETIME NOT NULL CONSTRAINT [DF_uac_{$suffix}_created] DEFAULT GETDATE(),
                 [updated_at] DATETIME NOT NULL CONSTRAINT [DF_uac_{$suffix}_updated] DEFAULT GETDATE(),
                 CONSTRAINT [PK_uac_{$suffix}] PRIMARY KEY ([id]),
@@ -770,6 +890,7 @@ class UserAccessControlController extends Controller
                     INSERT INTO [dbo].[{$temp}]
                     (user_id, username, page_no, page_name, page_route,
                      can_add, can_view, can_edit, can_approve, can_copy, can_assign, can_validate,
+                     can_receive, can_sent, can_workflow, can_approved,
                      created_at, updated_at)
                     SELECT
                         user_id,
@@ -784,6 +905,10 @@ class UserAccessControlController extends Controller
                         CAST(ISNULL(can_copy,0) AS BIT),
                         CAST(ISNULL(can_assign,0) AS BIT),
                         CAST(ISNULL(can_validate,0) AS BIT),
+                        CAST(ISNULL(can_receive,0) AS BIT),
+                        CAST(ISNULL(can_sent,0) AS BIT),
+                        CAST(ISNULL(can_workflow,0) AS BIT),
+                        CAST(ISNULL(can_approved,0) AS BIT),
                         ISNULL(created_at, GETDATE()),
                         ISNULL(updated_at, GETDATE())
                     FROM [dbo].[{$table}]
@@ -918,6 +1043,10 @@ class UserAccessControlController extends Controller
                         [can_copy] BIT NOT NULL CONSTRAINT [DF_{$table}_copy] DEFAULT 0,
                         [can_assign] BIT NOT NULL CONSTRAINT [DF_{$table}_assign] DEFAULT 0,
                         [can_validate] BIT NOT NULL CONSTRAINT [DF_{$table}_validate] DEFAULT 0,
+                        [can_receive] BIT NOT NULL CONSTRAINT [DF_{$table}_receive] DEFAULT 0,
+                        [can_sent] BIT NOT NULL CONSTRAINT [DF_{$table}_sent] DEFAULT 0,
+                        [can_workflow] BIT NOT NULL CONSTRAINT [DF_{$table}_workflow] DEFAULT 0,
+                        [can_approved] BIT NOT NULL CONSTRAINT [DF_{$table}_approved] DEFAULT 0,
                         [created_at] DATETIME NOT NULL CONSTRAINT [DF_{$table}_created] DEFAULT GETDATE(),
                         [updated_at] DATETIME NOT NULL CONSTRAINT [DF_{$table}_updated] DEFAULT GETDATE(),
                         CONSTRAINT [PK_{$table}] PRIMARY KEY ([id]),

@@ -72,7 +72,7 @@ final class PoTempfinCostingService
             return $this->fail('Purchase order number is required.');
         }
         if (!$this->pdo) {
-            return $this->fail($this->connectError ?? 'CLIENT_API_LIVE connection unavailable.');
+            return $this->fail($this->connectError ?? 'EVOLVBI connection unavailable.');
         }
 
         $matType = strtoupper(trim($matType));
@@ -83,28 +83,51 @@ final class PoTempfinCostingService
         }
 
         try {
-            $this->populateTempfin($po, $isFabric);
-            $salesOrders = $this->salesOrdersForPo($po, $isFabric);
-            if ($salesOrders === []) {
-                // Still try PASSPO with empty SO — some SPs accept PO-only via TEMPFIN dump
-                $rows = $this->fetchPassPoRows($po, '');
-            } else {
-                $rows = [];
-                $seen = [];
-                foreach ($salesOrders as $so) {
-                    foreach ($this->fetchPassPoRows($po, $so) as $row) {
-                        $key = implode('|', [
-                            (string) ($row['PONO'] ?? ''),
-                            (string) ($row['POITEM'] ?? ''),
-                            (string) ($row['SALORDNO'] ?? ''),
-                            (string) ($row['MATERIAL'] ?? ''),
-                            (string) ($row['STYLE'] ?? ''),
-                        ]);
-                        if (isset($seen[$key])) {
-                            continue;
+            // Classic portal: PO_SO_VALIDATION_* fills TEMPFIN; grid lines come from that dump
+            // (or SP result sets). PASSPO alone returns MATGROUP rollups (QR LABEL / TOTAL) —
+            // not POITEM detail lines — which caused the workbench to show 1–6 instead of 8.
+            $rows = $this->populateAndFetchDetailRows($po, $isFabric);
+            if ($rows === []) {
+                $rows = $this->fetchTempfinTableRows($po);
+            }
+            if ($rows === []) {
+                // Last resort: PASSPO per SO (may only yield matgroup summaries)
+                $salesOrders = $this->salesOrdersForPo($po, $isFabric);
+                if ($salesOrders === []) {
+                    $rows = $this->fetchPassPoRows($po, '');
+                } else {
+                    $rows = [];
+                    $seen = [];
+                    foreach ($salesOrders as $so) {
+                        foreach ($this->fetchPassPoRows($po, $so) as $row) {
+                            $ponoKey = strtoupper(trim((string) ($row['PONO'] ?? '')));
+                            $itemKey = ltrim(preg_replace('/\D/', '', (string) ($row['POITEM'] ?? '')) ?? '', '0');
+                            $isNumericPo = $ponoKey !== '' && ctype_digit(preg_replace('/\D/', '', $ponoKey) ?? '');
+                            if ($isNumericPo && $itemKey !== '') {
+                                $key = implode('|', [
+                                    preg_replace('/\D/', '', $ponoKey) ?? '',
+                                    $itemKey,
+                                    ltrim(preg_replace('/\D/', '', (string) ($row['SALORDNO'] ?? '')) ?? '', '0'),
+                                    trim((string) ($row['MATERIAL'] ?? '')),
+                                    trim((string) ($row['STYLE'] ?? '')),
+                                    (string) ($row['TOT_POQTY'] ?? ''),
+                                    (string) ($row['PORATE'] ?? ''),
+                                ]);
+                            } else {
+                                $key = implode('|', [
+                                    $ponoKey,
+                                    (string) ($row['POITEM'] ?? ''),
+                                    (string) ($row['SALORDNO'] ?? ''),
+                                    (string) ($row['MATERIAL'] ?? ''),
+                                    (string) ($row['STYLE'] ?? ''),
+                                ]);
+                            }
+                            if (isset($seen[$key])) {
+                                continue;
+                            }
+                            $seen[$key] = true;
+                            $rows[] = $row;
                         }
-                        $seen[$key] = true;
-                        $rows[] = $row;
                     }
                 }
             }
@@ -144,28 +167,15 @@ final class PoTempfinCostingService
 
     private function connect(): ?PDO
     {
-        $evolDb = dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . 'EVOL' . DIRECTORY_SEPARATOR . 'db_config_client_api.php';
-        if (is_file($evolDb)) {
-            require_once $evolDb;
-            if (function_exists('evol_client_api_pdo')) {
-                try {
-                    $pdo = evol_client_api_pdo();
-                    $pdo->exec('SET ANSI_NULLS ON');
-                    $pdo->exec('SET ANSI_WARNINGS ON');
-                    return $pdo;
-                } catch (Throwable $e) {
-                    $this->connectError = $e->getMessage();
-                }
-            }
-        }
-
-        // Fallback: same defaults as root index.php costing page
-        $server = '10.103.10.33,1433';
-        $dbName = 'CLIENT_API_LIVE';
+        // Classic PO Costing Validation uses EVOLVBI (PASSPO / PO_SO_VALIDATION_Trims / TEMPFIN).
+        // CLIENT_API_LIVE does not host those procedures — connecting there always fails SP 2812
+        // and the workbench falls back to CDS with incomplete line counts.
+        $server = '192.168.9.2';
+        $dbName = 'EVOLVBI';
         $user = 'sa';
-        $password = 'Developer@123';
+        $password = 'Evolv123@';
         try {
-            $dsn = "odbc:Driver={ODBC Driver 18 for SQL Server};Server={$server};Database={$dbName};Encrypt=no;TrustServerCertificate=yes;";
+            $dsn = "odbc:Driver={ODBC Driver 18 for SQL Server};Server={$server};Database={$dbName};Encrypt=no;TrustServerCertificate=yes;MARS_Connection=yes;Connection Timeout=30;";
             $pdo = new PDO($dsn, $user, $password, [
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
@@ -192,17 +202,166 @@ final class PoTempfinCostingService
         }
     }
 
-    private function populateTempfin(string $po, bool $isFabric): void
+    /**
+     * Run classic validation SP, prefer the POITEM detail result set, else empty.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function populateAndFetchDetailRows(string $po, bool $isFabric): array
     {
-        $sql = $isFabric
-            ? "DECLARE @ErrMsg VARCHAR(500); DECLARE @POStatus VARCHAR(50); EXEC [dbo].[PO_so_validation_Fabric] ?, @ErrMsg OUTPUT, @POStatus OUTPUT;"
-            : "DECLARE @ErrMsg VARCHAR(500); DECLARE @POStatus VARCHAR(50); EXEC [dbo].[PO_so_validation_Trims] ?, @ErrMsg OUTPUT, @POStatus OUTPUT;";
-        $st = $this->pdo->prepare($sql);
-        $st->execute([$po]);
-        while ($st->nextRowset()) {
-            // drain
+        // Classic portal uses PO_SO_VALIDATION_Trims (case-sensitive collations reject PO_so_validation_Trims).
+        $candidates = $isFabric
+            ? [
+                "DECLARE @ErrMsg VARCHAR(500); DECLARE @POStatus VARCHAR(50); EXEC [dbo].[PO_so_validation_Fabric] ?, @ErrMsg OUTPUT, @POStatus OUTPUT;",
+                "DECLARE @ErrMsg VARCHAR(500); DECLARE @POStatus VARCHAR(50); EXEC [dbo].[PO_SO_VALIDATION_Fabric] ?, @ErrMsg OUTPUT, @POStatus OUTPUT;",
+            ]
+            : [
+                "DECLARE @ErrMsg VARCHAR(500); DECLARE @POStatus VARCHAR(50); EXEC [dbo].[PO_SO_VALIDATION_Trims] ?, @ErrMsg OUTPUT, @POStatus OUTPUT;",
+                "DECLARE @ErrMsg VARCHAR(500); DECLARE @POStatus VARCHAR(50); EXEC [dbo].[PO_so_validation_Trims] ?, @ErrMsg OUTPUT, @POStatus OUTPUT;",
+            ];
+
+        $last = null;
+        foreach ($candidates as $sql) {
+            try {
+                $st = $this->pdo->prepare($sql);
+                $st->execute([$po]);
+                $chunks = [];
+                do {
+                    $chunk = $st->fetchAll(PDO::FETCH_ASSOC);
+                    if ($chunk !== []) {
+                        $chunks[] = $chunk;
+                    }
+                } while ($st->nextRowset());
+                $st->closeCursor();
+
+                $best = $this->pickBestDetailChunk($chunks);
+                if ($best !== []) {
+                    return $this->upperKeysRows($best);
+                }
+                return [];
+            } catch (Throwable $e) {
+                $last = $e;
+                // Try next spelling (2812 = procedure not found)
+                if (!preg_match('/2812|Could not find stored procedure/i', $e->getMessage())) {
+                    throw $e;
+                }
+            }
         }
-        $st->closeCursor();
+        if ($last instanceof Throwable) {
+            throw $last;
+        }
+        return [];
+    }
+
+    /**
+     * @param list<list<array<string,mixed>>> $chunks
+     * @return list<array<string,mixed>>
+     */
+    private function pickBestDetailChunk(array $chunks): array
+    {
+        $best = [];
+        $bestScore = -1;
+        foreach ($chunks as $chunk) {
+            if ($chunk === []) {
+                continue;
+            }
+            $score = $this->scoreDetailChunk($chunk);
+            if ($score > $bestScore) {
+                $bestScore = $score;
+                $best = $chunk;
+            }
+        }
+        // Require a real detail-looking grid (numeric PONO + POITEM), not status/matgroup rollups.
+        return $bestScore >= 500000 ? $best : [];
+    }
+
+    /**
+     * @param list<array<string,mixed>> $chunk
+     */
+    private function scoreDetailChunk(array $chunk): int
+    {
+        $nrow = count($chunk);
+        $ncol = count($chunk[0]);
+        $score = $nrow * max(100, $ncol);
+        $row1 = [];
+        foreach ($chunk[0] as $k => $v) {
+            $row1[strtoupper((string) $k)] = $v;
+        }
+        foreach (['MATGROUP', 'MATERIAL', 'STYLE', 'PONO', 'POITEM'] as $k) {
+            if (array_key_exists($k, $row1)) {
+                $score += 500000;
+                break;
+            }
+        }
+        $hasNumericPo = false;
+        $hasPoItem = false;
+        foreach ($chunk as $row) {
+            $u = [];
+            foreach ($row as $k => $v) {
+                $u[strtoupper((string) $k)] = $v;
+            }
+            $pono = strtoupper(trim((string) ($u['PONO'] ?? '')));
+            if (preg_match('/^\d+$/', $pono)) {
+                $hasNumericPo = true;
+                $score += 2000000;
+            }
+            $item = trim((string) ($u['POITEM'] ?? ''));
+            if ($item !== '' && preg_match('/\d/', $item)) {
+                $hasPoItem = true;
+                $score += 1000000;
+            }
+            if ($hasNumericPo && $hasPoItem) {
+                break;
+            }
+        }
+        if ($nrow === 1 && !isset($row1['POITEM']) && !isset($row1['REQQTY']) && !isset($row1['TOT_POQTY'])) {
+            $score -= 400000;
+        }
+        // PASSPO-style MATGROUP-only rollups (no POITEM) must lose to TEMPFIN detail.
+        if (!$hasPoItem) {
+            $score -= 3000000;
+        }
+        return $score;
+    }
+
+    /**
+     * Read detail lines from TEMPFIN after validation SP populate.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function fetchTempfinTableRows(string $po): array
+    {
+        try {
+            $st = $this->pdo->prepare(
+                'SELECT * FROM TEMPFIN WHERE LTRIM(RTRIM(CAST(PONO AS VARCHAR(30)))) = ? ORDER BY POITEM, SALORDNO, MATERIAL'
+            );
+            $st->execute([$po]);
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            $st->closeCursor();
+            return $this->upperKeysRows($rows);
+        } catch (Throwable $e) {
+            return [];
+        }
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function upperKeysRows(array $rows): array
+    {
+        $out = [];
+        foreach ($rows as $raw) {
+            $row = [];
+            foreach ($raw as $k => $v) {
+                $row[strtoupper((string) $k)] = $v;
+            }
+            if (!isset($row['MAT_DESC']) && isset($raw['mat_desc'])) {
+                $row['MAT_DESC'] = $raw['mat_desc'];
+            }
+            $out[] = $row;
+        }
+        return $out;
     }
 
     /**
@@ -288,7 +447,9 @@ final class PoTempfinCostingService
         $ponoRaw = trim((string) $get($row, 'PONO'));
         $ponoUpper = strtoupper(preg_replace('/\s+/', ' ', $ponoRaw) ?? '');
         $matgroupUpper = strtoupper(trim((string) $get($row, 'MATGROUP')));
-        $rowKind = $this->detectRowKind($ponoUpper, $matgroupUpper);
+        $poitemRaw = trim((string) $get($row, 'POITEM'));
+        $materialRaw = trim((string) $get($row, 'MATERIAL'));
+        $rowKind = $this->detectRowKind($ponoUpper, $matgroupUpper, $poitemRaw, $materialRaw);
 
         // Classic TEMPFIN numeric fields (align with PO Costing Validation)
         $soQty = $this->num($get($row, 'SO_QTY'));
@@ -297,6 +458,12 @@ final class PoTempfinCostingService
         $reqqty = $this->num($get($row, 'REQQTY'));
         $totPoQty = $this->num($get($row, 'TOT_POQTY'));
         $porate = $this->num($get($row, 'PORATE'));
+        $totValueRaw = $this->num($get($row, 'TOTVALUE'));
+        // TEMPFIN sometimes sends PORATE=0 while TOTVALUE is filled — derive unit rate
+        if (($porate === null || $porate <= 0) && $totValueRaw !== null && $totValueRaw > 0
+            && $totPoQty !== null && $totPoQty > 0) {
+            $porate = round($totValueRaw / $totPoQty, 4);
+        }
         $budgetedCons = $this->num($get($row, 'BUDGETED_CONS'));
         $budgetInr = $this->num($get($row, 'BUDGET_INR'));
         $budgetConv = $this->num($get($row, 'BUDGET_CONV_RT'));
@@ -348,40 +515,28 @@ final class PoTempfinCostingService
                 $conv = 1.0;
             }
 
-            // Classic: ACTUAL = PORATE × Curr Rate (BUDGET_CONV_RT) × PO consumption
+            // TEMPFIN/PASSPO PORATE and ACTUAL_COST are already INR (USD×Curr Rate applied upstream).
+            // Never multiply by BUDGET_CONV_RT again — that double-converts (e.g. 316.72 × 87 → 27554).
             $consForActual = ($consumption !== null && $consumption > 0) ? $consumption : 1.0;
             $classicActual = $this->computeClassicActualCost(
                 $porate,
                 $conv,
                 $consForActual,
-                $budgetConv,
+                1.0, // FX already baked into TEMPFIN PORATE
                 $matgroupUpper,
                 $ouom,
                 $buom,
                 $matDesc,
-                $poCurrency
+                'INR'
             );
-            // ACTUAL in INR: PORATE × Curr Rate (BUDGET_CONV_RT) with classic unit rules.
-            // Prefer classic computation so USD/EUR lines compare fairly to BUDGET_COST_PER_GMT.
-            $fx = ($budgetConv !== null && $budgetConv > 0) ? $budgetConv : 1.0;
-            $foreign = $poCurrency !== '' && $poCurrency !== 'INR';
-            $passpoLooksLikeRawPorate = $tempfinActual !== null && $porate !== null
-                && abs((float) $tempfinActual - (float) $porate) < 0.0001;
 
-            if ($classicActual !== null && ($foreign || $fixedBadCons || $passpoLooksLikeRawPorate || $tempfinActual === null)) {
-                $actual = $classicActual;
-            } elseif ($tempfinActual !== null && $tempfinActual > 0 && !$fixedBadCons) {
-                // Keep PASSPO ACTUAL when it already looks like a converted value
+            if ($tempfinActual !== null && $tempfinActual > 0 && !$fixedBadCons) {
+                // Prefer PASSPO ACTUAL as-is (already INR)
                 $actual = $tempfinActual;
-                // Still apply FX when PASSPO left ACTUAL in foreign currency
-                if ($foreign && $fx > 1.0 && $porate !== null
-                    && abs((float) $tempfinActual - (float) $porate) < 0.0001) {
-                    $actual = $classicActual ?? round((float) $porate * $fx, 4);
-                }
             } elseif ($classicActual !== null) {
                 $actual = $classicActual;
             } elseif ($porate !== null) {
-                $actual = $foreign ? round((float) $porate * $fx, 4) : $porate;
+                $actual = $porate;
             }
 
             // Trust PASSPO BUDGET_COST_PER_GMT — never invent from zCOST RATE.
@@ -405,7 +560,7 @@ final class PoTempfinCostingService
             }
         }
 
-        // ACTUAL_COST is always INR (PORATE × Rate when Curr ≠ INR)
+        // ACTUAL_COST is always INR (TEMPFIN PORATE already includes Curr Rate)
         $shownActual = $actual ?? $porate;
 
         $status = 'EXCEPTION';
@@ -511,7 +666,7 @@ final class PoTempfinCostingService
             'so_wise_po_val'       => $this->num($get($row, 'SO_WISE_PO_VAL')),
             'ouom'                 => $ouom !== '' ? $ouom : (string) $get($row, 'OUOM'),
             'porate'               => $porate,
-            'totvalue'             => $this->num($get($row, 'TOTVALUE')),
+            'totvalue'             => $totValueRaw ?? $this->num($get($row, 'TOTVALUE')),
             'mat_desc'             => $matDescRaw,
             'po_currency'          => $poCurrency !== '' ? $poCurrency : (string) $get($row, 'PO_CURRENCY'),
             'budgeted_cons'        => $budgetedCons,
@@ -534,6 +689,8 @@ final class PoTempfinCostingService
             'tempfin_budget_locked'=> $rowKind === 'detail' && $budget !== null && (float) $budget > 0,
             'tempfin_actual_locked'=> $rowKind === 'detail' && $shownActual !== null && (float) $shownActual > 0,
             'tempfin_cons_locked'  => $rowKind === 'detail' && $consumption !== null && $consumption > 0,
+            // PORATE from TEMPFIN is already INR — client must not × Curr Rate again
+            'porate_already_inr'   => $rowKind === 'detail',
             'cost_item'            => $costItem,
             'zcost_item'           => $costItem,
             'costing_quotation_no' => $quoteNo,
@@ -694,22 +851,39 @@ final class PoTempfinCostingService
         return false;
     }
 
-    private function detectRowKind(string $ponoUpper, string $matgroupUpper): string
-    {
+    private function detectRowKind(
+        string $ponoUpper,
+        string $matgroupUpper,
+        string $poitem = '',
+        string $material = ''
+    ): string {
+        $itemDigits = preg_replace('/\D/', '', $poitem) ?? '';
+        $ponoDigits = preg_replace('/\D/', '', $ponoUpper) ?? '';
+        $hasMaterial = trim($material) !== '';
+        // Real PASSPO line item: numeric PO plus (POITEM and/or MATERIAL).
+        // Never treat these as charge/tax — MATGROUP words like SCREEN/FREIGHT/BANK/MOQ
+        // are normal trim groups and were incorrectly hiding lines (8 API → 6 UI).
+        if ($ponoDigits !== '' && ($itemDigits !== '' || $hasMaterial)) {
+            return 'detail';
+        }
+
         $label = $ponoUpper !== '' ? $ponoUpper : $matgroupUpper;
         if ($label === '') {
             return 'detail';
         }
-        if (in_array($label, ['SUB-TOTAL', 'SUB TOTAL', 'SUBTOTAL', 'TOTAL'], true)) {
+        $labelCompact = strtoupper(preg_replace('/[\s\-]+/', '', $label) ?? $label);
+        if (in_array($labelCompact, ['SUBTOTAL', 'SUBTOT', 'TOTAL'], true)
+            || in_array($label, ['SUB-TOTAL', 'SUB TOTAL', 'SUBTOTAL', 'TOTAL'], true)) {
             return 'footer';
         }
         if (preg_match('/^(IGST|SGST|CGST|GST|TAX)(\s|$)/', $label)) {
             return 'tax';
         }
-        if (str_contains($label, 'CHARGES') || preg_match('/freight|moq|screen|bank|other\s*charges/i', $label)) {
-            return 'charge';
-        }
-        if (preg_match('/charges|igst|freight|screen|bank|moq|other\s*charges/i', $matgroupUpper)) {
+        // Charge footers use a text label in PONO (not a numeric PO number)
+        if ($ponoDigits === '' && (
+            str_contains($label, 'CHARGES')
+            || preg_match('/\b(other\s*charges|freight|moq|screen\s*print|bank\s*charges)\b/i', $label)
+        )) {
             return 'charge';
         }
         return 'detail';

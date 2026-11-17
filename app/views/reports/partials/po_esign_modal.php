@@ -18,7 +18,7 @@ $esignUser = trim((string) (
                     </span>
                     <div class="pcw-esign-head-titles">
                         <strong id="pcwEsignTitle">PO E-Signature</strong>
-                        <p id="pcwEsignSub">Sign and save the purchase order PDF</p>
+                        <p id="pcwEsignSub">Place signature, then click Save Signed PDF — unsigned views are never saved</p>
                     </div>
                 </div>
                 <div class="pcw-esign-head-right">
@@ -31,30 +31,6 @@ $esignUser = trim((string) (
                         <span class="material-icons-round">close</span>
                     </button>
                 </div>
-            </div>
-            <div class="pcw-esign-log" id="pcwEsignLogDetails" aria-live="polite">
-                <div class="pcw-esign-log-head">
-                    <span class="material-icons-round">history</span>
-                    <span>Log Details</span>
-                </div>
-                <dl class="pcw-esign-log-meta">
-                    <div class="pcw-esign-log-item" title="Signed / action by">
-                        <dt>Person</dt>
-                        <dd id="pcwEsignLogUser">—</dd>
-                    </div>
-                    <div class="pcw-esign-log-item" title="Action time">
-                        <dt>Time</dt>
-                        <dd id="pcwEsignLogTime">—</dd>
-                    </div>
-                    <div class="pcw-esign-log-item" title="Last action">
-                        <dt>Action</dt>
-                        <dd id="pcwEsignLogAction">—</dd>
-                    </div>
-                    <div class="pcw-esign-log-item is-status" title="Status">
-                        <dt>Status</dt>
-                        <dd id="pcwEsignLogStatus">—</dd>
-                    </div>
-                </dl>
             </div>
         </header>
 
@@ -141,7 +117,8 @@ $esignUser = trim((string) (
                         </div>
                     </div>
 
-                    <div class="pcw-esign-assign">
+                    <!-- Assign / Email / Remarks — only for Send PO mode -->
+                    <div class="pcw-esign-assign" id="pcwEsignAssignBlock" hidden>
                         <label class="pcw-esign-field">
                             <span>Assign to User</span>
                             <div class="pcw-esign-user-wrap">
@@ -156,22 +133,24 @@ $esignUser = trim((string) (
                             <small>This email is filled automatically from the selected user.</small>
                         </label>
                         <label class="pcw-esign-field">
-                            <span>Remarks</span>
-                            <textarea id="pcwEsignRemarks" class="pcw-esign-textarea" rows="3" placeholder="Add a remark for this PO."></textarea>
+                            <span>Note</span>
+                            <textarea id="pcwEsignRemarks" class="pcw-esign-textarea" rows="3" placeholder="Add a note for this PO."></textarea>
                         </label>
                     </div>
                 </div>
 
                 <div class="pcw-esign-side-foot">
-                    <button type="button" class="pcw-esign-btn is-approve" id="pcwEsignApprove" hidden title="Call POApprovalSet only (Value=X)">
+                    <div class="pcw-esign-sap-msg" id="pcwEsignSapMsg" hidden role="status" aria-live="polite"></div>
+                    <button type="button" class="pcw-esign-btn is-approve" id="pcwEsignApprove" hidden title="Save signed PDF, then approve in SAP (POApprovalSet)">
                         <span class="material-icons-round">task_alt</span>
                         Approved
                     </button>
-                    <button type="button" class="pcw-esign-btn is-save" id="pcwEsignSave">
-                        <span class="material-icons-round">verified</span>
-                        Save signed PO
+                    <button type="button" class="pcw-esign-btn is-save" id="pcwEsignSave" title="Save signed PDF to EVOL/uploads/po_esign">
+                        <span class="material-icons-round">save</span>
+                        <span id="pcwEsignSaveLabel">Save Signed PDF</span>
                     </button>
-                    <small id="pcwEsignApproveHint" hidden><b>Approved</b> = SAP Approve API · <b>Save signed PO</b> = save PDF file only (not SAP)</small>
+                    <small id="pcwEsignApproveHint" hidden></small>
+                    <small id="pcwEsignSentHint" hidden></small>
                 </div>
             </section>
 
@@ -182,7 +161,10 @@ $esignUser = trim((string) (
                         <iframe id="pcwEsignFrame" class="pcw-esign-pdf-fallback" title="PO PDF" hidden></iframe>
                         <!-- Template only — live stamps are cloned onto PDF pages -->
                         <div class="pcw-esign-stamp" id="pcwEsignStamp" hidden aria-hidden="true">
-                            <img id="pcwEsignStampImg" alt="" draggable="false">
+                            <div class="pcw-esign-stamp-body">
+                                <img id="pcwEsignStampImg" alt="" draggable="false">
+                                <span class="pcw-esign-stamp-time" aria-hidden="true"></span>
+                            </div>
                         </div>
                     </div>
                     <div class="pcw-esign-pdf-loading" id="pcwEsignPdfLoading" hidden>Loading PDF…</div>

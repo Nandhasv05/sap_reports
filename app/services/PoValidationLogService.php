@@ -281,6 +281,43 @@ class PoValidationLogService
                 $id = (int) ($pdo->query('SELECT CAST(SCOPE_IDENTITY() AS INT)')->fetchColumn() ?: 0);
             }
 
+            // Mirror validate / not-validate into unified Pass_po_validtion
+            if (in_array($status, [self::STATUS_VALIDATE, self::STATUS_NOT_VALIDATE], true)) {
+                try {
+                    require_once base_path('app/services/PassPoValidationLogService.php');
+                    $act = $status === self::STATUS_VALIDATE ? 'validate' : 'not_validate';
+                    $ok = true;
+                    (new PassPoValidationLogService())->save([
+                        'user_id' => $_SESSION['user_id'] ?? null,
+                        'username' => $createdBy !== '' ? $createdBy : 'system',
+                        'purchase_order' => $this->displayNumber($po),
+                        'action' => $act,
+                        'status' => PassPoValidationLogService::statusFor($act, $ok),
+                        'method' => 'POST',
+                        'url' => 'local://po-costing/validation-log',
+                        'payload' => [
+                            'validation_status' => $status,
+                            'assigned_username' => $username,
+                            'assigned_email' => $email,
+                            'description' => $desc,
+                            'row_status' => trim((string) ($payload['row_status'] ?? '')),
+                        ],
+                        'response' => [
+                            'success' => true,
+                            'status' => PassPoValidationLogService::statusFor($act, $ok),
+                            'validation_log_id' => $id > 0 ? $id : null,
+                        ],
+                        'http_code' => 200,
+                        'success' => $ok,
+                        'from_username' => $createdBy,
+                        'to_username' => $username,
+                        'to_email' => $email,
+                        'remarks' => $desc,
+                    ]);
+                } catch (Throwable $ignored) {
+                }
+            }
+
             return ['success' => true, 'id' => $id > 0 ? $id : null, 'error' => null];
         } catch (Throwable $e) {
             return ['success' => false, 'id' => null, 'error' => $e->getMessage()];
@@ -558,6 +595,135 @@ class PoValidationLogService
                 'department' => (string) ($r['Department'] ?? $r['department'] ?? ''),
             ];
         }
+        return $out;
+    }
+
+    /**
+     * Status & Remarks texts per PO (newest first). Prefer COMMENT rows; include count.
+     *
+     * @param list<string> $purchaseOrders
+     * @return array<string, array{remarks:string,remarks_all:list<string>,remarks_count:int,validation_status:string,created_by:string,created_at:?string}>
+     */
+    public function latestRemarksForPurchaseOrders(array $purchaseOrders): array
+    {
+        $out = [];
+        $keys = [];
+        foreach ($purchaseOrders as $po) {
+            $norm = $this->displayNumber((string) $po);
+            if ($norm !== '') {
+                $keys[$norm] = true;
+            }
+        }
+        $poList = array_keys($keys);
+        if ($poList === []) {
+            return $out;
+        }
+
+        $this->ensureTable();
+        if (!$this->tableExists()) {
+            return $out;
+        }
+
+        try {
+            $pdo = Database::connection();
+        } catch (Throwable $e) {
+            return $out;
+        }
+
+        $maxPerPo = 8;
+        foreach (array_chunk($poList, 200) as $chunk) {
+            $variants = [];
+            foreach ($chunk as $po) {
+                $variants[$po] = true;
+                if (preg_match('/^\d+$/', $po)) {
+                    $variants[str_pad($po, 10, '0', STR_PAD_LEFT)] = true;
+                }
+            }
+            $variantList = array_keys($variants);
+            $placeholders = implode(',', array_fill(0, count($variantList), '?'));
+            // Match listForPo: exact string OR numeric display form (avoids missing padded POs)
+            $sql = "
+                SELECT
+                    purchase_order, validation_status, description, created_by, created_at, id
+                FROM [dbo].[po_validation_log]
+                WHERE (
+                    REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(purchase_order, N''))), N'#', N''), N' ', N'') IN ({$placeholders})
+                    OR LTRIM(RTRIM(ISNULL(purchase_order, N''))) IN ({$placeholders})
+                    OR LTRIM(STR(TRY_CONVERT(BIGINT, purchase_order), 20)) IN ({$placeholders})
+                )
+                  AND LTRIM(RTRIM(ISNULL(description, N''))) <> N''
+                ORDER BY id DESC
+            ";
+            try {
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute(array_merge($variantList, $variantList, $variantList));
+                $buckets = [];
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+                    $po = $this->displayNumber((string) ($row['purchase_order'] ?? ''));
+                    if ($po === '' || !isset($keys[$po])) {
+                        continue;
+                    }
+                    $desc = preg_replace('/\s+/', ' ', trim((string) ($row['description'] ?? ''))) ?? '';
+                    if ($desc === '') {
+                        continue;
+                    }
+                    $st = strtoupper(trim((string) ($row['validation_status'] ?? '')));
+                    if (!isset($buckets[$po])) {
+                        $buckets[$po] = [
+                            'comments' => [],
+                            'other' => [],
+                            'created_by' => trim((string) ($row['created_by'] ?? '')),
+                            'created_at' => substr(str_replace('T', ' ', (string) ($row['created_at'] ?? '')), 0, 19) ?: null,
+                            'validation_status' => $st,
+                        ];
+                    }
+                    $entry = [
+                        'text' => $desc,
+                        'validation_status' => $st,
+                        'created_by' => trim((string) ($row['created_by'] ?? '')),
+                        'created_at' => substr(str_replace('T', ' ', (string) ($row['created_at'] ?? '')), 0, 19) ?: null,
+                    ];
+                    if ($st === self::STATUS_COMMENT) {
+                        if (count($buckets[$po]['comments']) < $maxPerPo) {
+                            $buckets[$po]['comments'][] = $entry;
+                        }
+                    } elseif (count($buckets[$po]['other']) < $maxPerPo) {
+                        $buckets[$po]['other'][] = $entry;
+                    }
+                }
+
+                foreach ($buckets as $po => $bucket) {
+                    $list = $bucket['comments'] !== [] ? $bucket['comments'] : $bucket['other'];
+                    if ($list === []) {
+                        continue;
+                    }
+                    $texts = [];
+                    foreach ($list as $item) {
+                        $t = (string) ($item['text'] ?? '');
+                        if ($t === '' || in_array($t, $texts, true)) {
+                            continue;
+                        }
+                        $texts[] = $t;
+                    }
+                    if ($texts === []) {
+                        continue;
+                    }
+                    $first = $list[0];
+                    $out[$po] = [
+                        'remarks' => $texts[0],
+                        'remarks_all' => $texts,
+                        'remarks_count' => count($texts),
+                        'validation_status' => (string) ($first['validation_status'] ?? $bucket['validation_status']),
+                        'created_by' => (string) ($first['created_by'] ?? $bucket['created_by']),
+                        'created_at' => $first['created_at'] ?? $bucket['created_at'],
+                    ];
+                }
+            } catch (Throwable $e) {
+                error_log('PoValidationLogService latestRemarksForPurchaseOrders: ' . $e->getMessage());
+                continue;
+            }
+        }
+
         return $out;
     }
 

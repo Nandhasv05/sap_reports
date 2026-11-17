@@ -79,8 +79,8 @@ class PoValidationStatusService
         if ($raw === '' || $raw === 'not_started') {
             return [
                 'bucket'             => self::BUCKET_NOT_STARTED,
-                'validation_status'  => 'Not Started',
-                'esign_status'       => '—',
+                'validation_status'  => 'Mapping Required',
+                'esign_status'       => 'Not Started',
                 'workflow_stage'     => 'No validation request',
                 'status_owner'       => '',
                 'tone'               => 'muted',
@@ -90,8 +90,8 @@ class PoValidationStatusService
         if ($raw === 'rejected') {
             return [
                 'bucket'             => self::BUCKET_REJECTED,
-                'validation_status'  => 'Rejected',
-                'esign_status'       => 'Rejected',
+                'validation_status'  => 'Need to Review',
+                'esign_status'       => 'E-Sign Rejected',
                 'workflow_stage'     => 'Rejected',
                 'status_owner'       => $owner,
                 'tone'               => 'danger',
@@ -101,8 +101,8 @@ class PoValidationStatusService
         if ($raw === 'completed') {
             return [
                 'bucket'             => self::BUCKET_COMPLETED,
-                'validation_status'  => 'Validated',
-                'esign_status'       => 'Completed',
+                'validation_status'  => 'Passed',
+                'esign_status'       => 'E-Sign Completed',
                 'workflow_stage'     => 'Fully signed & completed',
                 'status_owner'       => $owner,
                 'tone'               => 'ok',
@@ -116,14 +116,22 @@ class PoValidationStatusService
             'signed'             => 'Checker signed — awaiting final',
             'pending_authorised' => 'Pending authorised signatory',
         ];
+        $esignMap = [
+            'pending_kalai'      => 'Pending Upload',
+            'pending_signature'  => 'Pending Signature',
+            'pending_checker'    => 'Pending Checker',
+            'signed'             => 'Partially Signed',
+            'pending_authorised' => 'Pending Authorised',
+        ];
         $stage = $stageMap[$raw] ?? ucwords(str_replace('_', ' ', $raw));
+        $esign = $esignMap[$raw] ?? ucwords(str_replace('_', ' ', $raw));
 
         $inReview = in_array($raw, ['pending_checker', 'signed', 'pending_authorised'], true);
 
         return [
             'bucket'             => $inReview ? self::BUCKET_IN_REVIEW : self::BUCKET_PENDING,
-            'validation_status'  => $inReview ? 'In Review' : 'Pending Validation',
-            'esign_status'       => ucwords(str_replace('_', ' ', $raw)),
+            'validation_status'  => $inReview ? 'Need to Review' : 'Mapping Required',
+            'esign_status'       => $esign,
             'workflow_stage'     => $stage,
             'status_owner'       => $owner,
             'tone'               => $inReview ? 'warn' : 'info',
@@ -266,11 +274,160 @@ class PoValidationStatusService
             $row['status_bucket'] = $status['bucket'];
             $row['status_tone'] = $status['tone'];
             $row['esign_request_id'] = $status['request_id'];
+            $row['remarks'] = $row['remarks'] ?? '';
+            $row['sent_receive_status'] = $row['sent_receive_status'] ?? '';
             $bucket = (string) ($status['bucket'] ?? self::BUCKET_NOT_STARTED);
             if (isset($counts[$bucket])) {
                 $counts[$bucket]++;
             } else {
                 $counts['not_started']++;
+            }
+        }
+        unset($row);
+
+        // Status & Remarks comments (po_validation_log) → Remarks column
+        try {
+            if (is_file(base_path('app/services/PoValidationLogService.php'))) {
+                require_once base_path('app/services/PoValidationLogService.php');
+                $remarkMap = (new PoValidationLogService())->latestRemarksForPurchaseOrders($poNumbers);
+                foreach ($records as &$row) {
+                    $po = self::normalizePo((string) ($row['purchase_order'] ?? ''));
+                    $info = $remarkMap[$po] ?? null;
+                    if (!is_array($info)) {
+                        continue;
+                    }
+                    $all = [];
+                    if (!empty($info['remarks_all']) && is_array($info['remarks_all'])) {
+                        foreach ($info['remarks_all'] as $piece) {
+                            $piece = trim((string) $piece);
+                            if ($piece !== '' && !in_array($piece, $all, true)) {
+                                $all[] = $piece;
+                            }
+                        }
+                    }
+                    $note = trim((string) ($info['remarks'] ?? ''));
+                    if ($note !== '' && $all === []) {
+                        $all[] = $note;
+                    }
+                    if ($all === []) {
+                        continue;
+                    }
+                    $row['remarks'] = $all[0];
+                    $row['remarks_all'] = $all;
+                    $row['remarks_count'] = max(count($all), (int) ($info['remarks_count'] ?? 0));
+                    $row['remarks_by'] = $info['created_by'] ?? '';
+                    $row['remarks_at'] = $info['created_at'] ?? '';
+                }
+                unset($row);
+            }
+        } catch (Throwable $e) {
+            // Keep list usable if validation log is unavailable
+        }
+
+        // Attach latest Send/Receive mailbox status (+ fallback remarks) for list columns
+        $mailMap = [];
+        try {
+            if (is_file(base_path('app/services/PoSentLogService.php'))) {
+                require_once base_path('app/services/PoSentLogService.php');
+                $mailMap = (new PoSentLogService())->latestForPurchaseOrders($poNumbers);
+            }
+        } catch (Throwable $e) {
+            $mailMap = [];
+        }
+        // Fallback: Pass_po_validtion send/receive actions (mirrors Send PO)
+        try {
+            if (is_file(base_path('app/services/PassPoValidationLogService.php'))) {
+                require_once base_path('app/services/PassPoValidationLogService.php');
+                $passMail = (new PassPoValidationLogService())->latestSendStatusesForPos($poNumbers);
+                foreach ($passMail as $poKey => $info) {
+                    if (!isset($mailMap[$poKey]) && is_array($info)) {
+                        $mailMap[$poKey] = $info;
+                    }
+                }
+            }
+        } catch (Throwable $e) {
+            // optional
+        }
+        foreach ($records as &$row) {
+            $po = self::normalizePo((string) ($row['purchase_order'] ?? ''));
+            $mail = $mailMap[$po] ?? null;
+            if (!is_array($mail)) {
+                continue;
+            }
+            $row['sent_receive_status'] = trim((string) ($mail['sent_receive_status'] ?? '')) ?: '';
+            $row['mail_from'] = trim((string) ($mail['from_username'] ?? ''));
+            $row['mail_to'] = trim((string) ($mail['to_username'] ?? ''));
+            $row['mail_email'] = trim((string) ($mail['to_email'] ?? ''));
+            $row['mail_status'] = trim((string) ($mail['status'] ?? ''));
+            $row['mail_at'] = trim((string) ($mail['created_at'] ?? ''));
+            $row['mail_note'] = trim((string) ($mail['remarks'] ?? ''));
+            // Do not mix Send-PO notes into Remarks — Remarks stays Status & Remarks only
+        }
+        unset($row);
+
+        // Prefer Pass_po_validtion e-sign module status when present
+        try {
+            if (is_file(base_path('app/services/PassPoValidationLogService.php'))) {
+                require_once base_path('app/services/PassPoValidationLogService.php');
+                $passMap = (new PassPoValidationLogService())->latestStatusesForPos($poNumbers);
+                foreach ($records as &$row) {
+                    $po = self::normalizePo((string) ($row['purchase_order'] ?? ''));
+                    $info = $passMap[$po] ?? null;
+                    if (!is_array($info)) {
+                        continue;
+                    }
+                    $esign = trim((string) ($info['esign_status'] ?? ''));
+                    if ($esign !== '') {
+                        $row['esign_status'] = $esign;
+                    }
+                }
+                unset($row);
+            }
+        } catch (Throwable $e) {
+            // optional
+        }
+
+        // Detect signed PDF files for current page (e-sign module on disk)
+        try {
+            if (is_file(base_path('app/services/PoPassApprovalService.php'))) {
+                require_once base_path('app/services/PoPassApprovalService.php');
+                $passSvc = new PoPassApprovalService();
+                foreach ($records as &$row) {
+                    $current = strtolower(trim((string) ($row['esign_status'] ?? '')));
+                    if ($current !== '' && $current !== 'not started' && $current !== '—'
+                        && (str_contains($current, 'complet') || str_contains($current, 'signed'))) {
+                        continue;
+                    }
+                    $po = (string) ($row['purchase_order'] ?? '');
+                    if ($po === '') {
+                        continue;
+                    }
+                    $found = $passSvc->findEsignNetworkPdf($po);
+                    $hasFile = !empty($found['has_file']) && !empty($found['path']) && @is_file((string) $found['path']);
+                    if (!$hasFile) {
+                        continue;
+                    }
+                    $display = preg_replace('/\D/', '', $po) ?? '';
+                    $display = ltrim($display, '0') ?: $display;
+                    $marker = dirname((string) $found['path']) . DIRECTORY_SEPARATOR . ('PO-' . $display . '.signed');
+                    $looksSigned = @is_file($marker)
+                        || str_contains(strtolower((string) ($found['pdf_file'] ?? '')), 'signed')
+                        || $passSvc->isEsignCompletedInDb($po);
+                    if ($looksSigned) {
+                        $row['esign_status'] = 'E-Sign Completed';
+                    }
+                }
+                unset($row);
+            }
+        } catch (Throwable $e) {
+            // optional
+        }
+
+        // Never leave e-sign column blank — always show module label
+        foreach ($records as &$row) {
+            $esign = trim((string) ($row['esign_status'] ?? ''));
+            if ($esign === '' || $esign === '—') {
+                $row['esign_status'] = 'Not Started';
             }
         }
         unset($row);

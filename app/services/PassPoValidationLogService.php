@@ -42,6 +42,7 @@ class PassPoValidationLogService
             $pdo = Database::connection();
             if ($this->tableExists($pdo)) {
                 $this->ensureStatusColumn($pdo);
+                $this->ensureMailboxColumns($pdo);
                 return;
             }
 
@@ -77,6 +78,7 @@ class PassPoValidationLogService
                 self::$tableReady = null;
                 if ($this->tableExists($pdo)) {
                     $this->ensureStatusColumn($pdo);
+                    $this->ensureMailboxColumns($pdo);
                 }
             } catch (Throwable $createErr) {
                 // CREATE TABLE permission denied (262) on live — expected; DBA must create once.
@@ -100,8 +102,41 @@ class PassPoValidationLogService
         }
     }
 
+    /** Extra columns so Sent / Receive / Validate share this one table. */
+    private function ensureMailboxColumns(PDO $pdo): void
+    {
+        $cols = [
+            'from_username' => 'NVARCHAR(100) NULL',
+            'to_username' => 'NVARCHAR(100) NULL',
+            'to_email' => 'NVARCHAR(255) NULL',
+            'remarks' => 'NVARCHAR(MAX) NULL',
+        ];
+        foreach ($cols as $name => $ddl) {
+            try {
+                $pdo->exec("
+                    IF COL_LENGTH('dbo." . self::TABLE . "', '{$name}') IS NULL
+                        ALTER TABLE [dbo].[" . self::TABLE . "] ADD [{$name}] {$ddl}
+                ");
+            } catch (Throwable $ignored) {
+            }
+        }
+    }
+
+    private function hasMailboxColumns(?PDO $pdo = null): bool
+    {
+        try {
+            $pdo = $pdo ?? Database::connection();
+            $stmt = $pdo->query("
+                SELECT CASE WHEN COL_LENGTH(N'dbo." . self::TABLE . "', N'from_username') IS NULL THEN 0 ELSE 1 END
+            ");
+            return (int) ($stmt->fetchColumn() ?: 0) === 1;
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
+
     /**
-     * Human status for UI / DB (E-Sign Completed, Approved Completed, …).
+     * Human status for UI / DB (E-Sign Completed, Approved, Sent, …).
      */
     public static function statusFor(string $action, bool $success, ?string $valueFlag = null): string
     {
@@ -110,12 +145,20 @@ class PassPoValidationLogService
         if ($action === 'esign') {
             return $success ? 'E-Sign Completed' : 'E-Sign Failed';
         }
-        if ($action === 'pass' || $flag === 'X') {
-            // Local tracking label only — real approval is SAP POApprovalSet
-            return $success ? 'Approved Completed' : 'Approval Failed';
+        if ($action === 'approve' || $action === 'pass' || $flag === 'X') {
+            return $success ? 'Approved' : 'Approval Failed';
         }
         if ($action === 'revert') {
             return $success ? 'Reverted' : 'Revert Failed';
+        }
+        if ($action === 'send' || $action === 'receive') {
+            return $success ? 'Sent' : 'Send Failed';
+        }
+        if ($action === 'validate' || $action === 'validation') {
+            return $success ? 'Validated' : 'Validation Failed';
+        }
+        if ($action === 'not_validate' || $action === 'not-validate') {
+            return $success ? 'Not Validated' : 'Validation Failed';
         }
         return $success ? 'Completed' : 'Failed';
     }
@@ -170,41 +213,262 @@ class PassPoValidationLogService
             }
 
             $action = trim((string) ($row['action'] ?? ''));
-            $ok = !empty($row['success']);
+            $ok = array_key_exists('success', $row) ? !empty($row['success']) : true;
             $valueFlag = isset($row['value_flag']) ? (string) $row['value_flag'] : null;
             $status = trim((string) ($row['status'] ?? ''));
             if ($status === '') {
                 $status = self::statusFor($action, $ok, $valueFlag);
             }
+            $fromUser = trim((string) ($row['from_username'] ?? ''));
+            $toUser = trim((string) ($row['to_username'] ?? ''));
+            $toEmail = trim((string) ($row['to_email'] ?? ''));
+            $remarks = trim((string) ($row['remarks'] ?? ''));
+            $this->ensureMailboxColumns($pdo);
+            $hasMail = $this->hasMailboxColumns($pdo);
 
-            $stmt = $pdo->prepare("
-                INSERT INTO [dbo].[Pass_po_validtion] (
-                    user_id, username, purchase_order, request_id, action, status, value_flag,
-                    method, url, payload, response, http_code, success, created_at
-                )
-                OUTPUT INSERTED.id
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, SYSUTCDATETIME())
-            ");
-            $stmt->execute([
-                $row['user_id'] !== null && $row['user_id'] !== '' ? (string) $row['user_id'] : null,
-                trim((string) ($row['username'] ?? '')) !== '' ? trim((string) $row['username']) : null,
-                $displayPo,
-                trim((string) ($row['request_id'] ?? '')) !== '' ? trim((string) $row['request_id']) : null,
-                $action !== '' ? $action : null,
-                $status,
-                $valueFlag,
-                strtoupper(trim((string) ($row['method'] ?? 'POST'))) ?: 'POST',
-                trim((string) ($row['url'] ?? '')) !== '' ? trim((string) $row['url']) : null,
-                $payload !== null && $payload !== '' ? (string) $payload : null,
-                $response !== null && $response !== '' ? (string) $response : null,
-                isset($row['http_code']) ? (int) $row['http_code'] : null,
-                $ok ? 1 : 0,
-            ]);
+            if ($hasMail) {
+                $stmt = $pdo->prepare("
+                    INSERT INTO [dbo].[Pass_po_validtion] (
+                        user_id, username, purchase_order, request_id, action, status, value_flag,
+                        method, url, payload, response, http_code, success,
+                        from_username, to_username, to_email, remarks, created_at
+                    )
+                    OUTPUT INSERTED.id
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, SYSUTCDATETIME())
+                ");
+                $stmt->execute([
+                    $row['user_id'] !== null && $row['user_id'] !== '' ? (string) $row['user_id'] : null,
+                    trim((string) ($row['username'] ?? '')) !== '' ? trim((string) $row['username']) : null,
+                    $displayPo,
+                    trim((string) ($row['request_id'] ?? '')) !== '' ? trim((string) $row['request_id']) : null,
+                    $action !== '' ? $action : null,
+                    $status,
+                    $valueFlag,
+                    strtoupper(trim((string) ($row['method'] ?? 'POST'))) ?: 'POST',
+                    trim((string) ($row['url'] ?? '')) !== '' ? trim((string) $row['url']) : null,
+                    $payload !== null && $payload !== '' ? (string) $payload : null,
+                    $response !== null && $response !== '' ? (string) $response : null,
+                    isset($row['http_code']) ? (int) $row['http_code'] : null,
+                    $ok ? 1 : 0,
+                    $fromUser !== '' ? $fromUser : null,
+                    $toUser !== '' ? $toUser : null,
+                    $toEmail !== '' ? $toEmail : null,
+                    $remarks !== '' ? $remarks : null,
+                ]);
+            } else {
+                $stmt = $pdo->prepare("
+                    INSERT INTO [dbo].[Pass_po_validtion] (
+                        user_id, username, purchase_order, request_id, action, status, value_flag,
+                        method, url, payload, response, http_code, success, created_at
+                    )
+                    OUTPUT INSERTED.id
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, SYSUTCDATETIME())
+                ");
+                $stmt->execute([
+                    $row['user_id'] !== null && $row['user_id'] !== '' ? (string) $row['user_id'] : null,
+                    trim((string) ($row['username'] ?? '')) !== '' ? trim((string) $row['username']) : null,
+                    $displayPo,
+                    trim((string) ($row['request_id'] ?? '')) !== '' ? trim((string) $row['request_id']) : null,
+                    $action !== '' ? $action : null,
+                    $status,
+                    $valueFlag,
+                    strtoupper(trim((string) ($row['method'] ?? 'POST'))) ?: 'POST',
+                    trim((string) ($row['url'] ?? '')) !== '' ? trim((string) $row['url']) : null,
+                    $payload !== null && $payload !== '' ? (string) $payload : null,
+                    $response !== null && $response !== '' ? (string) $response : null,
+                    isset($row['http_code']) ? (int) $row['http_code'] : null,
+                    $ok ? 1 : 0,
+                ]);
+            }
             $id = (int) ($stmt->fetchColumn() ?: 0);
             return ['success' => true, 'id' => $id > 0 ? $id : null, 'error' => null];
         } catch (Throwable $e) {
             return ['success' => false, 'id' => null, 'error' => $e->getMessage()];
         }
+    }
+
+    /**
+     * Latest workflow statuses (esign / approve / validate) keyed by purchase_order.
+     *
+     * @param list<string> $pos
+     * @return array<string, array{esign_status:?string,approve_status:?string,validate_status:?string,workflow_status:?string,action:?string}>
+     */
+    public function latestStatusesForPos(array $pos): array
+    {
+        $out = [];
+        $norm = [];
+        foreach ($pos as $p) {
+            $d = ltrim(preg_replace('/\D/', '', (string) $p) ?? '', '0');
+            if ($d !== '') {
+                $norm[$d] = $d;
+            }
+        }
+        if ($norm === []) {
+            return $out;
+        }
+        try {
+            $this->ensureTable();
+            $pdo = Database::connection();
+            if (!$this->tableExists($pdo)) {
+                return $out;
+            }
+
+            foreach (array_chunk(array_values($norm), 200) as $chunk) {
+                $variants = [];
+                foreach ($chunk as $po) {
+                    $variants[$po] = true;
+                    if (preg_match('/^\d+$/', $po)) {
+                        $variants[str_pad($po, 10, '0', STR_PAD_LEFT)] = true;
+                    }
+                }
+                $variantList = array_keys($variants);
+                $placeholders = implode(',', array_fill(0, count($variantList), '?'));
+                // Newest first; keep first hit per action per PO in PHP
+                $sql = "
+                    SELECT TOP 4000 purchase_order, action, status, success, created_at, id
+                    FROM [dbo].[Pass_po_validtion]
+                    WHERE (
+                        REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(purchase_order, N''))), N'#', N''), N' ', N'') IN ({$placeholders})
+                        OR LTRIM(RTRIM(ISNULL(purchase_order, N''))) IN ({$placeholders})
+                        OR LTRIM(STR(TRY_CONVERT(BIGINT, purchase_order), 20)) IN ({$placeholders})
+                    )
+                      AND LOWER(ISNULL(action, '')) IN ('esign', 'approve', 'pass', 'validate', 'validation', 'not_validate')
+                    ORDER BY id DESC
+                ";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute(array_merge($variantList, $variantList, $variantList));
+                $seenAction = [];
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+                    $po = ltrim(preg_replace('/\D/', '', (string) ($row['purchase_order'] ?? '')) ?? '', '0');
+                    if ($po === '') {
+                        continue;
+                    }
+                    if (!isset($out[$po])) {
+                        $out[$po] = [
+                            'esign_status' => null,
+                            'approve_status' => null,
+                            'validate_status' => null,
+                            'workflow_status' => null,
+                            'action' => null,
+                        ];
+                    }
+                    $act = strtolower(trim((string) ($row['action'] ?? '')));
+                    if ($act === '') {
+                        continue;
+                    }
+                    $seenKey = $po . '|' . $act;
+                    if (isset($seenAction[$seenKey])) {
+                        continue;
+                    }
+                    $seenAction[$seenKey] = true;
+
+                    $st = trim((string) ($row['status'] ?? ''));
+                    if ($st === '') {
+                        $st = self::statusFor($act, !empty($row['success']));
+                    }
+                    if ($act === 'esign') {
+                        $out[$po]['esign_status'] = $st;
+                    } elseif ($act === 'approve' || $act === 'pass') {
+                        $out[$po]['approve_status'] = $st;
+                    } elseif (in_array($act, ['validate', 'validation', 'not_validate'], true)) {
+                        $out[$po]['validate_status'] = $st;
+                    }
+                    // Prefer approve > esign > validate for summary badge
+                    $out[$po]['workflow_status'] = $out[$po]['approve_status']
+                        ?: ($out[$po]['esign_status'] ?: ($out[$po]['validate_status'] ?: $st));
+                    $out[$po]['action'] = $act !== '' ? $act : $out[$po]['action'];
+                }
+            }
+        } catch (Throwable $e) {
+            return $out;
+        }
+        return $out;
+    }
+
+    /**
+     * Latest Send / Receive mailbox action per PO (from Pass_po_validtion).
+     *
+     * @param list<string> $pos
+     * @return array<string, array{sent_receive_status:string,status:string,from_username:?string,to_username:?string,remarks:?string,created_at:?string}>
+     */
+    public function latestSendStatusesForPos(array $pos): array
+    {
+        $out = [];
+        $norm = [];
+        foreach ($pos as $p) {
+            $d = ltrim(preg_replace('/\D/', '', (string) $p) ?? '', '0');
+            if ($d !== '') {
+                $norm[$d] = $d;
+            }
+        }
+        if ($norm === []) {
+            return $out;
+        }
+        try {
+            $this->ensureTable();
+            $pdo = Database::connection();
+            if (!$this->tableExists($pdo)) {
+                return $out;
+            }
+            $this->ensureMailboxColumns($pdo);
+            $hasMailbox = $this->hasMailboxColumns($pdo);
+
+            foreach (array_chunk(array_values($norm), 200) as $chunk) {
+                $variants = [];
+                foreach ($chunk as $po) {
+                    $variants[$po] = true;
+                    if (preg_match('/^\d+$/', $po)) {
+                        $variants[str_pad($po, 10, '0', STR_PAD_LEFT)] = true;
+                    }
+                }
+                $variantList = array_keys($variants);
+                $placeholders = implode(',', array_fill(0, count($variantList), '?'));
+                $mailSelect = $hasMailbox
+                    ? 'from_username, to_username, to_email, remarks,'
+                    : "CAST(NULL AS NVARCHAR(100)) AS from_username, CAST(NULL AS NVARCHAR(100)) AS to_username, CAST(NULL AS NVARCHAR(255)) AS to_email, CAST(NULL AS NVARCHAR(MAX)) AS remarks,";
+                $sql = "
+                    SELECT TOP 4000
+                        purchase_order, action, status, {$mailSelect} created_at, id
+                    FROM [dbo].[Pass_po_validtion]
+                    WHERE (
+                        REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(purchase_order, N''))), N'#', N''), N' ', N'') IN ({$placeholders})
+                        OR LTRIM(RTRIM(ISNULL(purchase_order, N''))) IN ({$placeholders})
+                        OR LTRIM(STR(TRY_CONVERT(BIGINT, purchase_order), 20)) IN ({$placeholders})
+                    )
+                      AND LOWER(ISNULL(action, '')) IN ('send', 'receive', 'sent', 'forward')
+                    ORDER BY id DESC
+                ";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute(array_merge($variantList, $variantList, $variantList));
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+                    $po = ltrim(preg_replace('/\D/', '', (string) ($row['purchase_order'] ?? '')) ?? '', '0');
+                    if ($po === '' || !isset($norm[$po]) || isset($out[$po])) {
+                        continue;
+                    }
+                    $act = strtolower(trim((string) ($row['action'] ?? '')));
+                    $st = trim((string) ($row['status'] ?? ''));
+                    $label = (str_contains($act, 'receiv') || str_contains(strtolower($st), 'receiv'))
+                        ? 'Received'
+                        : 'Sent';
+                    $created = function_exists('sap_reports_to_mumbai')
+                        ? sap_reports_to_mumbai($row['created_at'] ?? null)
+                        : substr(str_replace('T', ' ', (string) ($row['created_at'] ?? '')), 0, 19);
+                    $out[$po] = [
+                        'sent_receive_status' => $label,
+                        'status' => $st !== '' ? $st : strtolower($label),
+                        'from_username' => trim((string) ($row['from_username'] ?? '')) ?: null,
+                        'to_username' => trim((string) ($row['to_username'] ?? '')) ?: null,
+                        'to_email' => trim((string) ($row['to_email'] ?? '')) ?: null,
+                        'remarks' => trim((string) ($row['remarks'] ?? '')) ?: null,
+                        'created_at' => $created !== '' ? $created : null,
+                    ];
+                }
+            }
+        } catch (Throwable $e) {
+            error_log('PassPoValidationLogService latestSendStatusesForPos: ' . $e->getMessage());
+            return $out;
+        }
+        return $out;
     }
 
     /**
@@ -233,12 +497,34 @@ class PassPoValidationLogService
             $action = strtolower(trim((string) ($filters['action'] ?? '')));
             $from = trim((string) ($filters['from'] ?? ''));
             $to = trim((string) ($filters['to'] ?? ''));
+            // success: 1 = ok only, 0 = failed only, all/empty = both
+            $successFilter = strtolower(trim((string) ($filters['success'] ?? 'all')));
+            $approvedOnlyRaw = strtolower(trim((string) ($filters['approved_only'] ?? '')));
+            $approvedOnly = in_array($approvedOnlyRaw, ['1', 'true', 'yes', 'approved'], true)
+                || $successFilter === 'approved';
 
             $where = [
-                'success = 1',
-                "(LOWER(ISNULL(action, '')) IN ('pass', 'esign') OR ISNULL(value_flag, '') = 'X')",
+                "(LOWER(ISNULL(action, '')) IN ('pass', 'esign', 'approve') OR ISNULL(value_flag, '') = 'X')",
+                "LOWER(ISNULL(action, '')) <> 'workflow'",
             ];
             $params = [];
+            if ($approvedOnly) {
+                // Approved PO page: successful approve / pass / e-sign only (no failed / no workflow audit)
+                $where[] = 'success = 1';
+                $where[] = "(
+                    LOWER(ISNULL(action, '')) IN ('approve', 'pass', 'esign')
+                    OR ISNULL(value_flag, '') = 'X'
+                    OR LOWER(ISNULL(status, '')) LIKE '%approved%'
+                    OR LOWER(ISNULL(status, '')) LIKE '%e-sign%'
+                    OR LOWER(ISNULL(status, '')) LIKE '%signed%'
+                )";
+                $where[] = "LOWER(ISNULL(status, '')) NOT LIKE '%fail%'";
+                $where[] = "LOWER(ISNULL(status, '')) NOT LIKE '%workflow%'";
+            } elseif ($successFilter === '1' || $successFilter === 'true' || $successFilter === 'ok') {
+                $where[] = 'success = 1';
+            } elseif ($successFilter === '0' || $successFilter === 'false' || $successFilter === 'failed') {
+                $where[] = 'success = 0';
+            }
             if ($po !== '') {
                 $where[] = 'purchase_order LIKE ?';
                 $params[] = '%' . ltrim($po, '0') . '%';
@@ -247,7 +533,7 @@ class PassPoValidationLogService
                 $where[] = 'username LIKE ?';
                 $params[] = '%' . $username . '%';
             }
-            if ($action !== '' && in_array($action, ['pass', 'esign'], true)) {
+            if ($action !== '' && in_array($action, ['pass', 'esign', 'approve'], true)) {
                 $where[] = 'LOWER(ISNULL(action, \'\')) = ?';
                 $params[] = $action;
             }
@@ -289,7 +575,14 @@ class PassPoValidationLogService
             $stmt->execute($params);
             $rows = [];
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
-                $rows[] = $this->mapPassRow($row);
+                $mapped = $this->mapPassRow($row);
+                if ($approvedOnly) {
+                    // Approved PO page: always show status as Approved
+                    $mapped['status'] = 'Approved';
+                    $mapped['remarks'] = 'Approved';
+                    $mapped['success'] = true;
+                }
+                $rows[] = $mapped;
             }
 
             return [
@@ -349,17 +642,23 @@ class PassPoValidationLogService
             // Fall through to legacy local mirror
         }
 
-        // Legacy fallback (older saves under public/upload)
+        // Legacy fallback — signed names / marker only (never treat unsigned cache as signed)
         $folderRel = 'upload/PoZcostValidation/Po-' . $display;
         $folderAbs = base_path('public/' . $folderRel);
+        $marker = $folderAbs . DIRECTORY_SEPARATOR . ('PO-' . $display . '.signed');
         $candidates = [
             'PO-' . $display . '_signed.pdf',
             'po-' . $display . '_signed.pdf',
             'PO_' . $display . '_signed.pdf',
-            'PO-' . $display . '.pdf',
-            'po-' . $display . '.pdf',
-            'PO_' . $display . '.pdf',
         ];
+        if (@is_file($marker)) {
+            array_unshift(
+                $candidates,
+                'PO-' . $display . '.pdf',
+                'po-' . $display . '.pdf',
+                'PO_' . $display . '.pdf'
+            );
+        }
         $pdfFile = null;
         $absPath = null;
         foreach ($candidates as $name) {
@@ -401,8 +700,10 @@ class PassPoValidationLogService
         $ok = !empty($row['success']);
         $valueFlag = isset($row['value_flag']) ? (string) $row['value_flag'] : null;
         $status = trim((string) ($row['status'] ?? ''));
-        if ($status === '') {
-            $status = self::statusFor((string) $action, $ok, $valueFlag);
+        if ($status === '' || preg_match('/^signed\s*already$/i', $status)) {
+            $status = $status !== '' && preg_match('/^signed\s*already$/i', $status)
+                ? 'E-Sign Completed'
+                : self::statusFor((string) $action, $ok, $valueFlag);
         }
         $file = $this->resolveSignedPdf($po);
 
@@ -425,6 +726,24 @@ class PassPoValidationLogService
             }
         }
 
+        $remarks = $status;
+        $responseDecoded = null;
+        if ($responseRaw !== '') {
+            $responseDecoded = json_decode($responseRaw, true);
+            if (is_array($responseDecoded)) {
+                $err = trim((string) ($responseDecoded['error'] ?? ''));
+                $note = trim((string) ($responseDecoded['note'] ?? $responseDecoded['status'] ?? ''));
+                if (preg_match('/^signed\s*already$/i', $note)) {
+                    $note = 'E-Sign Completed';
+                }
+                if (!$ok && $err !== '') {
+                    $remarks = $status . ' — ' . $err;
+                } elseif ($note !== '' && !preg_match('/^signed\s*already$/i', $note)) {
+                    $remarks = $note;
+                }
+            }
+        }
+
         return [
             'id' => isset($row['id']) ? (int) $row['id'] : null,
             'user_id' => $row['user_id'] !== null ? (string) $row['user_id'] : null,
@@ -433,6 +752,7 @@ class PassPoValidationLogService
             'request_id' => trim((string) ($row['request_id'] ?? '')) ?: null,
             'action' => $action,
             'status' => $status,
+            'remarks' => $remarks,
             'value_flag' => $valueFlag,
             'success' => $ok,
             'http_code' => isset($row['http_code']) ? (int) $row['http_code'] : null,
@@ -446,3 +766,4 @@ class PassPoValidationLogService
         ];
     }
 }
+?>
