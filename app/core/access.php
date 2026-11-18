@@ -192,7 +192,7 @@ function sap_reports_user_can(string $module, string $action = 'view', ?array $u
     }
     if (!in_array($action, [
         'add', 'view', 'edit', 'approve', 'copy', 'assign', 'validate',
-        'receive', 'sent', 'workflow', 'approved',
+        'receive', 'sent', 'workflow', 'approved', 'related',
     ], true)) {
         $action = 'view';
     }
@@ -241,11 +241,11 @@ function sap_reports_user_can(string $module, string $action = 'view', ?array $u
         require_once base_path('app/core/Database.php');
         $pdo = Database::connection();
         $table = sap_reports_access_table();
-        if (in_array($action, ['copy', 'assign', 'validate', 'receive', 'sent', 'workflow', 'approved'], true)) {
+        if (in_array($action, ['copy', 'assign', 'validate', 'receive', 'sent', 'workflow', 'approved', 'related'], true)) {
             $len = $pdo->query("SELECT COL_LENGTH('dbo.{$table}', '{$col}')")->fetchColumn();
             if ((int) $len <= 0) {
                 // Fallback: older table without new columns
-                if (in_array($action, ['copy', 'receive', 'sent', 'workflow', 'approved'], true)) {
+                if (in_array($action, ['copy', 'receive', 'sent', 'workflow', 'approved', 'related'], true)) {
                     return false;
                 }
                 // assign/validate fall back to can_approve if column missing

@@ -261,6 +261,56 @@ class PoSentLogService
     }
 
     /**
+     * Full sent/receive history for one PO (newest first).
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function historyForPurchaseOrder(string $purchaseOrder, int $limit = 40): array
+    {
+        $po = preg_replace('/\D/', '', $purchaseOrder) ?? '';
+        $po = ltrim($po, '0');
+        if ($po === '' || !preg_match('/^\d{1,10}$/', $po)) {
+            return [];
+        }
+        $limit = max(1, min(100, $limit));
+        try {
+            $this->ensureTable();
+            $pdo = Database::connection();
+            if (!$this->tableExists($pdo)) {
+                return [];
+            }
+            $variants = [$po, str_pad($po, 10, '0', STR_PAD_LEFT)];
+            $variants = array_values(array_unique($variants));
+            $ph = implode(',', array_fill(0, count($variants), '?'));
+            $sql = "
+                SELECT TOP ({$limit})
+                    id, purchase_order, from_username, to_username, to_email, remarks, status, created_at
+                FROM [dbo].[" . self::TABLE . "]
+                WHERE (
+                    REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(purchase_order, N''))), N'#', N''), N' ', N'') IN ({$ph})
+                    OR LTRIM(RTRIM(ISNULL(purchase_order, N''))) IN ({$ph})
+                    OR LTRIM(STR(TRY_CONVERT(BIGINT, purchase_order), 20)) IN ({$ph})
+                )
+                ORDER BY id DESC
+            ";
+            $bind = array_merge($variants, $variants, $variants);
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($bind);
+            $rows = [];
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+                $mapped = $this->mapRow($row);
+                $rawStatus = strtolower((string) ($mapped['status'] ?? 'sent'));
+                $mapped['sent_receive_status'] = str_contains($rawStatus, 'receiv') ? 'Received' : 'Sent';
+                $rows[] = $mapped;
+            }
+            return $rows;
+        } catch (Throwable $e) {
+            error_log('PoSentLogService historyForPurchaseOrder: ' . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
      * @param array{box?:string,username?:string,limit?:int,po?:string} $filters
      * @return array{success:bool,rows:list<array<string,mixed>>,error:?string}
      */

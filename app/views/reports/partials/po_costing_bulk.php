@@ -47,10 +47,10 @@
             </div>
             <div class="pcb-rules-body">
                 <section>
-                    <h4>Validation Status (workflow)</h4>
+                    <h4>System Validation (workflow)</h4>
                     <p>List badges and KPI cards follow the PO e-sign / validation workflow for each purchase order.</p>
                     <ul class="pcb-rules-status">
-                        <li><span class="pcb-badge is-pass">PASSED</span> Workflow completed — fully signed &amp; validated.</li>
+                        <li><span class="pcb-badge is-pass">Valid</span> Workflow completed — fully signed &amp; validated.</li>
                         <li><span class="pcb-badge is-review">NEED TO REVIEW</span> In checker / authorised review, or rejected and needs attention.</li>
                         <li><span class="pcb-badge is-pending">MAPPING REQUIRED</span> Not started or pending required upload / preparer steps.</li>
                     </ul>
@@ -60,7 +60,7 @@
                     <ol>
                         <li><strong>Mapping Required</strong> — no request yet, pending upload, or pending preparer signature.</li>
                         <li><strong>Need to Review</strong> — pending checker, signed awaiting final, pending authorised signatory, or rejected.</li>
-                        <li><strong>Passed</strong> — completed after all required signatures.</li>
+                        <li><strong>Valid</strong> — completed after all required signatures.</li>
                     </ol>
                 </section>
             </div>
@@ -80,7 +80,7 @@
             <span class="pcb-kpi-icon material-icons-round">check_circle</span>
             <div class="pcb-kpi-body">
                 <b id="pcbKpiPassed">—</b>
-                <small id="pcbKpiPassedPct">Passed</small>
+                <small id="pcbKpiPassedPct">Valid</small>
             </div>
             <div class="pcb-kpi-bar" aria-hidden="true" style="display:none;"><i id="pcbKpiPassedBar" style="width:0%"></i></div>
         </article>

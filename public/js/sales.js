@@ -379,6 +379,11 @@
             splash.classList.add('is-done');
             splash.setAttribute('hidden', '');
         }
+        if (window.rptLoader && typeof window.rptLoader.show === 'function') {
+            if (active) window.rptLoader.show({ solid: true });
+            else window.rptLoader.hide(true);
+            return;
+        }
         if (loader) loader.hidden = !active;
     }
 

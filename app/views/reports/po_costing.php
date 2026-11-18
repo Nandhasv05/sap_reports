@@ -75,13 +75,23 @@ if (!isset($canApprovedPage)) {
         : true;
 }
 $canApprovedPage = (bool) $canApprovedPage;
+if (!isset($canRelatedPage)) {
+    $canRelatedPage = function_exists('sap_reports_user_can')
+        ? sap_reports_user_can('po-costing', 'related')
+        : true;
+}
+$canRelatedPage = (bool) $canRelatedPage;
 // Aside pages follow Access Studio toggles only (not View / Pass PO / Assign)
 $canAsideDashboard = $canView || $canPassPo || $canAssign || $canValidate || $canEsign
-    || $canReceivePage || $canSentPage || $canWorkflowPage || $canApprovedPage;
+    || $canReceivePage || $canSentPage || $canWorkflowPage || $canApprovedPage || $canRelatedPage;
 $canAsideReceive = $canReceivePage;
 $canAsideSent = $canSentPage;
 $canAsideWorkflow = $canWorkflowPage;
 $canAsideApproved = $canApprovedPage;
+$canAsideRelated = $canRelatedPage;
+$relatedPoDataUrl = (string) ($relatedPoDataUrl ?? url('po-costing/related-po'));
+$relatedPoStatusUrl = (string) ($relatedPoStatusUrl ?? url('po-costing/related-po/status'));
+$relatedPoSentLogUrl = (string) ($relatedPoSentLogUrl ?? url('po-costing/related-po/sent-log'));
 $costingHomeUrl = (string) ($costingHomeUrl ?? url('po-costing'));
 $panelHref = static function (string $panel) use ($costingHomeUrl): string {
     $panel = trim($panel);
@@ -105,9 +115,13 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
      data-workflow-notify="<?= e($workflowNotifyUrl) ?>"
      data-workflow-decide="<?= e($workflowDecideUrl) ?>"
      data-workflow-ack="<?= e($workflowAckUrl) ?>"
+     data-related-po-url="<?= e($relatedPoDataUrl) ?>"
+     data-related-po-status-url="<?= e($relatedPoStatusUrl) ?>"
+     data-related-po-sent-log-url="<?= e($relatedPoSentLogUrl) ?>"
      data-can-view="<?= $canView ? '1' : '0' ?>"
      data-can-pass-po="<?= $canPassPo ? '1' : '0' ?>"
      data-can-esign="<?= $canEsign ? '1' : '0' ?>"
+     data-can-sent="<?= $canSentPage ? '1' : '0' ?>"
      data-can-assign="<?= $canAssign ? '1' : '0' ?>"
      data-can-validate="<?= $canValidate ? '1' : '0' ?>"
      data-can-workflow="<?= $canWorkflowPage ? '1' : '0' ?>"
@@ -115,8 +129,16 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
      data-aside-received="<?= $canAsideReceive ? '1' : '0' ?>"
      data-aside-sent="<?= $canAsideSent ? '1' : '0' ?>"
      data-aside-workflow="<?= $canAsideWorkflow ? '1' : '0' ?>"
-     data-aside-approved="<?= $canAsideApproved ? '1' : '0' ?>">
+     data-aside-approved="<?= $canAsideApproved ? '1' : '0' ?>"
+     data-aside-related="<?= $canAsideRelated ? '1' : '0' ?>">
 
+    <?php
+        $loaderVisible = true;
+        $loaderAutoHide = true;
+        $loaderMessage = 'Preparing PO Costing…';
+        $loaderSteps = ['Connecting…', 'Loading PO Costing Validation…', 'Preparing PO Costing…'];
+    ?>
+    <?php $relatedBrandOptions = is_array($brands ?? null) ? $brands : []; ?>
     <header class="rpt-bar">
         <div class="rpt-bar-left">
             <a href="<?= e($catalogHome) ?>" class="rpt-brand" aria-label="EVOLV" title="SAP Reports">
@@ -130,6 +152,69 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
             </a>
             <div class="rpt-name">PO Costing Validation</div>
         </div>
+        <?php if (!empty($canAsideRelated)): ?>
+        <form class="rpt-search poc-related-header-filters" id="pocRelatedHeaderFilters" autocomplete="off" hidden aria-label="Related PO filters">
+            <label class="rpt-field rpt-field-mat-cat" title="Filter by Fabric, Trims, or All materials">
+                <span class="material-icons-round">category</span>
+                <select id="pocRelatedMatCat" name="mat_cat" aria-label="Material category">
+                    <option value="all" selected>All Materials</option>
+                    <option value="fabric">Fabric</option>
+                    <option value="trims">Trims</option>
+                </select>
+            </label>
+            <div class="po-multi-dropdown poc-related-brand" id="pocRelatedBrandDropdown" title="Filter by brand name (multi-select)">
+                <input type="hidden" name="brand" id="pocRelatedBrand" value="">
+                <button type="button" class="po-multi-trigger" id="pocRelatedBrandTrigger" aria-haspopup="true" aria-expanded="false" aria-label="Brand name">
+                    <span class="material-icons-round po-multi-icon">sell</span>
+                    <span class="po-multi-label" id="pocRelatedBrandLabel">All Brands</span>
+                    <span class="po-multi-badge" id="pocRelatedBrandBadge" style="display:none;">0</span>
+                    <span class="material-icons-round po-multi-arrow">expand_more</span>
+                </button>
+                <div class="po-multi-menu" id="pocRelatedBrandMenu" role="menu">
+                    <div class="po-multi-search-wrap">
+                        <span class="material-icons-round">search</span>
+                        <input type="text" id="pocRelatedBrandSearch" class="po-multi-search" placeholder="Search brands…" autocomplete="off">
+                        <button type="button" id="pocRelatedBrandSearchClear" class="po-multi-search-clear" style="display:none;" title="Clear search">
+                            <span class="material-icons-round">close</span>
+                        </button>
+                    </div>
+                    <div class="po-multi-actions">
+                        <button type="button" class="po-multi-action-btn" id="pocRelatedBrandSelectAll">Select All</button>
+                        <span class="po-multi-action-dot">·</span>
+                        <button type="button" class="po-multi-action-btn" id="pocRelatedBrandClearAll">Clear</button>
+                        <span class="po-multi-selected-info" id="pocRelatedBrandCountInfo">0 of <?= count($relatedBrandOptions) ?> selected</span>
+                    </div>
+                    <div class="po-multi-list" id="pocRelatedBrandList">
+                        <?php foreach ($relatedBrandOptions as $b): ?>
+                            <?php
+                            $bCode = (string) ($b['code'] ?? '');
+                            $bName = (string) ($b['name'] ?? $bCode);
+                            if ($bCode === '') {
+                                continue;
+                            }
+                            ?>
+                            <label class="po-multi-item" data-code="<?= e($bCode) ?>" data-name="<?= e(strtolower($bName)) ?>">
+                                <input type="checkbox" class="po-multi-checkbox" value="<?= e($bCode) ?>">
+                                <span class="po-multi-item-name"><?= e($bName) ?></span>
+                                <span class="po-multi-item-code"><?= e($bCode) ?></span>
+                            </label>
+                        <?php endforeach; ?>
+                    </div>
+                    <div class="po-multi-footer">
+                        <button type="button" class="po-multi-btn-cancel" id="pocRelatedBrandCancel">Cancel</button>
+                        <button type="button" class="po-multi-btn-apply" id="pocRelatedBrandApply">
+                            <span class="material-icons-round">check</span>
+                            <span>Apply</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <button type="button" class="poc-related-clear" id="pocRelatedClearHeaderBtn" title="Clear Related PO filters">
+                <span class="material-icons-round">filter_alt_off</span>
+                <span>Clear Filter</span>
+            </button>
+        </form>
+        <?php endif; ?>
         <?php require base_path('app/views/partials/header_nav_right.php'); ?>
     </header>
 
@@ -167,6 +252,12 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
                     <span class="poc-sidenav-ico" aria-hidden="true"><span class="material-icons-round">verified</span></span>
                     <span class="poc-sidenav-copy">Approved PO</span>
                     <span class="poc-tab-badge is-approved" id="pocTabBadgeApproved">0</span>
+                </a>
+                <?php endif; ?>
+                <?php if ($canAsideRelated): ?>
+                <a href="<?= e($panelHref('related')) ?>" class="poc-sidenav-item" data-poc-panel="related" data-access="view" role="tab" aria-selected="false" title="Related PO — NotApproved from Z_QuotationZCostCom">
+                    <span class="poc-sidenav-ico" aria-hidden="true"><span class="material-icons-round">link</span></span>
+                    <span class="poc-sidenav-copy">Related PO</span>
                 </a>
                 <?php endif; ?>
             </nav>
@@ -380,6 +471,11 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
                     </div>
                 </div>
             </div>
+
+            <!-- 5. Related PO — NotApproved from Z_QuotationZCostCom -->
+            <?php if ($canAsideRelated): ?>
+                <?php require base_path('app/views/reports/partials/po_related.php'); ?>
+            <?php endif; ?>
         </main>
     </div>
 
@@ -417,6 +513,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
         sent: page.getAttribute('data-aside-sent') !== '0',
         workflow: page.getAttribute('data-aside-workflow') !== '0',
         approved: page.getAttribute('data-aside-approved') !== '0',
+        related: page.getAttribute('data-aside-related') !== '0',
         mailbox: page.getAttribute('data-aside-received') !== '0' || page.getAttribute('data-aside-sent') !== '0'
     };
     function firstAllowedPanel() {
@@ -425,6 +522,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
         if (asideAccess.sent) return 'sent';
         if (asideAccess.workflow) return 'workflow';
         if (asideAccess.approved) return 'approved';
+        if (asideAccess.related) return 'related';
         return 'dashboard';
     }
     function canOpenPanel(name) {
@@ -814,6 +912,11 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
             if (mailboxTab === 'sent' || mailboxTab === 'received') {
                 loadBox(mailboxTab, true);
             }
+            try {
+                if (window.pocRelatedPo && typeof window.pocRelatedPo.load === 'function') {
+                    window.pocRelatedPo.load(true);
+                }
+            } catch (_) {}
         } catch (err) {
             sentShowError(String((err && err.message) || 'Could not send mail'));
         } finally {
@@ -1494,7 +1597,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
     function showPanel(name) {
         var key = String(name || 'dashboard');
         if (key === 'flow') key = 'workflow';
-        if (['dashboard', 'received', 'sent', 'mailbox', 'workflow', 'approved'].indexOf(key) < 0) key = 'dashboard';
+        if (['dashboard', 'received', 'sent', 'mailbox', 'workflow', 'approved', 'related'].indexOf(key) < 0) key = 'dashboard';
         if (!canOpenPanel(key)) {
             key = firstAllowedPanel();
         }
@@ -1516,8 +1619,22 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
             b.setAttribute('aria-selected', active ? 'true' : 'false');
         });
 
-        page.classList.toggle('is-lookup', key === 'dashboard');
-        page.classList.toggle('is-workflow', key !== 'dashboard');
+        if (key === 'related') {
+            page.classList.toggle('is-lookup', false);
+            page.classList.toggle('is-workflow', true);
+            page.classList.add('is-related-po', 'is-related-results');
+            page.classList.remove('is-related-lookup');
+            if (window.pocRelatedPo && typeof window.pocRelatedPo.open === 'function') {
+                window.pocRelatedPo.open();
+            }
+        } else {
+            if (window.pocRelatedPo && typeof window.pocRelatedPo.close === 'function') {
+                window.pocRelatedPo.close();
+            }
+            page.classList.remove('is-related-po', 'is-related-results', 'is-related-lookup');
+            page.classList.toggle('is-lookup', key === 'dashboard');
+            page.classList.toggle('is-workflow', key !== 'dashboard');
+        }
 
         if (panelKey === 'mailbox') {
             var tab = (key === 'sent') ? 'sent' : 'received';
@@ -1652,6 +1769,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
             var shell = document.getElementById('pcwSentModal');
             if (shell && !shell.hidden) closeSentModal();
         });
+        window.pocOpenSentModal = openSentModal;
     })();
 
     if (approvedSearch) {
@@ -1774,3 +1892,32 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
     }
 })();
 </script>
+<?php if (!empty($canAsideRelated)): ?>
+<?php
+    require_once base_path('app/services/TableColumnRegistry.php');
+    $relatedTableKey = 'purchase_order_related_po_table';
+    $relatedTableDef = TableColumnRegistry::get($relatedTableKey) ?? ['columns' => [], 'defaultHidden' => []];
+?>
+<script type="application/json" id="pocRelatedTablePrefs"><?= json_encode([
+    'tableKey'      => $relatedTableKey,
+    'apiUrl'        => url('api/user/table-preferences/' . $relatedTableKey),
+    'userId'        => (string) ($_SESSION['user_id'] ?? ''),
+    'columns'       => $relatedTableDef['columns'] ?? [],
+    'defaultHidden' => $relatedTableDef['defaultHidden'] ?? [],
+], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
+<script src="<?= e(asset('js/table-columns.js')) ?>?v=<?= @filemtime(base_path('public/js/table-columns.js')) ?: time() ?>"></script>
+<script src="<?= e(asset('js/excel-export.js')) ?>?v=<?= @filemtime(base_path('public/js/excel-export.js')) ?: time() ?>"></script>
+<script src="<?= e(asset('js/related-po.js')) ?>?v=<?= @filemtime(base_path('public/js/related-po.js')) ?: time() ?>"></script>
+<script>
+(function () {
+    try {
+        var panel = new URL(window.location.href).searchParams.get('panel') || '';
+        if (panel === 'related' && window.pocRelatedPo && typeof window.pocRelatedPo.open === 'function') {
+            window.pocRelatedPo.open();
+        } else if (window.pocRelatedPo && typeof window.pocRelatedPo.close === 'function') {
+            window.pocRelatedPo.close();
+        }
+    } catch (_) {}
+})();
+</script>
+<?php endif; ?>

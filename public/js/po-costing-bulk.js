@@ -85,7 +85,7 @@
 
     const COL_DEFS = [
         { key: 'sno', label: 'S.No', locked: true },
-        { key: 'status', label: 'Validation Status' },
+        { key: 'status', label: 'System Validation' },
         { key: 'po', label: 'PO Number' },
         { key: 'date', label: 'PO Date' },
         { key: 'material', label: 'Material Type' },
@@ -128,6 +128,11 @@
     * Handle Spinner Functionality
     */
     function showSpinner(on) {
+        if (window.rptLoader && typeof window.rptLoader.show === 'function') {
+            if (on) window.rptLoader.show({ solid: true });
+            else window.rptLoader.hide(true);
+            return;
+        }
         if (spinner) spinner.hidden = !on;
         document.body.classList.toggle('rpt-loading', !!on);
     }
@@ -167,17 +172,8 @@
     }
 
     function selectedApprovedStatus() {
-        const radio = document.querySelector('input[name="pcb_approved"]:checked');
-        const raw = radio != null
-            ? String(radio.value || '')
-            : String($('pcbApproved')?.value || cfg.approvedStatus || '');
-        const val = (raw === 'Approved' || raw === 'NotApproved') ? raw : 'NotApproved';
-        if ($('pcbApproved') && $('pcbApproved').value !== val) $('pcbApproved').value = val;
-        document.querySelectorAll('input[name="pcb_approved"]').forEach((el) => {
-            el.checked = el.value === val;
-        });
-        cfg.approvedStatus = val;
-        return val;
+        cfg.approvedStatus = '';
+        return '';
     }
 
     function selectedBrand() {
@@ -185,6 +181,163 @@
         if ($('pcbBrand') && $('pcbBrand').value !== val) $('pcbBrand').value = val;
         cfg.brand = val;
         return val;
+    }
+
+    function selectedBrands() {
+        return selectedBrand().split(',').map((s) => s.trim()).filter(Boolean);
+    }
+
+    function bindBrandDropdown() {
+        const dd = $('pcbBrandDropdown');
+        if (!dd) return;
+
+        const trigger = $('pcbBrandTrigger');
+        const menu = $('pcbBrandMenu');
+        const hiddenInput = $('pcbBrand');
+        const labelEl = $('pcbBrandLabel');
+        const badgeEl = $('pcbBrandBadge');
+        const countInfoEl = $('pcbBrandCountInfo');
+        const searchInput = $('pcbBrandSearch');
+        const searchClear = $('pcbBrandSearchClear');
+        const selectAllBtn = $('pcbBrandSelectAll');
+        const clearAllBtn = $('pcbBrandClearAll');
+        const applyBtn = $('pcbBrandApply');
+        const cancelBtn = $('pcbBrandCancel');
+        const items = () => Array.from(dd.querySelectorAll('.po-multi-item'));
+        const checkboxes = () => Array.from(dd.querySelectorAll('.po-multi-checkbox'));
+
+        let initialChecked = checkboxes().filter((c) => c.checked).map((c) => c.value);
+
+        function updateItemHighlight() {
+            items().forEach((item) => {
+                const cb = item.querySelector('.po-multi-checkbox');
+                item.classList.toggle('is-checked', !!cb?.checked);
+            });
+        }
+
+        function updateCountInfo() {
+            const cbs = checkboxes();
+            const checkedCount = cbs.filter((c) => c.checked).length;
+            if (countInfoEl) {
+                countInfoEl.textContent = `${checkedCount} of ${cbs.length} selected`;
+            }
+            updateItemHighlight();
+        }
+
+        function updateTriggerUI(selected) {
+            if (selected.length === 0) {
+                if (labelEl) labelEl.textContent = 'All Brands';
+                if (badgeEl) { badgeEl.style.display = 'none'; badgeEl.textContent = '0'; }
+            } else if (selected.length === 1) {
+                const checkedCb = checkboxes().find((c) => c.value === selected[0]);
+                const name = checkedCb
+                    ? checkedCb.closest('.po-multi-item')?.querySelector('.po-multi-item-name')?.textContent
+                    : selected[0];
+                if (labelEl) labelEl.textContent = name || selected[0];
+                if (badgeEl) { badgeEl.style.display = 'inline-flex'; badgeEl.textContent = '1'; }
+            } else {
+                if (labelEl) labelEl.textContent = `${selected.length} Brands Selected`;
+                if (badgeEl) { badgeEl.style.display = 'inline-flex'; badgeEl.textContent = String(selected.length); }
+            }
+        }
+
+        function filterList(q) {
+            const query = q.trim().toLowerCase();
+            if (searchClear) searchClear.style.display = query ? 'flex' : 'none';
+            items().forEach((item) => {
+                const code = (item.getAttribute('data-code') || '').toLowerCase();
+                const name = (item.getAttribute('data-name') || '').toLowerCase();
+                const match = !query || code.includes(query) || name.includes(query);
+                item.style.display = match ? 'flex' : 'none';
+            });
+        }
+
+        function openDropdown(open) {
+            dd.classList.toggle('is-open', open);
+            trigger?.setAttribute('aria-expanded', open ? 'true' : 'false');
+            if (open) {
+                initialChecked = checkboxes().filter((c) => c.checked).map((c) => c.value);
+                if (searchInput) {
+                    searchInput.value = '';
+                    filterList('');
+                    setTimeout(() => searchInput.focus(), 60);
+                }
+            }
+        }
+
+        function restoreInitial() {
+            checkboxes().forEach((c) => { c.checked = initialChecked.includes(c.value); });
+            updateCountInfo();
+        }
+
+        trigger?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openDropdown(!dd.classList.contains('is-open'));
+        });
+        menu?.addEventListener('click', (e) => e.stopPropagation());
+        checkboxes().forEach((cb) => cb.addEventListener('change', updateCountInfo));
+        searchInput?.addEventListener('input', () => filterList(searchInput.value));
+        searchClear?.addEventListener('click', () => {
+            if (searchInput) searchInput.value = '';
+            filterList('');
+            searchInput?.focus();
+        });
+        selectAllBtn?.addEventListener('click', () => {
+            items().forEach((item) => {
+                if (item.style.display === 'none') return;
+                const cb = item.querySelector('.po-multi-checkbox');
+                if (cb) cb.checked = true;
+            });
+            updateCountInfo();
+        });
+        clearAllBtn?.addEventListener('click', () => {
+            items().forEach((item) => {
+                if (item.style.display === 'none') return;
+                const cb = item.querySelector('.po-multi-checkbox');
+                if (cb) cb.checked = false;
+            });
+            updateCountInfo();
+        });
+        cancelBtn?.addEventListener('click', () => {
+            restoreInitial();
+            openDropdown(false);
+        });
+        applyBtn?.addEventListener('click', () => {
+            const selected = checkboxes().filter((c) => c.checked).map((c) => c.value);
+            const val = selected.join(',');
+            const oldVal = hiddenInput ? hiddenInput.value : '';
+            if (hiddenInput) hiddenInput.value = val;
+            cfg.brand = val;
+            updateTriggerUI(selected);
+            openDropdown(false);
+            if (val !== oldVal) void fetchPos();
+        });
+        document.addEventListener('click', (e) => {
+            if (dd.classList.contains('is-open') && !dd.contains(e.target)) {
+                restoreInitial();
+                openDropdown(false);
+            }
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && dd.classList.contains('is-open')) {
+                restoreInitial();
+                openDropdown(false);
+            }
+        });
+
+        updateCountInfo();
+        updateTriggerUI(selectedBrands());
+
+        return {
+            clear() {
+                checkboxes().forEach((c) => { c.checked = false; });
+                if (hiddenInput) hiddenInput.value = '';
+                cfg.brand = '';
+                initialChecked = [];
+                updateCountInfo();
+                updateTriggerUI([]);
+            },
+        };
     }
 
     function workbenchUrl(po, opts = {}) {
@@ -293,7 +446,7 @@
         let label = 'MAPPING REQUIRED';
         if (s === 'PASSED') {
             cls = 'is-pass';
-            label = 'PASSED';
+            label = 'Valid';
         } else if (s === 'NEED_TO_REVIEW' || s === 'NEEDS_REVIEW') {
             cls = 'is-review';
             label = 'NEED TO REVIEW';
@@ -494,7 +647,8 @@
         let validationStatus = workflowListStatus(rec);
         let lastValidated = '';
         let validatedBy = '';
-        if (cached && Array.isArray(cached.records)) {
+        const hasCache = !!(cached && Array.isArray(cached.records) && cached.records.length);
+        if (hasCache) {
             const rollup = costingListStatusFromRecords(cached.records);
             validationStatus = rollup.status;
             passed = rollup.passed;
@@ -506,7 +660,13 @@
         } else {
             pending = Number(rec.items_count || 0) || 1;
         }
-        const totals = totalsFromRecords(cached?.records) || rec._totals || emptyTotals();
+        // Only replace list totals from validate cache — never wipe API total_value with 0
+        const apiValue = Number(rec.total_value ?? rec.totvalue ?? rec.net_value ?? 0) || 0;
+        const cachedTotals = hasCache ? (totalsFromRecords(cached.records) || emptyTotals()) : null;
+        const totals = cachedTotals || rec._totals || emptyTotals();
+        const totvalue = (cachedTotals && Number(cachedTotals.totvalue) > 0)
+            ? Number(cachedTotals.totvalue)
+            : apiValue;
         return {
             ...rec,
             _checked: !!rec._checked,
@@ -518,23 +678,24 @@
             _validation_status: validationStatus,
             _last_validated: lastValidated,
             _validated_by: validatedBy,
-            _totals: totals,
-            so_qty: totals.so_qty,
-            prwise_so_qty: totals.prwise_so_qty,
-            consumption: totals.consumption,
-            reqqty: totals.reqqty,
-            tot_poqty: totals.tot_poqty,
-            so_wise_poqty: totals.so_wise_poqty,
-            so_wise_po_val: totals.so_wise_po_val,
-            totvalue: totals.totvalue,
+            _totals: { ...totals, totvalue },
+            so_qty: hasCache ? totals.so_qty : (Number(rec.so_qty || 0) || totals.so_qty),
+            prwise_so_qty: hasCache ? totals.prwise_so_qty : (Number(rec.prwise_so_qty || 0) || totals.prwise_so_qty),
+            consumption: hasCache ? totals.consumption : (Number(rec.consumption || 0) || totals.consumption),
+            reqqty: hasCache ? totals.reqqty : (Number(rec.reqqty || 0) || totals.reqqty),
+            tot_poqty: hasCache ? totals.tot_poqty : (Number(rec.total_qty || rec.tot_poqty || 0) || totals.tot_poqty),
+            so_wise_poqty: hasCache ? totals.so_wise_poqty : (Number(rec.so_wise_poqty || 0) || totals.so_wise_poqty),
+            so_wise_po_val: hasCache ? totals.so_wise_po_val : (Number(rec.so_wise_po_val || 0) || totals.so_wise_po_val),
+            totvalue,
+            total_value: totvalue > 0 ? totvalue : apiValue,
             po_currency: totals.po_currency || rec.currency || rec.po_currency || 'INR',
-            budgeted_cons: totals.budgeted_cons,
-            budget_inr: totals.budget_inr,
-            budget_cost_per_gmt: totals.budget_cost_per_gmt,
-            conv: totals.conv,
-            actual_cost: totals.actual_cost,
-            _po_items: totals.po_items,
-            _po_materials: totals.po_materials,
+            budgeted_cons: hasCache ? totals.budgeted_cons : (Number(rec.budgeted_cons || 0) || totals.budgeted_cons),
+            budget_inr: hasCache ? totals.budget_inr : (Number(rec.budget_inr || 0) || totals.budget_inr),
+            budget_cost_per_gmt: hasCache ? totals.budget_cost_per_gmt : (Number(rec.budget_cost_per_gmt || 0) || totals.budget_cost_per_gmt),
+            conv: hasCache ? totals.conv : (Number(rec.conv || 0) || totals.conv),
+            actual_cost: hasCache ? totals.actual_cost : (Number(rec.actual_cost || 0) || totals.actual_cost),
+            _po_items: hasCache ? totals.po_items : (Number(rec.items_count || 0) || totals.po_items),
+            _po_materials: hasCache ? totals.po_materials : (Number(rec.materials_count || 0) || totals.po_materials),
             _z_items: totals.z_items,
             _z_materials: totals.z_materials,
             _z_so_qty: totals.z_so_qty,
@@ -1499,7 +1660,7 @@
         if ($('pcbKpiPassed')) $('pcbKpiPassed').textContent = qty(passed);
         if ($('pcbKpiExceptions')) $('pcbKpiExceptions').textContent = qty(review);
         if ($('pcbKpiPending')) $('pcbKpiPending').textContent = qty(missing);
-        if ($('pcbKpiPassedPct')) $('pcbKpiPassedPct').textContent = `Passed (${pctLabel(passed, total)})`;
+        if ($('pcbKpiPassedPct')) $('pcbKpiPassedPct').textContent = `Valid (${pctLabel(passed, total)})`;
         if ($('pcbKpiExcPct')) {
             $('pcbKpiExcPct').innerHTML = `Need to Review (${pctLabel(review, total)}) <span class="material-icons-round pcb-kpi-help" aria-hidden="true">info</span>`;
         }
@@ -1840,18 +2001,20 @@
             if (to) u.searchParams.set('to', to);
             if (supplier) u.searchParams.set('supplier', supplier);
             if (mat !== 'all') u.searchParams.set('mat_cat', mat);
+            if (brand) u.searchParams.set('brand', brand);
             if (approvedStatus === 'Approved' || approvedStatus === 'NotApproved') {
                 u.searchParams.set('approved_status', approvedStatus);
             }
             window.history.replaceState({}, '', u.pathname + u.search);
 
-            // Validate only this page's POs (skip already cached from prior visits)
-            if (autoValidatePage && cfg.canValidate !== false) {
+            // Always auto-validate this page for list status/value (SAP compare is read-only).
+            // Manual "Validated" button stays gated by canValidate.
+            if (autoValidatePage) {
                 const pagePos = allRows
                     .map((r) => String(r.purchase_order || ''))
                     .filter((po) => po && !itemCache[po]);
                 if (pagePos.length) {
-                    runBulkValidation(pagePos);
+                    enqueueSelectedValidation(pagePos);
                 }
             }
         } catch (err) {
@@ -2018,6 +2181,7 @@
     }
 
     function runBulkValidation(extraPos = null) {
+        // Manual trigger only — page auto-validate bypasses this gate
         if (cfg.canValidate === false) {
             toast('You do not have permission to validate.', 'error');
             return;
@@ -3657,16 +3821,7 @@
                 void fetchPos();
             });
         });
-        document.querySelectorAll('input[name="pcb_approved"]').forEach((el) => {
-            el.addEventListener('change', () => {
-                selectedApprovedStatus();
-                void fetchPos();
-            });
-        });
-        $('pcbBrand')?.addEventListener('change', () => {
-            selectedBrand();
-            void fetchPos();
-        });
+        const brandDropdownApi = bindBrandDropdown();
         $('pcbSupplier')?.addEventListener('change', () => void fetchPos());
         $('pcbPoSearchBtn')?.addEventListener('click', () => searchPoHeader());
         $('pcbPoSearch')?.addEventListener('keydown', (e) => {
@@ -3685,13 +3840,12 @@
             document.querySelectorAll('input[name="pcb_mat"]').forEach((el) => {
                 el.checked = el.value === 'all';
             });
-            if ($('pcbApproved')) $('pcbApproved').value = 'NotApproved';
-            document.querySelectorAll('input[name="pcb_approved"]').forEach((el) => {
-                el.checked = el.value === 'NotApproved';
-            });
-            cfg.approvedStatus = 'NotApproved';
-            if ($('pcbBrand')) $('pcbBrand').value = '';
-            cfg.brand = '';
+            cfg.approvedStatus = '';
+            if (brandDropdownApi) brandDropdownApi.clear();
+            else {
+                if ($('pcbBrand')) $('pcbBrand').value = '';
+                cfg.brand = '';
+            }
             if ($('pcbPoSearch')) $('pcbPoSearch').value = '';
             if ($('pcbQuickSearch')) $('pcbQuickSearch').value = '';
             document.querySelectorAll('#pcbFilterRow .pcb-col-filter').forEach((inp) => { inp.value = ''; });

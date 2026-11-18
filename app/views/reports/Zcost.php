@@ -20,7 +20,7 @@ $userRole = !empty($user['role']) ? $user['role'] : 'ADMIN';
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
-  <link rel="stylesheet" href="<?= e(asset('css/loader.css')) ?>">
+  <link rel="stylesheet" href="<?= e(asset('css/loader.css')) ?>?v=<?= @filemtime(base_path('public/css/loader.css')) ?: time() ?>">
   <link rel="stylesheet" href="<?= e(asset('css/zcost/sap_theme.css')) ?>">
   <link rel="stylesheet" href="<?= e(asset('css/zcost/sap_initial.css')) ?>">
   <link rel="stylesheet" href="<?= e(asset('css/zcost/evolv_landing.css')) ?>">
@@ -44,6 +44,7 @@ $userRole = !empty($user['role']) ? $user['role'] : 'ADMIN';
 <body class="sap-body">
   <?php
     $loaderIcon = 'request_quote';
+    $loaderVisible = false;
     $loaderSteps = ['Connecting to SAP…', 'Loading costing sheet…', 'Preparing workspace…'];
     require base_path('app/views/partials/loader.php');
   ?>
@@ -1145,7 +1146,7 @@ $userRole = !empty($user['role']) ? $user['role'] : 'ADMIN';
 <script>
   window.ZCOST_API_URL = "<?= e(url('zcost/api')) ?>";
 </script>
-<script src="<?= e(asset('js/loader.js')) ?>"></script>
+<script src="<?= e(asset('js/loader.js')) ?>?v=<?= @filemtime(base_path('public/js/loader.js')) ?: time() ?>"></script>
 <script src="<?= e(asset('js/zcost/sap_costing.js')) ?>?v=62"></script>
 
 </body>

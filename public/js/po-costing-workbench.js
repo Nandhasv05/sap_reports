@@ -366,7 +366,7 @@
                 return { code: 'NEEDS_REVIEW', label: 'Need to Review', cls: 'is-ambiguous' };
             }
             r.cost_mismatch = false;
-            return { code: 'PASS', label: 'Passed', cls: 'is-pass' };
+            return { code: 'PASS', label: 'Valid', cls: 'is-pass' };
         }
         // Budget present but actual missing / 0 → review (do not paint green for 0)
         if (budget !== null && budget > 0 && (actual === null || actual <= 0)) {
@@ -381,7 +381,7 @@
         if (st === 'EXCEPTION' || st === 'FAIL' || st === 'NOT_VALIDATED' || !!r.cost_mismatch) {
             return { code: 'NEEDS_REVIEW', label: 'Need to Review', cls: 'is-ambiguous' };
         }
-        if (st === 'PASS') return { code: 'PASS', label: 'Passed', cls: 'is-pass' };
+        if (st === 'PASS') return { code: 'PASS', label: 'Valid', cls: 'is-pass' };
         // Linked but uncertain → Need to Review; else Mapping Required
         if (hasLink) {
             return { code: 'NEEDS_REVIEW', label: 'Need to Review', cls: 'is-ambiguous' };
@@ -619,7 +619,7 @@
 
     function statusFilterLabel(code) {
         const map = {
-            PASS: 'Passed',
+            PASS: 'Valid',
             NOT_MATCHED: 'Mapping Required',
             NOT_VALIDATED: 'Need to Review',
             NEEDS_REVIEW: 'Need to Review',
@@ -682,9 +682,9 @@
             subtitle = 'Validation Overview';
             title = 'Total Items';
             val = fmt(s.total_records || detailRows.length);
-            formula = 'Total Items = Passed + Mapping Required + Need to Review';
+            formula = 'Total Items = Valid + Mapping Required + Need to Review';
             stepsHtml = `
-                <div class="pcw-cdm-step-item"><span>Passed</span><strong>${fmt(s.passed)}</strong></div>
+                <div class="pcw-cdm-step-item"><span>Valid</span><strong>${fmt(s.passed)}</strong></div>
                 <div class="pcw-cdm-step-item"><span>Mapping Required</span><strong>${fmt(s.mapping_required)}</strong></div>
                 <div class="pcw-cdm-step-item"><span>Need to Review</span><strong>${fmt(s.ambiguous_match ?? s.needs_review)}</strong></div>
                 <div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Items</span><strong>${fmt(s.total_records || detailRows.length)}</strong></div>
@@ -694,15 +694,15 @@
         } else if (cardKey === 'status_pass') {
             icon = 'check_circle';
             subtitle = 'Validation Overview';
-            title = 'Passed';
+            title = 'Valid';
             val = fmt(s.passed);
-            formula = 'Passed = Actual Cost ≤ Budget Cost per GMT (green)';
+            formula = 'Valid = Actual Cost ≤ Budget Cost per GMT (green)';
             showFilterBtn = true;
             filterStatus = 'PASS';
             const passRows = detailRows.filter((r) => statusDisplay(r).code === 'PASS');
             stepsHtml = `
                 <div class="pcw-cdm-step-item"><span>Condition</span><strong>Actual ≤ Budget (green cells)</strong></div>
-                <div class="pcw-cdm-step-item"><span>Passed</span><strong>${fmt(s.passed)} of ${fmt(detailRows.length)}</strong></div>
+                <div class="pcw-cdm-step-item"><span>Valid</span><strong>${fmt(s.passed)} of ${fmt(detailRows.length)}</strong></div>
             `;
             rowsHtml = passRows.map(rowLineHtml).join('');
             rowCount = passRows.length;
@@ -1013,10 +1013,17 @@
     }
 
     function showSpinner(on) {
-        // Prefer shared rptLoader so % progress reaches 100% and hide clears cleanly
+        // Prefer shared rptLoader so the evolv boot overlay shows/hides cleanly
         if (window.rptLoader && typeof window.rptLoader.show === 'function') {
-            if (on) window.rptLoader.show({ solid: true });
-            else window.rptLoader.hide(true);
+            if (on) {
+                window.rptLoader.show({
+                    solid: true,
+                    message: 'Fetching purchase order…',
+                    steps: ['Connecting to SAP…', 'Fetching purchase order…', 'Loading ZCOST sheet…', 'Validating costs…'],
+                });
+            } else {
+                window.rptLoader.hide(true);
+            }
             return;
         }
         if (spinner) spinner.hidden = !on;
@@ -1593,6 +1600,9 @@
 
     /** @type {'pass'|'esign'|'sent'} */
     let esignLaunchMode = 'esign';
+    /** When eSign was opened via ?open=esign deep-link, cancel/close returns here */
+    let esignDeepLinkReturnUrl = '';
+    let esignOpenedViaDeepLink = false;
 
     function applyEsignSaveLabel(mode) {
         const label = $('pcwEsignSaveLabel');
@@ -1621,6 +1631,116 @@
         }
     }
 
+    let esignReleaseSaved = { status: '', remarks: '' };
+
+    function normalizeReleaseStatus(v) {
+        const raw = String(v || '').trim().toLowerCase();
+        if (!raw) return '';
+        if (raw === 'draft') return 'Draft';
+        if (raw === 'review' || raw === 'passed' || raw === 'pass') return 'Review';
+        if (['released', 'release', 'related', 'relasted', 'moved', 'move'].includes(raw)) return 'Released';
+        if (['Draft', 'Review', 'Released'].includes(String(v || '').trim())) return String(v).trim();
+        return '';
+    }
+
+    function setEsignReleaseFields(status, remarks) {
+        const statusEl = $('pcwEsignReleaseStatus');
+        const remarksEl = $('pcwEsignReleaseRemarks');
+        const norm = normalizeReleaseStatus(status);
+        if (statusEl) statusEl.value = norm;
+        if (remarksEl) remarksEl.value = String(remarks || '');
+        esignReleaseSaved = { status: norm, remarks: String(remarks || '').trim() };
+    }
+
+    function resetEsignReleaseFields() {
+        setEsignReleaseFields('', '');
+    }
+
+    async function loadEsignReleaseStatus(po) {
+        const endpoint = releaseStatusEndpoint();
+        if (!po || !endpoint) {
+            resetEsignReleaseFields();
+            return;
+        }
+        try {
+            const res = await fetch(`${endpoint}?po=${encodeURIComponent(po)}&_=${Date.now()}`, {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+                cache: 'no-store',
+            });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok || json.success === false) {
+                resetEsignReleaseFields();
+                return;
+            }
+            const data = json.data || {};
+            setEsignReleaseFields(data.status || '', data.remarks || '');
+        } catch (_) {
+            resetEsignReleaseFields();
+        }
+    }
+
+    function releaseStatusEndpoint() {
+        const configured = String(cfg.releaseStatusUrl || '').trim();
+        if (configured) return configured;
+        try {
+            return new URL('po-costing/related-po/status', window.location.origin + '/').pathname;
+        } catch (_) {
+            return '/po-costing/related-po/status';
+        }
+    }
+
+    /**
+     * Persist Draft/Review/Released + remarks. Called only from Save Signed PDF / Send PO.
+     * @returns {Promise<{ok:boolean,skipped?:boolean,error?:string}>}
+     */
+    async function saveEsignReleaseStatus() {
+        const endpoint = releaseStatusEndpoint();
+        const po = String($('pcwEsignPo')?.value || headerPo() || '').replace(/\D/g, '');
+        const status = normalizeReleaseStatus($('pcwEsignReleaseStatus')?.value || '');
+        const remarks = String($('pcwEsignReleaseRemarks')?.value || '').trim();
+        if (!po || !endpoint) {
+            return { ok: false, error: 'Status save URL is not configured.' };
+        }
+        if (!status) {
+            return { ok: true, skipped: true };
+        }
+        if (
+            status === esignReleaseSaved.status
+            && remarks === esignReleaseSaved.remarks
+        ) {
+            return { ok: true, skipped: true };
+        }
+        try {
+            const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    po,
+                    purchase_order: po,
+                    status,
+                    remarks,
+                }),
+            });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok || json.success === false) {
+                throw new Error(json.message || json.error || 'Failed to save status');
+            }
+            const data = json.data || {};
+            setEsignReleaseFields(
+                data.status || status,
+                data.remarks != null ? data.remarks : remarks
+            );
+            return { ok: true };
+        } catch (err) {
+            return { ok: false, error: String(err.message || 'Unable to save status update.') };
+        }
+    }
+
     function openEsignModal(opts) {
         const po = String(opts?.po || headerPo() || '').replace(/\D/g, '');
         const requestId = String(opts?.requestId || '');
@@ -1643,9 +1763,11 @@
             $('pcwEsignAssignUser').value = '';
             $('pcwEsignAssignUser').classList.remove('is-invalid');
         }
+        resetEsignReleaseFields();
         resetEsignLogDetails();
         clearEsignSignedAlready();
         showEsignSapMessage('', '');
+        void loadEsignReleaseStatus(po);
         void loadEsignLogDetails(po);
         // eSign toolbar → hide Approved; Pass PO → show Approved; Sent → send mode
         shell.classList.toggle('is-from-pass-po', showApprove);
@@ -1708,6 +1830,39 @@
         }
     }
 
+    function leaveEsignDeepLink() {
+        if (!esignOpenedViaDeepLink) return false;
+        const returnUrl = String(esignDeepLinkReturnUrl || '').trim();
+        esignOpenedViaDeepLink = false;
+        esignDeepLinkReturnUrl = '';
+        // Prefer explicit return (e.g. Related PO). Else close this tab if we opened it.
+        if (returnUrl) {
+            try {
+                window.location.href = returnUrl;
+                return true;
+            } catch (_) {}
+        }
+        try {
+            if (window.opener && !window.opener.closed) {
+                window.close();
+                return true;
+            }
+        } catch (_) {}
+        try {
+            window.close();
+            return true;
+        } catch (_) {}
+        // Fallback: strip open= from URL so user is not stuck in launch mode
+        try {
+            const u = new URL(window.location.href);
+            u.searchParams.delete('open');
+            u.searchParams.delete('from');
+            u.searchParams.delete('return');
+            window.history.replaceState({}, '', u.pathname + u.search);
+        } catch (_) {}
+        return false;
+    }
+
     function closeEsignModal() {
         const shell = $('pcwEsignModal');
         if (!shell) return;
@@ -1734,6 +1889,10 @@
         shell.classList.remove('is-open');
         shell.setAttribute('aria-hidden', 'true');
         document.body.classList.remove('pcw-esign-open');
+
+        // Deep-link from Related PO / bulk list: cancel should leave workbench
+        if (leaveEsignDeepLink()) return;
+
         window.setTimeout(() => {
             if (!shell.classList.contains('is-open')) {
                 shell.hidden = true;
@@ -3216,12 +3375,18 @@
         const assignName = String(assignOpt?.getAttribute('data-username') || assignOpt?.textContent || '').trim();
         const assignEmail = String($('pcwEsignAssignEmail')?.value || '').trim();
         const remarks = String($('pcwEsignRemarks')?.value || '').trim();
+        const releaseStatus = normalizeReleaseStatus($('pcwEsignReleaseStatus')?.value || '');
         const isSendMode = esignLaunchMode === 'sent' || !!document.getElementById('pcwEsignModal')?.classList.contains('is-from-sent');
         assignSel?.classList.remove('is-invalid');
         if (isSendMode && !assignId && !assignName) {
             assignSel?.classList.add('is-invalid');
             alert('Select a user in Assign to User before sending this PO.');
             assignSel?.focus();
+            return;
+        }
+        if (!releaseStatus) {
+            alert('Please select Draft, Review, or Released before saving.');
+            $('pcwEsignReleaseStatus')?.focus();
             return;
         }
         const place = places[0];
@@ -3275,6 +3440,10 @@
             if (!res.ok || json.success === false) {
                 throw new Error(json.message || json.error || `HTTP ${res.status}`);
             }
+
+            // Status + remarks save only with Save Signed PDF / Send PO (not on dropdown change)
+            const releaseSave = await saveEsignReleaseStatus();
+
             // Save signed PDF only — does NOT approve in SAP and does NOT set local APPROVED
             syncPassRevertButtons(summarizeRows(rows));
 
@@ -3288,10 +3457,12 @@
             if (btn) btn.disabled = true;
 
             const toast = document.createElement('div');
-            toast.className = 'pcw-toast is-ok';
-            toast.textContent = isSendMode
-                ? `PO ${po} sent · ${mumbaiStamp}`
-                : `Save Signed PDF · PO-${String(po).replace(/^0+/, '') || po}.pdf · ${mumbaiStamp}`;
+            toast.className = releaseSave.ok ? 'pcw-toast is-ok' : 'pcw-toast is-warn';
+            toast.textContent = releaseSave.ok
+                ? (isSendMode
+                    ? `PO ${po} sent · status saved · ${mumbaiStamp}`
+                    : `Save Signed PDF · status saved · PO-${String(po).replace(/^0+/, '') || po}.pdf · ${mumbaiStamp}`)
+                : `Signed PDF saved, but status/remarks failed: ${releaseSave.error || 'unknown error'}`;
             document.body.appendChild(toast);
             setTimeout(() => toast.remove(), 4500);
 
@@ -4675,7 +4846,7 @@
             ? statusDisplay(row)
             : (() => {
                 const st = String(status || '').toUpperCase().replace(/\s+/g, '_');
-                if (st === 'PASS') return { label: 'Passed', cls: 'is-pass' };
+                if (st === 'PASS') return { label: 'Valid', cls: 'is-pass' };
                 if (st === 'NEEDS_REVIEW' || st === 'AMBIGUOUS' || st === 'AMBIGUOUS_MATCH') {
                     return { label: 'Need to Review', cls: 'is-ambiguous' };
                 }
@@ -6452,10 +6623,27 @@
 
             // New-tab launch: ?open=esign|pass → open the modal after data is ready
             if (openAction === 'esign' || openAction === 'pass') {
+                try {
+                    const sp = new URLSearchParams(window.location.search);
+                    const from = String(sp.get('from') || '').toLowerCase();
+                    const ret = String(sp.get('return') || '').trim();
+                    esignOpenedViaDeepLink = true;
+                    if (ret && (ret.startsWith('/') || ret.startsWith(window.location.origin))) {
+                        esignDeepLinkReturnUrl = ret.startsWith('http') ? ret : (window.location.origin + ret);
+                    } else if (from === 'related') {
+                        esignDeepLinkReturnUrl = new URL('po-costing?panel=related', window.location.origin).href;
+                    } else {
+                        esignDeepLinkReturnUrl = '';
+                    }
+                } catch (_) {
+                    esignOpenedViaDeepLink = true;
+                    esignDeepLinkReturnUrl = '';
+                }
                 window.setTimeout(() => {
                     if (openAction === 'esign') {
                         if (cfg.canEsign === false) {
                             alert('You do not have eSign access for PO Costing.');
+                            leaveEsignDeepLink();
                             return;
                         }
                         passPoAndOpenEsign({ fromPassPo: false });
@@ -6463,6 +6651,7 @@
                     }
                     if (cfg.canPassPo === false) {
                         alert('You do not have Pass PO access for PO Costing.');
+                        leaveEsignDeepLink();
                         return;
                     }
                     passPoAndOpenEsign({ fromPassPo: true });
@@ -7636,6 +7825,7 @@
         if (bootPo && root) root.dataset.po = bootPo;
 
         if (bootPo || headerPo() || cfg.po) {
+            showSpinner(true);
             void runValidate({
                 mode: selectedCustomer ? 'non_validated' : 'validated',
                 customer: selectedCustomer,

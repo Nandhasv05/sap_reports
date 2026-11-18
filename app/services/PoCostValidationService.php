@@ -354,7 +354,8 @@ class PoCostValidationService
         if (!in_array($matCat, ['all', 'fabric', 'trims'], true)) {
             $matCat = 'all';
         }
-        $brand = SapPurchaseOrderService::normalizeBrand((string) ($filters['brand'] ?? $filters['brand_name'] ?? ''));
+        $brands = SapPurchaseOrderService::normalizeBrands($filters['brand'] ?? $filters['brand_name'] ?? '');
+        $brand = $brands[0] ?? '';
 
         $pageSize = (int) ($filters['page_size'] ?? $filters['limit'] ?? 25);
         $page = (int) ($filters['page'] ?? 1);
@@ -434,9 +435,25 @@ class PoCostValidationService
             }
 
             $brandName = trim((string) ($row['BrandName'] ?? $row['brand_name'] ?? ''));
-            if ($brand !== '' && strcasecmp($brandName, $brand) !== 0
-                && stripos($brandName, $brand) === false) {
-                continue;
+            if ($brands !== []) {
+                $matched = false;
+                foreach ($brands as $bCode) {
+                    if (strcasecmp($brandName, $bCode) === 0 || stripos($brandName, $bCode) !== false) {
+                        $matched = true;
+                        break;
+                    }
+                    $label = SapPurchaseOrderService::brandLabel($bCode);
+                    if ($label !== '' && (
+                        strcasecmp($brandName, $label) === 0
+                        || stripos($brandName, $label) !== false
+                    )) {
+                        $matched = true;
+                        break;
+                    }
+                }
+                if (!$matched) {
+                    continue;
+                }
             }
 
             $qty = $this->sapNumber($row['OrderQuantity'] ?? 0);
@@ -523,6 +540,30 @@ class PoCostValidationService
             ];
         }
 
+        // PO Validation page: only POs marked Released in dbo.po_release_log
+        if ($records !== [] && is_file(base_path('app/services/PoReleaseLogService.php'))) {
+            require_once base_path('app/services/PoReleaseLogService.php');
+            $poNums = [];
+            foreach ($records as $rec) {
+                $poNums[] = (string) ($rec['purchase_order'] ?? '');
+            }
+            $latest = (new PoReleaseLogService())->latestStatusesForPos($poNums);
+            $released = [];
+            foreach ($records as $rec) {
+                $poKey = ltrim(preg_replace('/\D/', '', (string) ($rec['purchase_order'] ?? '')) ?? '', '0');
+                $info = $latest[$poKey] ?? null;
+                $st = PoReleaseLogService::normalizeStatus(
+                    is_array($info) ? (string) ($info['status'] ?? '') : ''
+                );
+                if ($st === PoReleaseLogService::STATUS_RELEASED) {
+                    $released[] = $rec;
+                }
+            }
+            $records = $released;
+        } else {
+            $records = [];
+        }
+
         usort($records, static function (array $a, array $b): int {
             return strcmp((string) ($b['po_date'] ?? ''), (string) ($a['po_date'] ?? ''))
                 ?: strcmp((string) ($b['purchase_order'] ?? ''), (string) ($a['purchase_order'] ?? ''));
@@ -573,6 +614,326 @@ class PoCostValidationService
             'error'         => null,
             'source'        => 'Z_QUOTATIONZCOSTCOM_CDS',
             'approved_status' => $searchPo !== '' ? '' : 'NotApproved',
+        ];
+    }
+
+    /**
+     * Related PO list columns (matches Purchase Order list screenshot).
+     *
+     * @return list<array{key:string,label:string,type:string}>
+     */
+    public static function relatedPoColumns(): array
+    {
+        return [
+            ['key' => 'sno', 'label' => 'S.No', 'type' => 'num'],
+            ['key' => 'purchase_order', 'label' => 'PO Number', 'type' => 'text'],
+            ['key' => 'purchase_order_type', 'label' => 'PO Type', 'type' => 'text'],
+            ['key' => 'po_type_name', 'label' => 'PO Type Name', 'type' => 'text'],
+            ['key' => 'date', 'label' => 'PO Date', 'type' => 'date'],
+            ['key' => 'plant', 'label' => 'Plant', 'type' => 'text'],
+            ['key' => 'supplier', 'label' => 'Supplier', 'type' => 'text'],
+            ['key' => 'supplier_full_name', 'label' => 'Supplier Name', 'type' => 'text'],
+            ['key' => 'brand_name', 'label' => 'Brand Name', 'type' => 'text'],
+            ['key' => 'material_type', 'label' => 'Material', 'type' => 'text'],
+            ['key' => 'mat_type_desc', 'label' => 'MatTypeDesc', 'type' => 'text'],
+            ['key' => 'material_group', 'label' => 'MaterialGroup', 'type' => 'text'],
+            ['key' => 'items_count', 'label' => 'Items', 'type' => 'num'],
+            ['key' => 'total_qty', 'label' => 'Order Qty', 'type' => 'num'],
+            ['key' => 'unit', 'label' => 'Unit', 'type' => 'text'],
+            ['key' => 'total_value', 'label' => 'Net Value', 'type' => 'num'],
+            ['key' => 'currency', 'label' => 'Currency', 'type' => 'text'],
+            ['key' => 'status_update', 'label' => 'Status', 'type' => 'text'],
+            ['key' => 'status_remarks', 'label' => 'Remarks', 'type' => 'text'],
+            ['key' => 'sent', 'label' => 'Sent', 'type' => 'text'],
+            ['key' => 'sent_receive_log', 'label' => 'Sent / Receive Log', 'type' => 'text'],
+            ['key' => 'esign', 'label' => 'E-Sign', 'type' => 'text'],
+            ['key' => 'pdf', 'label' => 'View PDF', 'type' => 'text'],
+        ];
+    }
+
+    /**
+     * Related PO sidebar — Z_QuotationZCostCom NotApproved with expand navigations.
+     * Aggregates to one row per purchase order for the professional list table.
+     *
+     * @param array<string,mixed> $filters
+     * @return array{records:list,total:int,totals:array,columns:list,error:?string,source:string}
+     */
+    public function listRelatedPurchaseOrders(array $filters = []): array
+    {
+        $service = (string) ($this->cfg['quotation_costing_service']
+            ?? '/sap/opu/odata/sap/Z_QUOTATIONZCOSTCOM_CDS/Z_QuotationZCostCom');
+
+        $searchPo = preg_replace('/\D/', '', (string) ($filters['po'] ?? $filters['q'] ?? '')) ?? '';
+        if ($searchPo !== '' && !preg_match('/^\d{1,10}$/', $searchPo)) {
+            $searchPo = '';
+        }
+
+        $matCat = strtolower(trim((string) ($filters['mat_cat'] ?? $filters['category'] ?? 'all')));
+        if (!in_array($matCat, ['all', 'fabric', 'trims'], true)) {
+            $matCat = 'all';
+        }
+        $brands = SapPurchaseOrderService::normalizeBrands($filters['brand'] ?? $filters['brand_name'] ?? '');
+
+        if ($searchPo !== '') {
+            $poDisplay = $this->displayNumber($searchPo);
+            $poPadded = preg_match('/^\d+$/', $poDisplay)
+                ? str_pad($poDisplay, 10, '0', STR_PAD_LEFT)
+                : $poDisplay;
+            $filter = ($poPadded !== '' && $poPadded !== $poDisplay)
+                ? "(PurchaseOrder eq '{$poDisplay}' or PurchaseOrder eq '{$poPadded}')"
+                : "PurchaseOrder eq '{$poDisplay}'";
+        } else {
+            $filter = "ApprovedStatus eq 'NotApproved'";
+        }
+
+        $res = $this->odata->fetchResults($service, [
+            '$filter' => $filter,
+            '$expand' => 'to_Fabric,to_Trim,to_Packing,to_Special',
+        ], 8000);
+
+        $emptyTotals = [
+            'pos_count'       => 0,
+            'items_count'     => 0,
+            'total_qty'       => 0,
+            'total_value'     => 0,
+            'currency'        => 'INR',
+            'suppliers_count' => 0,
+        ];
+
+        if (!empty($res['error']) && empty($res['rows'])) {
+            return [
+                'records'       => [],
+                'total'         => 0,
+                'totals'        => $emptyTotals,
+                'columns'       => self::relatedPoColumns(),
+                'truncated'     => false,
+                'items_fetched' => 0,
+                'error'         => $res['error'],
+                'source'        => 'Z_QUOTATIONZCOSTCOM_CDS',
+                'odata_filter'  => $filter,
+                'mat_cat'       => $matCat,
+                'brand'         => implode(',', $brands),
+            ];
+        }
+
+        $docTypeMap = SapPurchaseOrderService::documentTypeMap();
+
+        /** @var array<string, array<string,mixed>> $pos */
+        $pos = [];
+        foreach ($res['rows'] ?? [] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $po = $this->displayNumber((string) ($row['PurchaseOrder'] ?? ''));
+            if ($po === '') {
+                continue;
+            }
+            $key = ltrim(preg_replace('/\D/', '', $po) ?? '', '0');
+            if ($key === '') {
+                $key = $po;
+            }
+
+            $matType = trim((string) ($row['MaterialType'] ?? ''));
+            $matTypeDesc = trim((string) ($row['MatTypeDesc'] ?? ''));
+            $matGroup = trim((string) ($row['MaterialGroup'] ?? ''));
+            $cat = SapPurchaseOrderService::classifyMaterial($matType, $matTypeDesc, $matGroup);
+            if ($matCat === 'fabric' && $cat !== 'fabric') {
+                continue;
+            }
+            if ($matCat === 'trims' && $cat !== 'trims') {
+                continue;
+            }
+
+            $brandName = trim((string) ($row['BrandName'] ?? $row['brand_name'] ?? ''));
+            if ($brands !== []) {
+                $matched = false;
+                foreach ($brands as $bCode) {
+                    if (strcasecmp($brandName, $bCode) === 0 || stripos($brandName, $bCode) !== false) {
+                        $matched = true;
+                        break;
+                    }
+                    $label = SapPurchaseOrderService::brandLabel($bCode);
+                    if ($label !== '' && (
+                        strcasecmp($brandName, $label) === 0
+                        || stripos($brandName, $label) !== false
+                    )) {
+                        $matched = true;
+                        break;
+                    }
+                }
+                if (!$matched) {
+                    continue;
+                }
+            }
+
+            $qty = $this->sapNumber($row['OrderQuantity'] ?? 0);
+            $net = $this->sapNumber($row['NetPriceAmount'] ?? 0);
+            $itemNo = $this->displayNumber((string) ($row['PurchaseOrderItem'] ?? ''));
+            $plant = trim((string) ($row['Plant'] ?? ''));
+            $unit = trim((string) ($row['PurchaseOrderQuantityUnit'] ?? ''));
+            $poType = trim((string) ($row['PurchaseOrderType'] ?? ''));
+            $typeName = trim((string) ($row['PurchasingDocumentTypeName'] ?? ''));
+            if ($typeName === '' && $poType !== '' && isset($docTypeMap[$poType])) {
+                $typeName = $docTypeMap[$poType];
+            }
+
+            if (!isset($pos[$key])) {
+                $pos[$key] = [
+                    'purchase_order'          => $po,
+                    'purchase_order_type'     => $poType,
+                    'po_type_name'            => $typeName,
+                    'date'                    => $this->sapDate($row['PurchaseOrderDate'] ?? null),
+                    'supplier'                => $this->displayNumber((string) ($row['Supplier'] ?? '')),
+                    'supplier_full_name'      => trim((string) ($row['SupplierFullName'] ?? '')),
+                    'brand_name'              => $brandName,
+                    'currency'                => trim((string) ($row['DocumentCurrency'] ?? 'INR')) ?: 'INR',
+                    'unit'                    => $unit,
+                    'items_count'             => 0,
+                    'total_qty'               => 0.0,
+                    'total_value'             => 0.0,
+                    'plants'                  => [],
+                    'mat_categories'          => [],
+                    'mat_type_descs'          => [],
+                    'material_groups'         => [],
+                    'brand_names'             => [],
+                    '_items'                  => [],
+                    'fabric_lines'            => 0,
+                    'trim_lines'              => 0,
+                    'packing_lines'           => 0,
+                    'special_lines'           => 0,
+                ];
+            }
+
+            $p = &$pos[$key];
+            if ($itemNo !== '' && !isset($p['_items'][$itemNo])) {
+                $p['_items'][$itemNo] = true;
+                $p['items_count']++;
+                $p['total_qty'] += $qty;
+                $p['total_value'] += $net;
+            } elseif ($itemNo === '') {
+                $p['items_count']++;
+                $p['total_qty'] += $qty;
+                $p['total_value'] += $net;
+            }
+
+            if ($plant !== '' && !in_array($plant, $p['plants'], true)) {
+                $p['plants'][] = $plant;
+            }
+            if (in_array($cat, ['fabric', 'trims'], true) && !in_array($cat, $p['mat_categories'], true)) {
+                $p['mat_categories'][] = $cat;
+            }
+            if ($matTypeDesc !== '' && !in_array($matTypeDesc, $p['mat_type_descs'], true)) {
+                $p['mat_type_descs'][] = $matTypeDesc;
+            }
+            if ($matGroup !== '' && !in_array($matGroup, $p['material_groups'], true)) {
+                $p['material_groups'][] = $matGroup;
+            }
+            if ($brandName !== '' && !in_array($brandName, $p['brand_names'], true)) {
+                $p['brand_names'][] = $brandName;
+            }
+            if ($p['unit'] === '' && $unit !== '') {
+                $p['unit'] = $unit;
+            }
+            if ($p['purchase_order_type'] === '' && $poType !== '') {
+                $p['purchase_order_type'] = $poType;
+            }
+            if ($p['po_type_name'] === '' && $typeName !== '') {
+                $p['po_type_name'] = $typeName;
+            }
+            if ($p['brand_name'] === '' && $brandName !== '') {
+                $p['brand_name'] = $brandName;
+            }
+
+            foreach (['to_Fabric' => 'fabric_lines', 'to_Trim' => 'trim_lines', 'to_Packing' => 'packing_lines', 'to_Special' => 'special_lines'] as $nav => $field) {
+                $navData = $row[$nav] ?? null;
+                $results = is_array($navData) ? ($navData['results'] ?? []) : [];
+                if (is_array($results) && $results !== []) {
+                    $p[$field] += count($results);
+                }
+            }
+            unset($p);
+        }
+
+        $records = [];
+        foreach ($pos as $r) {
+            unset($r['_items']);
+            $r['plant'] = implode(', ', $r['plants']);
+            $cats = $r['mat_categories'];
+            // Prefer expand counts when classifyMaterial is inconclusive
+            if ($cats === []) {
+                if ((int) ($r['fabric_lines'] ?? 0) > 0) {
+                    $cats[] = 'fabric';
+                }
+                if ((int) ($r['trim_lines'] ?? 0) > 0 || (int) ($r['packing_lines'] ?? 0) > 0 || (int) ($r['special_lines'] ?? 0) > 0) {
+                    $cats[] = 'trims';
+                }
+            }
+            $labels = [];
+            if (in_array('fabric', $cats, true)) {
+                $labels[] = 'Fabric';
+            }
+            if (in_array('trims', $cats, true)) {
+                $labels[] = 'Trims';
+            }
+            $r['material_type'] = $labels !== [] ? implode(', ', $labels) : '—';
+            $r['mat_category'] = count($labels) > 1 ? 'mixed' : strtolower($labels[0] ?? 'other');
+            $r['mat_type_desc'] = implode(', ', $r['mat_type_descs']);
+            $r['material_group'] = implode(', ', $r['material_groups']);
+            if ($r['brand_name'] === '' && $r['brand_names'] !== []) {
+                $r['brand_name'] = implode(', ', $r['brand_names']);
+            }
+            $r['total_qty'] = round((float) $r['total_qty'], 3);
+            $r['total_value'] = round((float) $r['total_value'], 2);
+            unset($r['plants'], $r['mat_categories'], $r['mat_type_descs'], $r['material_groups'], $r['brand_names']);
+            $records[] = $r;
+        }
+
+        usort($records, static function (array $a, array $b): int {
+            return strcmp((string) ($b['date'] ?? ''), (string) ($a['date'] ?? ''))
+                ?: strcmp((string) ($b['purchase_order'] ?? ''), (string) ($a['purchase_order'] ?? ''));
+        });
+
+        $totalQty = 0.0;
+        $totalVal = 0.0;
+        $totalItems = 0;
+        $suppliers = [];
+        $currencies = [];
+        foreach ($records as $r) {
+            $totalQty += (float) ($r['total_qty'] ?? 0);
+            $totalVal += (float) ($r['total_value'] ?? 0);
+            $totalItems += (int) ($r['items_count'] ?? 0);
+            $sup = trim((string) ($r['supplier'] ?? ''));
+            if ($sup !== '') {
+                $suppliers[$sup] = true;
+            }
+            $cur = trim((string) ($r['currency'] ?? ''));
+            if ($cur !== '') {
+                $currencies[$cur] = ($currencies[$cur] ?? 0) + 1;
+            }
+        }
+        arsort($currencies);
+        $primaryCurrency = key($currencies) ?: 'INR';
+
+        return [
+            'records'       => $records,
+            'total'         => count($records),
+            'totals'        => [
+                'pos_count'       => count($records),
+                'items_count'     => $totalItems,
+                'total_qty'       => round($totalQty, 3),
+                'total_value'     => round($totalVal, 2),
+                'currency'        => $primaryCurrency,
+                'suppliers_count' => count($suppliers),
+            ],
+            'columns'       => self::relatedPoColumns(),
+            'truncated'     => (int) ($res['row_count'] ?? 0) >= 8000,
+            'items_fetched' => (int) ($res['row_count'] ?? 0),
+            'error'         => null,
+            'source'        => 'Z_QUOTATIONZCOSTCOM_CDS',
+            'odata_filter'  => $filter,
+            'approved_status' => $searchPo !== '' ? '' : 'NotApproved',
+            'mat_cat'       => $matCat,
+            'brand'         => implode(',', $brands),
         ];
     }
 

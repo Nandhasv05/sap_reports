@@ -27,6 +27,7 @@ $cards = [
 <div class="rpt-app is-procurement <?= $isLookup ? 'is-lookup' : 'is-report' ?>">
     <?php
         $loaderIcon = 'shopping_cart';
+        $loaderVisible = !$isLookup;
         $loaderSteps = ['Connecting to SAP…', 'Fetching component requirements…', 'Fetching PR & PO lines…', 'Calculating balances & stock…', 'Preparing report…'];
     ?>
 

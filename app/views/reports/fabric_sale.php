@@ -31,6 +31,8 @@ $extraHead = '<link rel="stylesheet" href="' . e(asset('css/fabricSale.css')) . 
 
     <?php
         $loaderIcon = 'checkroom';
+        $loaderVisible = true;
+        $loaderAutoHide = true;
         $loaderSteps = ['Connecting to SAP…', 'Loading sale orders…', 'Preparing dashboard…'];
     ?>
 

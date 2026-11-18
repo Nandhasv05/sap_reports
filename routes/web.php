@@ -36,6 +36,18 @@ if (method_exists(ReportsController::class, 'showPoPassLog')) {
 if (method_exists(ReportsController::class, 'showPoValidationHistory')) {
     $router->get('po-costing/validation-history', [ReportsController::class, 'showPoValidationHistory']);
 }
+if (method_exists(ReportsController::class, 'relatedPoData')) {
+    $router->get('po-costing/related-po', [ReportsController::class, 'relatedPoData']);
+}
+if (method_exists(ReportsController::class, 'relatedPoStatusGet')) {
+    $router->get('po-costing/related-po/status', [ReportsController::class, 'relatedPoStatusGet']);
+}
+if (method_exists(ReportsController::class, 'relatedPoStatusSave')) {
+    $router->post('po-costing/related-po/status', [ReportsController::class, 'relatedPoStatusSave']);
+}
+if (method_exists(ReportsController::class, 'relatedPoSentLogGet')) {
+    $router->get('po-costing/related-po/sent-log', [ReportsController::class, 'relatedPoSentLogGet']);
+}
 $router->get('po-costing', [ReportsController::class, 'showPoCosting']);
 $router->get('po-costing-validation', [ReportsController::class, 'showPoCosting']);
 $router->get('sale', function () {

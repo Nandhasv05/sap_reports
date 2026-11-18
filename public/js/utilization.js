@@ -22,7 +22,15 @@
     /*
     *  SHOW SPINNER 
     */
-    function showSpinner() { if (!spinner) return; spinner.hidden = false; document.body.classList.add('rpt-loading'); }
+    function showSpinner() {
+        if (window.rptLoader && typeof window.rptLoader.show === 'function') {
+            window.rptLoader.show({ solid: true, message: 'Preparing Utilization Report…' });
+            return;
+        }
+        if (!spinner) return;
+        spinner.hidden = false;
+        document.body.classList.add('rpt-loading');
+    }
 
     
     function hideBoot() { if (app) app.classList.remove('is-first'); if (boot) boot.hidden = true; drawCharts(); }
@@ -733,7 +741,8 @@
                 }
             })
             .finally(() => {
-                if (spinner) spinner.hidden = true;
+                if (window.rptLoader && typeof window.rptLoader.hide === 'function') window.rptLoader.hide(true);
+                else if (spinner) spinner.hidden = true;
                 document.body.classList.remove('rpt-loading');
             });
     }

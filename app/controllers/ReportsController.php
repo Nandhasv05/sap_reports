@@ -685,7 +685,283 @@ class ReportsController extends Controller
             'canApprovedPage'       => function_exists('sap_reports_user_can')
                 ? sap_reports_user_can('po-costing', 'approved')
                 : true,
+            'canRelatedPage'        => function_exists('sap_reports_user_can')
+                ? sap_reports_user_can('po-costing', 'related')
+                : true,
+            'relatedPoDataUrl'      => url('po-costing/related-po'),
+            'relatedPoStatusUrl'    => url('po-costing/related-po/status'),
+            'relatedPoSentLogUrl'   => url('po-costing/related-po/sent-log'),
             'extraScripts'          => '',
+        ]);
+    }
+
+    /*
+     * Related PO — Z_QuotationZCostCom NotApproved list for PO Costing sidebar panel
+     * GET po-costing/related-po
+     */
+    public function relatedPoData(): void
+    {
+        if (
+            (function_exists('sap_reports_user_can') && !sap_reports_user_can('po-costing', 'related'))
+            || (function_exists('sap_reports_user_can_access') && !sap_reports_user_can_access('po-costing'))
+        ) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Access restricted.',
+                'error'   => 'Access restricted.',
+                'data'    => [],
+            ], 403);
+            return;
+        }
+        if (!is_file(base_path('app/services/PoCostValidationService.php'))) {
+            $message = 'PO costing validation is not deployed on this server.';
+            $this->jsonResponse(['success' => false, 'message' => $message, 'error' => $message, 'data' => []], 503);
+            return;
+        }
+        require_once base_path('app/services/PoCostValidationService.php');
+        try {
+            $payload = (new PoCostValidationService())->listRelatedPurchaseOrders($_GET);
+            if (!empty($payload['error'])) {
+                $this->jsonResponse([
+                    'success' => false,
+                    'message' => 'Unable to fetch Related POs: ' . $payload['error'],
+                    'error'   => $payload['error'],
+                    'data'    => $payload,
+                ], 502);
+                return;
+            }
+
+            $records = is_array($payload['records'] ?? null) ? $payload['records'] : [];
+            $poNumbers = [];
+            foreach ($records as $rec) {
+                if (!is_array($rec)) {
+                    continue;
+                }
+                $poNumbers[] = (string) ($rec['purchase_order'] ?? '');
+            }
+            if ($records !== [] && is_file(base_path('app/services/PoReleaseLogService.php'))) {
+                require_once base_path('app/services/PoReleaseLogService.php');
+                $latest = (new PoReleaseLogService())->latestStatusesForPos($poNumbers);
+                foreach ($records as &$rec) {
+                    if (!is_array($rec)) {
+                        continue;
+                    }
+                    $poKey = ltrim(preg_replace('/\D/', '', (string) ($rec['purchase_order'] ?? '')) ?? '', '0');
+                    $info = $latest[$poKey] ?? null;
+                    $rec['status_update'] = is_array($info) ? (string) ($info['status'] ?? '') : '';
+                    $rec['status_updated_by'] = is_array($info) ? (string) ($info['created_by'] ?? '') : '';
+                    $rec['status_updated_on'] = is_array($info) ? (string) ($info['created_on'] ?? '') : '';
+                    $rec['status_remarks'] = is_array($info) ? (string) ($info['remarks'] ?? '') : '';
+                }
+                unset($rec);
+            }
+            if ($records !== [] && is_file(base_path('app/services/PoSentLogService.php'))) {
+                require_once base_path('app/services/PoSentLogService.php');
+                $sentMap = (new PoSentLogService())->latestForPurchaseOrders($poNumbers);
+                foreach ($records as &$rec) {
+                    if (!is_array($rec)) {
+                        continue;
+                    }
+                    $poKey = ltrim(preg_replace('/\D/', '', (string) ($rec['purchase_order'] ?? '')) ?? '', '0');
+                    $mail = $sentMap[$poKey] ?? null;
+                    $rec['sent_receive_status'] = is_array($mail) ? (string) ($mail['sent_receive_status'] ?? '') : '';
+                    $rec['mail_from'] = is_array($mail) ? (string) ($mail['from_username'] ?? '') : '';
+                    $rec['mail_to'] = is_array($mail) ? (string) ($mail['to_username'] ?? '') : '';
+                    $rec['mail_email'] = is_array($mail) ? (string) ($mail['to_email'] ?? '') : '';
+                    $rec['mail_status'] = is_array($mail) ? (string) ($mail['status'] ?? '') : '';
+                    $rec['mail_at'] = is_array($mail) ? (string) ($mail['created_at'] ?? '') : '';
+                    $rec['mail_remarks'] = is_array($mail) ? (string) ($mail['remarks'] ?? '') : '';
+                    $rec['mail_note'] = $rec['mail_remarks'];
+                }
+                unset($rec);
+            }
+            $payload['records'] = $records;
+
+            $this->jsonResponse([
+                'success' => true,
+                'message' => ($payload['records'] ?? []) === []
+                    ? 'No related purchase orders found.'
+                    : 'Related PO data loaded',
+                'data'    => $payload,
+            ]);
+        } catch (Throwable $e) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Unable to load Related POs. Please try again.',
+                'error'   => $e->getMessage(),
+                'data'    => [],
+            ], 500);
+        }
+    }
+
+    /*
+     * POST po-costing/related-po/status — save Related / Passed / Moved into dbo.po_release_log
+     */
+    public function relatedPoStatusSave(): void
+    {
+        $canStatus = !function_exists('sap_reports_user_can')
+            || sap_reports_user_can('po-costing', 'related')
+            || sap_reports_user_can('po-costing', 'esign');
+        if (
+            !$canStatus
+            || (function_exists('sap_reports_user_can_access') && !sap_reports_user_can_access('po-costing'))
+        ) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Access restricted.',
+                'error'   => 'Access restricted.',
+                'data'    => [],
+            ], 403);
+            return;
+        }
+        if (!is_file(base_path('app/services/PoReleaseLogService.php'))) {
+            $message = 'PO release log service is not deployed on this server.';
+            $this->jsonResponse(['success' => false, 'message' => $message, 'error' => $message, 'data' => []], 503);
+            return;
+        }
+        require_once base_path('app/services/PoReleaseLogService.php');
+
+        $raw = function_exists('sap_reports_request_raw_body')
+            ? sap_reports_request_raw_body()
+            : ((string) (file_get_contents('php://input') ?: ''));
+        $input = json_decode($raw, true);
+        if (!is_array($input)) {
+            $input = is_array($_POST) ? $_POST : [];
+        }
+
+        $po = (string) ($input['po'] ?? $input['purchase_order'] ?? $input['po_number'] ?? '');
+        $status = (string) ($input['status'] ?? $input['status_update'] ?? '');
+        $remarks = (string) ($input['remarks'] ?? '');
+        $current = function_exists('portal_user') ? portal_user() : null;
+        $createdBy = trim((string) ($current['username'] ?? ($_SESSION['username'] ?? 'system')));
+
+        $res = (new PoReleaseLogService())->save($po, $status, $createdBy, $remarks);
+        if (empty($res['success'])) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => (string) ($res['error'] ?? 'Could not save status update'),
+                'error'   => (string) ($res['error'] ?? 'Could not save status update'),
+                'data'    => $res,
+            ], 422);
+            return;
+        }
+
+        $this->jsonResponse([
+            'success' => true,
+            'message' => 'Status update saved',
+            'data'    => [
+                'id'             => $res['id'],
+                'purchase_order' => preg_replace('/\D/', '', $po),
+                'status'         => $res['status'] ?? PoReleaseLogService::normalizeStatus($status),
+                'remarks'        => substr(trim($remarks), 0, 500),
+                'created_by'     => $createdBy,
+            ],
+        ]);
+    }
+
+    /*
+     * GET po-costing/related-po/status?po=… — latest Draft/Review/Released + remarks
+     */
+    public function relatedPoStatusGet(): void
+    {
+        $canStatus = !function_exists('sap_reports_user_can')
+            || sap_reports_user_can('po-costing', 'related')
+            || sap_reports_user_can('po-costing', 'esign');
+        if (
+            !$canStatus
+            || (function_exists('sap_reports_user_can_access') && !sap_reports_user_can_access('po-costing'))
+        ) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Access restricted.',
+                'error'   => 'Access restricted.',
+                'data'    => [],
+            ], 403);
+            return;
+        }
+        if (!is_file(base_path('app/services/PoReleaseLogService.php'))) {
+            $message = 'PO release log service is not deployed on this server.';
+            $this->jsonResponse(['success' => false, 'message' => $message, 'error' => $message, 'data' => []], 503);
+            return;
+        }
+        require_once base_path('app/services/PoReleaseLogService.php');
+
+        $po = (string) ($_GET['po'] ?? $_GET['purchase_order'] ?? $_GET['po_number'] ?? '');
+        $digits = preg_replace('/\D/', '', $po) ?? '';
+        if ($digits === '' || !preg_match('/^\d{1,10}$/', ltrim($digits, '0') ?: '0')) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Invalid purchase order.',
+                'error'   => 'Invalid purchase order.',
+                'data'    => [],
+            ], 422);
+            return;
+        }
+
+        $latest = (new PoReleaseLogService())->latestForPo($digits);
+        $this->jsonResponse([
+            'success' => true,
+            'message' => $latest ? 'Status loaded' : 'No status update yet',
+            'data'    => [
+                'purchase_order' => ltrim($digits, '0') ?: $digits,
+                'status'         => is_array($latest) ? (string) ($latest['status'] ?? '') : '',
+                'remarks'        => is_array($latest) ? (string) ($latest['remarks'] ?? '') : '',
+                'created_by'     => is_array($latest) ? (string) ($latest['created_by'] ?? '') : '',
+                'created_on'     => is_array($latest) ? ($latest['created_on'] ?? null) : null,
+            ],
+        ]);
+    }
+
+    /*
+     * GET po-costing/related-po/sent-log?po=… — Sent / Receive log history for one PO
+     */
+    public function relatedPoSentLogGet(): void
+    {
+        $canLog = !function_exists('sap_reports_user_can')
+            || sap_reports_user_can('po-costing', 'related')
+            || sap_reports_user_can('po-costing', 'sent')
+            || sap_reports_user_can('po-costing', 'receive');
+        if (
+            !$canLog
+            || (function_exists('sap_reports_user_can_access') && !sap_reports_user_can_access('po-costing'))
+        ) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Access restricted.',
+                'error'   => 'Access restricted.',
+                'data'    => ['rows' => []],
+            ], 403);
+            return;
+        }
+        if (!is_file(base_path('app/services/PoSentLogService.php'))) {
+            $message = 'Sent log service is not deployed on this server.';
+            $this->jsonResponse(['success' => false, 'message' => $message, 'error' => $message, 'data' => ['rows' => []]], 503);
+            return;
+        }
+        require_once base_path('app/services/PoSentLogService.php');
+
+        $po = (string) ($_GET['po'] ?? $_GET['purchase_order'] ?? '');
+        $digits = preg_replace('/\D/', '', $po) ?? '';
+        $norm = ltrim($digits, '0');
+        if ($norm === '' || !preg_match('/^\d{1,10}$/', $norm)) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Invalid purchase order.',
+                'error'   => 'Invalid purchase order.',
+                'data'    => ['rows' => []],
+            ], 422);
+            return;
+        }
+
+        $rows = (new PoSentLogService())->historyForPurchaseOrder($norm, (int) ($_GET['limit'] ?? 40));
+        $this->jsonResponse([
+            'success' => true,
+            'message' => $rows === [] ? 'No sent / receive log yet' : 'Sent / receive log loaded',
+            'data'    => [
+                'purchase_order' => $norm,
+                'rows'           => $rows,
+                'count'          => count($rows),
+            ],
         ]);
     }
 
@@ -729,14 +1005,16 @@ class ReportsController extends Controller
         $input = preg_replace('/[\s,]/', '', (string) ($_GET['po'] ?? '')) ?? '';
         $error = $input !== '' && !preg_match('/^\d{1,10}$/', $input) ? 'Purchase order must be a number of up to 10 digits.' : null;
         $mode = ($input !== '' && $error === null) ? 'detail' : 'list';
-        // Workbench (PO detail costing view) — only users with Workbench access
-        if (
-            $isCosting
-            && $mode === 'detail'
-            && function_exists('sap_reports_user_can')
-            && !sap_reports_user_can('po-costing', 'workbench')
-        ) {
-            $_SESSION['flash_error'] = 'Access restricted: You do not have Workbench permission for PO Costing Validation.';
+        // Workbench (PO detail costing view) — Workbench access, or eSign-only when ?open=esign
+        $openMode = strtolower(trim((string) ($_GET['open'] ?? '')));
+        $canOpenWorkbench = !function_exists('sap_reports_user_can')
+            || sap_reports_user_can('po-costing', 'workbench')
+            || (
+                $openMode === 'esign'
+                && sap_reports_user_can('po-costing', 'esign')
+            );
+        if ($isCosting && $mode === 'detail' && !$canOpenWorkbench) {
+            $_SESSION['flash_error'] = 'Access restricted: You do not have Workbench / eSign permission for PO Costing Validation.';
             $this->redirect(url('purchase-order') . '?view=costing');
             return;
         }
@@ -773,7 +1051,8 @@ class ReportsController extends Controller
         if (!array_key_exists($matCat, SapPurchaseOrderService::materialCategories())) {
             $matCat = 'all';
         }
-        $brand = SapPurchaseOrderService::normalizeBrand((string) ($_GET['brand'] ?? $_GET['brand_name'] ?? ''));
+        $brands = SapPurchaseOrderService::normalizeBrands($_GET['brand'] ?? $_GET['brand_name'] ?? '');
+        $brand = implode(',', $brands);
         $approvedStatus = trim((string) ($_GET['approved_status'] ?? $_GET['APPROVEDSTATUS'] ?? ''));
         if (!in_array($approvedStatus, ['Approved', 'NotApproved'], true)) {
             // Costing list defaults to Z_QuotationZCostCom ApprovedStatus eq 'NotApproved'
@@ -2590,10 +2869,10 @@ HTML;
 </html>
 HTML;
 
-        $mail = (new SimpleMailService($mailCfg))->send($emails, $subject, $body, $fromEmail, $fromName);
-        $mail['mentioned'] = $resolved ?: array_values($mentioned);
-        $mail['recipients'] = $emails;
-        return $mail;
+    $mail = (new SimpleMailService($mailCfg))->send($emails, $subject, $body, $fromEmail, $fromName);
+    $mail['mentioned'] = $resolved ?: array_values($mentioned);
+    $mail['recipients'] = $emails;
+    return $mail;
     }
 
     /*
@@ -2699,7 +2978,7 @@ HTML;
                 ]);
             }
 
-            // List mode. Costing bulk = Z_QuotationZCostCom ApprovedStatus eq 'NotApproved' only.
+            // List mode. Costing bulk = NotApproved API rows that are Released in po_release_log.
             $listFilters = $_GET;
             if ($isCostingView) {
                 $listFilters['range'] = 'all';
@@ -2726,10 +3005,17 @@ HTML;
                 $payload = (new PoValidationStatusService())->enrichListPayload($payload);
                 $payload['columns'] = PoValidationStatusService::costingListColumns();
             }
+            if ($isCostingView) {
+                $payload['released_only'] = true;
+            }
             $jsonSent = true;
             $this->jsonResponse([
                 'success' => true,
-                'message' => $payload['records'] === [] ? 'No purchase orders match the selected criteria.' : 'Live SAP data',
+                'message' => $payload['records'] === []
+                    ? ($isCostingView
+                        ? 'No released purchase orders match the selected criteria.'
+                        : 'No purchase orders match the selected criteria.')
+                    : ($isCostingView ? 'Released PO Validation data' : 'Live SAP data'),
                 'data'    => $payload,
             ]);
         } catch (Throwable $e) {

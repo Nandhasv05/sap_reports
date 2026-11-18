@@ -7679,8 +7679,73 @@ body.rpt-body:has(.audit-page) {
 }
 
 .hub-footer-center {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     font-weight: 500;
     color: #94a3b8;
+}
+
+.hub-footer-heartbeat {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    line-height: 0;
+}
+
+.hub-heartbeat-svg {
+    display: block;
+    overflow: visible;
+}
+
+.hub-heartbeat-track {
+    fill: none;
+    stroke: rgba(239, 68, 68, 0.18);
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.hub-heartbeat-pulse {
+    fill: none;
+    stroke: #ef4444;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-dasharray: 56 120;
+    stroke-dashoffset: 0;
+    filter: drop-shadow(0 0 3px rgba(239, 68, 68, 0.65));
+    animation: hub-heartbeat-draw 1.35s ease-in-out infinite;
+}
+
+@keyframes hub-heartbeat-draw {
+    0% {
+        stroke-dashoffset: 176;
+        opacity: 0.35;
+    }
+    18% {
+        opacity: 1;
+    }
+    55% {
+        stroke-dashoffset: 0;
+        opacity: 1;
+    }
+    100% {
+        stroke-dashoffset: -176;
+        opacity: 0.25;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .hub-heartbeat-pulse {
+        animation: hub-heartbeat-pulse-soft 1.8s ease-in-out infinite;
+        stroke-dasharray: none;
+        stroke-dashoffset: 0;
+    }
+    @keyframes hub-heartbeat-pulse-soft {
+        0%, 100% { opacity: 0.45; }
+        50% { opacity: 1; }
+    }
 }
 
 .hub-footer-right {
@@ -12149,39 +12214,37 @@ body.pcw-pdf-open { overflow: hidden; }
 }
 .is-costing-bulk .pcb-mat-opt input[value="fabric"]:checked + span { color: #1d4ed8; }
 .is-costing-bulk .pcb-mat-opt input[value="trims"]:checked + span { color: #c2410c; }
-.is-costing-bulk .pcb-approved-seg .pcb-mat-opt input[value="Approved"]:checked + span { color: #15803d; }
-.is-costing-bulk .pcb-approved-seg .pcb-mat-opt input[value="NotApproved"]:checked + span { color: #b45309; }
-.is-costing-bulk .pcb-approved-seg .pcb-mat-opt span { min-width: 78px; }
 .is-costing-bulk .pcb-header-filters .rpt-field-mat-cat { flex: 0 1 140px; max-width: 160px; }
 .is-costing-bulk .pcb-header-filters .rpt-field-supplier { flex: 0 1 160px; max-width: 190px; }
 .is-costing-bulk .pcb-header-filters .rpt-field-status { flex: 0 1 130px; max-width: 150px; }
 .is-costing-bulk .pcb-header-filters .pcb-header-brand {
-    flex: 0 1 180px;
-    max-width: 210px;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
+    flex: 0 1 210px;
+    max-width: 240px;
+    position: relative;
+}
+.is-costing-bulk .pcb-header-filters .pcb-header-brand .po-multi-trigger {
     height: 36px;
-    padding: 0 10px;
+    max-width: 240px;
+    width: 100%;
     border-radius: 999px;
     background: #f8fafc;
     border: 1px solid #e2e8f0;
+    box-shadow: none;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 0 10px;
 }
-.is-costing-bulk .pcb-header-filters .pcb-header-brand .material-icons-round {
+.is-costing-bulk .pcb-header-filters .pcb-header-brand .po-multi-icon {
     font-size: 18px;
     color: #64748b;
 }
-.is-costing-bulk .pcb-header-filters .pcb-header-brand select {
-    flex: 1 1 auto;
-    min-width: 0;
-    border: 0;
-    background: transparent;
-    font: inherit;
-    font-size: 12px;
-    font-weight: 700;
-    color: #334155;
-    outline: none;
-    cursor: pointer;
+.is-costing-bulk .pcb-header-filters .pcb-header-brand .po-multi-label {
+    max-width: 120px;
+}
+.is-costing-bulk .pcb-header-filters .pcb-header-brand .po-multi-menu {
+    width: min(340px, 92vw);
+    right: 0;
+    left: auto;
 }
 .is-costing-bulk .pcb-header-filters .pcb-header-search {
     flex: 0 1 150px;
@@ -13771,9 +13834,9 @@ button.pcb-esign-btn {
     gap: 6px;
     padding: 5px 12px;
     border-radius: 999px;
-    border: 1px solid #c7d2fe;
-    background: #eef2ff;
-    color: #3730a3;
+    border: 1px solid #a7f3d0;
+    background: #ecfdf5;
+    color: #047857;
     font: inherit;
     font-size: 12px;
     font-weight: 700;
@@ -13785,18 +13848,20 @@ button.pcb-esign-btn .material-icons-round {
     font-size: 16px;
 }
 button.pcb-esign-btn:hover:not(:disabled) {
-    background: #e0e7ff;
-    border-color: #a5b4fc;
+    background: #d1fae5;
+    border-color: #6ee7b7;
 }
 button.pcb-esign-btn:focus-visible {
-    outline: 2px solid #a5b4fc;
+    outline: 2px solid #6ee7b7;
     outline-offset: 2px;
 }
 button.pcb-esign-btn:disabled {
     opacity: .55;
     cursor: not-allowed;
 }
-button.pcb-esign-btn.is-done {
+button.pcb-esign-btn.is-done,
+button.pcb-esign-btn.is-pending,
+button.pcb-esign-btn.is-review {
     border-color: #a7f3d0;
     background: #ecfdf5;
     color: #047857;
@@ -13806,15 +13871,75 @@ button.pcb-esign-btn.is-fail {
     background: #fef2f2;
     color: #b91c1c;
 }
-button.pcb-esign-btn.is-review {
-    border-color: #fde68a;
-    background: #fffbeb;
-    color: #b45309;
+button.pcb-sent-btn {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 160px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    border: 1px solid #93c5fd;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
-button.pcb-esign-btn.is-pending {
-    border-color: #c7d2fe;
-    background: #eef2ff;
-    color: #3730a3;
+button.pcb-sent-btn .material-icons-round {
+    font-size: 16px;
+    flex: 0 0 auto;
+}
+button.pcb-sent-btn > span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+button.pcb-sent-btn:hover:not(:disabled) {
+    background: #dbeafe;
+    border-color: #60a5fa;
+}
+button.pcb-sent-btn:focus-visible {
+    outline: 2px solid #60a5fa;
+    outline-offset: 2px;
+}
+button.pcb-sent-btn:disabled {
+    opacity: .55;
+    cursor: not-allowed;
+}
+button.pcb-sent-btn.is-done {
+    border-color: #67e8f9;
+    background: #ecfeff;
+    color: #0e7490;
+}
+button.pcb-sent-btn.is-done:hover:not(:disabled) {
+    background: #cffafe;
+    border-color: #22d3ee;
+}
+.rpt-app.is-po-costing .poc-related-mail-pop {
+    z-index: 80;
+}
+.rpt-app.is-po-costing .poc-related-mail-item {
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #e2e8f0;
+}
+.rpt-app.is-po-costing .poc-related-mail-item:last-child {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: 0;
+}
+.rpt-app.is-po-costing button.poc-related-mail-btn.is-empty {
+    border-color: #e2e8f0;
+    background: #f8fafc;
+    color: #94a3b8;
+}
+.rpt-app.is-po-costing button.poc-related-mail-btn.is-empty .pcb-mail-email {
+    color: #94a3b8;
 }
 button.pcb-mail-btn.pcb-badge {
     appearance: none;
@@ -18521,6 +18646,13 @@ body.pcw-esign-open { overflow: hidden; }
     cursor: pointer;
 }
 .pcw-esign-sig-pen .material-icons-round { font-size: 18px; color: #fff; }
+.pcw-esign-release {
+    display: grid;
+    gap: 12px;
+    margin-top: 12px;
+    padding-top: 14px;
+    border-top: 1px solid #e2e8f0;
+}
 .pcw-esign-assign {
     display: grid;
     gap: 12px;
@@ -20280,4 +20412,405 @@ body:has(.rpt-app.is-po-costing) {
 }
 .rpt-app.is-po-costing .poc-flow-history .poc-approved-list {
     max-height: min(42vh, 360px);
+}
+
+/* ========== Related PO (PO Costing sidenav panel) ========== */
+/* Header Material + Brand filters (between title and Admin) */
+.rpt-app.is-po-costing.is-related-po .rpt-bar {
+    flex-wrap: nowrap;
+}
+.rpt-app.is-po-costing.is-related-po .rpt-bar-left {
+    flex: 0 1 auto;
+}
+.rpt-app.is-po-costing.is-related-po .rpt-bar-right {
+    flex: 0 0 auto;
+    margin-left: 0;
+}
+.rpt-app.is-po-costing .poc-related-header-filters {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+    margin-right: 10px;
+    flex-wrap: nowrap;
+    flex: 0 1 auto;
+    min-width: 0;
+}
+.rpt-app.is-po-costing.is-related-po .poc-related-header-filters:not([hidden]) {
+    display: inline-flex !important;
+}
+.rpt-app.is-po-costing .poc-related-header-filters .rpt-field {
+    margin: 0;
+    min-width: 132px;
+    max-width: 170px;
+}
+.rpt-app.is-po-costing .poc-related-header-filters .poc-related-brand {
+    flex-shrink: 0;
+}
+.rpt-app.is-po-costing .poc-related-header-filters .poc-related-brand .po-multi-trigger {
+    height: 38px;
+    min-width: 168px;
+    max-width: 220px;
+}
+.rpt-app.is-po-costing .poc-related-header-filters .poc-related-brand .po-multi-menu {
+    right: 0;
+    left: auto;
+    z-index: 60;
+}
+.rpt-app.is-po-costing .poc-related-header-filters .poc-related-clear {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    flex-shrink: 0;
+    white-space: nowrap;
+    height: 38px;
+    min-width: 118px;
+    padding: 0 14px;
+    border: 1px solid #fecaca;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #ef4444 0%, #f97316 100%);
+    color: #fff;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: .01em;
+    cursor: pointer;
+    box-shadow: 0 6px 14px rgba(239, 68, 68, .22);
+    transition: transform .15s ease, box-shadow .15s ease, filter .15s ease;
+}
+.rpt-app.is-po-costing .poc-related-header-filters .poc-related-clear:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.05);
+    box-shadow: 0 8px 18px rgba(239, 68, 68, .3);
+}
+.rpt-app.is-po-costing .poc-related-header-filters .poc-related-clear:active {
+    transform: translateY(0);
+}
+.rpt-app.is-po-costing .poc-related-header-filters .poc-related-clear .material-icons-round {
+    font-size: 17px;
+    color: #fff;
+}
+.rpt-app.is-po-costing .poc-related-header-filters[hidden] {
+    display: none !important;
+}
+@media (max-width: 900px) {
+    .rpt-app.is-po-costing.is-related-po .rpt-bar {
+        flex-wrap: wrap;
+    }
+    .rpt-app.is-po-costing .poc-related-header-filters {
+        order: 3;
+        width: 100%;
+        margin: 4px 0 0;
+        justify-content: flex-start;
+    }
+}
+
+/* Full-screen results (no card chrome) */
+.rpt-app.is-po-costing.is-related-po .poc-landing {
+    padding: 0 !important;
+    align-items: stretch !important;
+    justify-content: stretch !important;
+    overflow: hidden !important;
+    background: #fff !important;
+}
+.rpt-app.is-po-costing.is-related-po .poc-panel.is-active[data-panel="related"] {
+    display: flex !important;
+    flex-direction: column;
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    max-width: none !important;
+    height: 100% !important;
+    min-height: 0 !important;
+}
+.rpt-app.is-po-costing .poc-panel-frame.is-related-results,
+.rpt-app.is-po-costing .poc-body.is-full-width .poc-panel-frame.is-related-results,
+.rpt-app.is-po-costing #pocRelatedResults {
+    display: flex !important;
+    flex-direction: column;
+    gap: 0;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;
+    width: 100%;
+    margin: 0 !important;
+    padding: 10px 12px 8px !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+    box-sizing: border-box;
+}
+.rpt-app.is-po-costing #pocRelatedResults[hidden] {
+    display: none !important;
+}
+.rpt-app.is-po-costing .poc-related-stats {
+    margin: 0 0 10px;
+    flex-shrink: 0;
+}
+.rpt-app.is-po-costing .poc-related-toolbar {
+    margin: 0 0 8px;
+    flex-shrink: 0;
+    border-radius: 10px;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.rpt-app.is-po-costing .poc-related-filter-pill {
+    display: inline-flex;
+    align-items: center;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: #ede9fe;
+    color: #5b21b6;
+    font-size: 11px;
+    font-weight: 700;
+}
+.rpt-app.is-po-costing .poc-related-wrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    border: 1px solid #e9d5ff;
+    border-radius: 0;
+    background: #fff;
+}
+.rpt-app.is-po-costing .poc-related-wrap.is-expanded {
+    overflow: visible;
+}
+.rpt-app.is-po-costing #pocRelatedTable thead tr.rpt-header-row th {
+    background: #f3e8ff;
+    color: #5b21b6;
+    border-bottom-color: #e9d5ff;
+}
+.rpt-app.is-po-costing #pocRelatedTable thead tr.rpt-filter-row th {
+    background: #faf5ff;
+}
+.rpt-app.is-po-costing #pocRelatedTable tfoot th {
+    background: #f3e8ff;
+    color: #5b21b6;
+    font-weight: 800;
+}
+.rpt-app.is-po-costing #pocRelatedTable tbody tr.po-row:hover {
+    background: #faf5ff;
+}
+.rpt-app.is-po-costing .poc-related-mat-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 1px 2px 1px 0;
+    padding: 4px 9px 4px 6px;
+    border-radius: 999px;
+    border: 1px solid #e2e8f0;
+    background: #f8fafc;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 800;
+    white-space: nowrap;
+    transition: transform 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
+}
+.rpt-app.is-po-costing .poc-related-mat-badge .material-icons-round {
+    font-size: 14px;
+    line-height: 1;
+}
+.rpt-app.is-po-costing .poc-related-mat-badge em {
+    font-style: normal;
+    font-weight: inherit;
+}
+.rpt-app.is-po-costing .poc-related-mat-badge.is-fabric {
+    border-color: #7dd3fc;
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    color: #0369a1;
+}
+.rpt-app.is-po-costing .poc-related-mat-badge.is-trims {
+    border-color: #c4b5fd;
+    background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%);
+    color: #6d28d9;
+}
+.rpt-app.is-po-costing .poc-related-mat-badge.is-empty {
+    color: #94a3b8;
+}
+.rpt-app.is-po-costing td:hover .poc-related-mat-badge.is-fabric,
+.rpt-app.is-po-costing .poc-related-mat-badge.is-fabric:hover {
+    transform: translateY(-1px);
+    background: linear-gradient(135deg, #e0f2fe 0%, #7dd3fc 100%);
+    box-shadow: 0 5px 12px rgba(14, 165, 233, 0.22);
+}
+.rpt-app.is-po-costing td:hover .poc-related-mat-badge.is-trims,
+.rpt-app.is-po-costing .poc-related-mat-badge.is-trims:hover {
+    transform: translateY(-1px);
+    background: linear-gradient(135deg, #ede9fe 0%, #c4b5fd 100%);
+    box-shadow: 0 5px 12px rgba(124, 58, 237, 0.22);
+}
+.rpt-app.is-po-costing .poc-related-status-cell {
+    min-width: 124px;
+}
+.rpt-app.is-po-costing .poc-related-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 100%;
+    padding: 5px 10px 5px 7px;
+    border-radius: 999px;
+    border: 1px solid #c4b5fd;
+    background: #f5f3ff;
+    color: #5b21b6;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    transition: transform 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+.rpt-app.is-po-costing .poc-related-status-badge .material-icons-round {
+    font-size: 15px;
+    line-height: 1;
+    opacity: 0.88;
+    transition: transform 0.16s ease, opacity 0.16s ease;
+}
+.rpt-app.is-po-costing .poc-related-status-badge em {
+    font-style: normal;
+    font-weight: inherit;
+}
+.rpt-app.is-po-costing .poc-related-status-badge.is-empty {
+    border-color: #e2e8f0;
+    background: #f8fafc;
+    color: #94a3b8;
+    font-weight: 700;
+}
+.rpt-app.is-po-costing .poc-related-status-badge.is-draft {
+    border-color: #93c5fd;
+    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+    color: #1d4ed8;
+}
+.rpt-app.is-po-costing .poc-related-status-badge.is-review {
+    border-color: #fcd34d;
+    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+    color: #b45309;
+}
+.rpt-app.is-po-costing .poc-related-status-badge.is-released {
+    border-color: #86efac;
+    background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+    color: #047857;
+}
+.rpt-app.is-po-costing .poc-related-status-cell:hover .poc-related-status-badge,
+.rpt-app.is-po-costing .poc-related-status-badge:hover {
+    transform: translateY(-1px) scale(1.04);
+    box-shadow: 0 6px 14px rgba(91, 33, 182, 0.16);
+}
+.rpt-app.is-po-costing .poc-related-status-cell:hover .poc-related-status-badge .material-icons-round,
+.rpt-app.is-po-costing .poc-related-status-badge:hover .material-icons-round {
+    opacity: 1;
+    transform: scale(1.12);
+}
+.rpt-app.is-po-costing .poc-related-status-cell:hover .poc-related-status-badge.is-draft,
+.rpt-app.is-po-costing .poc-related-status-badge.is-draft:hover {
+    background: linear-gradient(135deg, #dbeafe 0%, #93c5fd 100%);
+    border-color: #3b82f6;
+    color: #1e3a8a;
+    box-shadow: 0 6px 14px rgba(37, 99, 235, 0.28);
+}
+.rpt-app.is-po-costing .poc-related-status-cell:hover .poc-related-status-badge.is-review,
+.rpt-app.is-po-costing .poc-related-status-badge.is-review:hover {
+    background: linear-gradient(135deg, #fef3c7 0%, #fbbf24 100%);
+    border-color: #f59e0b;
+    color: #92400e;
+    box-shadow: 0 6px 14px rgba(245, 158, 11, 0.28);
+}
+.rpt-app.is-po-costing .poc-related-status-cell:hover .poc-related-status-badge.is-released,
+.rpt-app.is-po-costing .poc-related-status-badge.is-released:hover {
+    background: linear-gradient(135deg, #d1fae5 0%, #34d399 100%);
+    border-color: #10b981;
+    color: #065f46;
+    box-shadow: 0 6px 14px rgba(16, 185, 129, 0.28);
+}
+.rpt-app.is-po-costing .poc-related-status-cell:hover .poc-related-status-badge.is-empty,
+.rpt-app.is-po-costing .poc-related-status-badge.is-empty:hover {
+    background: #eef2ff;
+    border-color: #a5b4fc;
+    color: #6366f1;
+    box-shadow: 0 6px 14px rgba(99, 102, 241, 0.18);
+}
+.rpt-app.is-po-costing .poc-related-remarks-cell {
+    min-width: 160px;
+    max-width: 280px;
+}
+.rpt-app.is-po-costing .poc-related-remarks-chip {
+    display: inline-flex;
+    align-items: flex-start;
+    gap: 6px;
+    max-width: 100%;
+    padding: 5px 10px 5px 7px;
+    border-radius: 12px;
+    border: 1px solid #e9d5ff;
+    background: #faf5ff;
+    color: #6b21a8;
+    transition: transform 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease, border-color 0.16s ease;
+}
+.rpt-app.is-po-costing .poc-related-remarks-chip .material-icons-round {
+    flex: 0 0 auto;
+    margin-top: 1px;
+    font-size: 15px;
+    color: #8b5cf6;
+    opacity: 0.85;
+    transition: transform 0.16s ease, color 0.16s ease, opacity 0.16s ease;
+}
+.rpt-app.is-po-costing .poc-related-remarks-chip em,
+.rpt-app.is-po-costing .poc-related-remarks-view {
+    font-style: normal;
+    color: #4c1d95;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.35;
+    white-space: normal;
+    word-break: break-word;
+}
+.rpt-app.is-po-costing .poc-related-remarks-chip.is-empty {
+    border-color: #e2e8f0;
+    background: #f8fafc;
+    color: #94a3b8;
+}
+.rpt-app.is-po-costing .poc-related-remarks-chip.is-empty .material-icons-round {
+    color: #94a3b8;
+}
+.rpt-app.is-po-costing .poc-related-remarks-chip.is-empty em {
+    color: #94a3b8;
+    font-weight: 700;
+}
+.rpt-app.is-po-costing .poc-related-remarks-cell:hover .poc-related-remarks-chip,
+.rpt-app.is-po-costing .poc-related-remarks-chip:hover {
+    transform: translateY(-1px);
+    background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%);
+    border-color: #a78bfa;
+    box-shadow: 0 6px 14px rgba(139, 92, 246, 0.2);
+}
+.rpt-app.is-po-costing .poc-related-remarks-cell:hover .poc-related-remarks-chip .material-icons-round,
+.rpt-app.is-po-costing .poc-related-remarks-chip:hover .material-icons-round {
+    opacity: 1;
+    color: #7c3aed;
+    transform: scale(1.12);
+}
+.rpt-app.is-po-costing .poc-related-remarks-cell:hover .poc-related-remarks-chip.is-empty,
+.rpt-app.is-po-costing .poc-related-remarks-chip.is-empty:hover {
+    background: #eef2ff;
+    border-color: #a5b4fc;
+    box-shadow: 0 6px 14px rgba(99, 102, 241, 0.16);
+}
+.rpt-app.is-po-costing .poc-related-remarks-cell:hover .poc-related-remarks-chip.is-empty .material-icons-round,
+.rpt-app.is-po-costing .poc-related-remarks-chip.is-empty:hover .material-icons-round {
+    color: #6366f1;
+}
+@media (max-width: 1100px) {
+    .rpt-app.is-po-costing .poc-related-stats.po-stat-row {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+@media (max-width: 720px) {
+    .rpt-app.is-po-costing .poc-related-stats.po-stat-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .rpt-app.is-po-costing .poc-panel-frame.is-related-results {
+        padding: 6px !important;
+    }
 }

@@ -78,6 +78,11 @@
     } catch (e) {}
 
     function showSpinner(on) {
+        if (window.rptLoader && typeof window.rptLoader.show === 'function') {
+            if (on) window.rptLoader.show({ solid: true });
+            else window.rptLoader.hide(true);
+            return;
+        }
         if (spinner) spinner.hidden = !on;
         document.body.classList.toggle('rpt-loading', !!on);
     }

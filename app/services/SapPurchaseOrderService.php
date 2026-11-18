@@ -349,6 +349,29 @@ class SapPurchaseOrderService
         return '';
     }
 
+    /**
+     * Normalize one or many brand filter values to known codes.
+     *
+     * @param mixed $raw comma string, array, or single code
+     * @return list<string>
+     */
+    public static function normalizeBrands($raw): array
+    {
+        if (is_array($raw)) {
+            $parts = $raw;
+        } else {
+            $parts = preg_split('/[,\s]+/', (string) $raw) ?: [];
+        }
+        $out = [];
+        foreach ($parts as $part) {
+            $code = self::normalizeBrand((string) $part);
+            if ($code !== '' && !in_array($code, $out, true)) {
+                $out[] = $code;
+            }
+        }
+        return $out;
+    }
+
     /** Friendly label for a SAP BrandName code */
     public static function brandLabel(string $code): string
     {
@@ -449,7 +472,8 @@ class SapPurchaseOrderService
             $matCat = 'all';
         }
 
-        $brand = self::normalizeBrand((string) ($filters['brand'] ?? $filters['brand_name'] ?? $filters['BrandName'] ?? ''));
+        $brands = self::normalizeBrands($filters['brand'] ?? $filters['brand_name'] ?? $filters['BrandName'] ?? '');
+        $brand = $brands[0] ?? '';
 
         $searchPo = preg_replace('/\D/', '', (string) ($filters['po'] ?? $filters['purchase_order'] ?? $filters['q'] ?? '')) ?? '';
         if ($searchPo !== '' && !preg_match('/^\d{1,10}$/', $searchPo)) {
@@ -536,9 +560,20 @@ class SapPurchaseOrderService
                 $filterParts[] = '(' . implode(' or ', $typeClauses) . ')';
             }
         }
-        if ($brand !== '') {
-            $brandEsc = str_replace("'", "''", $brand);
-            $filterParts[] = "BrandName eq '{$brandEsc}'";
+        if ($brands !== []) {
+            if (count($brands) === 1) {
+                $brandEsc = str_replace("'", "''", $brands[0]);
+                $filterParts[] = "BrandName eq '{$brandEsc}'";
+            } else {
+                $brandClauses = array_map(
+                    static function (string $code): string {
+                        $esc = str_replace("'", "''", $code);
+                        return "BrandName eq '{$esc}'";
+                    },
+                    $brands
+                );
+                $filterParts[] = '(' . implode(' or ', $brandClauses) . ')';
+            }
         }
         if ($searchPo !== '') {
             $poDisplay = $this->displayNumber($searchPo);
@@ -817,7 +852,7 @@ class SapPurchaseOrderService
             ],
             'suppliers' => array_values($uniqueSuppliers),
             'mat_cat' => $matCat,
-            'brand'   => $brand,
+            'brand'   => implode(',', $brands),
             'approved_status' => $approvedStatus,
             'range'   => $range,
             'truncated' => $truncated,

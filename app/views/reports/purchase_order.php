@@ -86,6 +86,9 @@ $listCards = $isCostingView
 <div class="rpt-app is-purchase-order <?= $isList ? 'is-po-list' : 'is-po-detail' ?><?= $isCostingWorkbench ? ' is-costing-workbench' : '' ?><?= $isCostingBulk ? ' is-costing-bulk' : '' ?><?= $isCostingView ? ' is-costing-view' : '' ?>">
     <?php
         $loaderIcon = 'receipt';
+        $loaderVisible = true;
+        // Page JS owns hide — do not auto-dismiss during SAP validate/fetch
+        $loaderAutoHide = false;
         $loaderSteps = $isCostingBulk
             ? ['Connecting to SAP…', 'Fetching purchase orders…', 'Preparing bulk validation…']
             : ($isList
@@ -93,6 +96,9 @@ $listCards = $isCostingView
                 : ($isCostingWorkbench
                     ? ['Connecting to SAP…', 'Fetching purchase order…', 'Loading ZCOST sheet…', 'Validating costs…']
                     : ['Connecting to SAP…', 'Fetching purchase order ' . ($purchaseOrder ?: '…'), 'Reading items & sales orders…', 'Preparing report…']));
+        $loaderMessage = $isCostingWorkbench
+            ? 'Fetching purchase order…'
+            : ($isCostingBulk ? 'Fetching purchase orders…' : ($loaderSteps[0] ?? 'Loading…'));
     ?>
 
     <header class="rpt-bar<?= $isCostingWorkbench ? ' is-pcw-top' : '' ?>">
@@ -161,26 +167,18 @@ $listCards = $isCostingView
         <?php elseif ($isCostingBulk): ?>
             <?php
                 $bulkMatHeader = (string) ($matCat ?? 'all');
-                $bulkApprovedHeader = (string) ($approvedStatus ?? '');
-                if (!in_array($bulkApprovedHeader, ['Approved', 'NotApproved'], true)) {
-                    $bulkApprovedHeader = 'NotApproved';
-                }
-                $bulkBrandHeader = (string) ($brand ?? '');
                 $bulkBrandOptions = is_array($brands ?? null) ? $brands : [];
+                $bulkSelectedBrands = SapPurchaseOrderService::normalizeBrands($brand ?? '');
+                $bulkBrandCount = count($bulkSelectedBrands);
+                $bulkBrandLabel = 'All Brands';
+                if ($bulkBrandCount === 1) {
+                    $bulkBrandLabel = SapPurchaseOrderService::brandLabel($bulkSelectedBrands[0]) ?: $bulkSelectedBrands[0];
+                } elseif ($bulkBrandCount > 1) {
+                    $bulkBrandLabel = $bulkBrandCount . ' Brands Selected';
+                }
             ?>
             <form class="rpt-search prod-filters po-filters pcb-header-filters" id="pcbFilterForm" autocomplete="off" novalidate>
                 <input type="hidden" name="view" value="costing">
-                <div class="pcb-mat-seg pcb-approved-seg" role="radiogroup" aria-label="Approved status">
-                    <label class="pcb-mat-opt">
-                        <input type="radio" name="pcb_approved" value="Approved"<?= $bulkApprovedHeader === 'Approved' ? ' checked' : '' ?>>
-                        <span>Approved</span>
-                    </label>
-                    <label class="pcb-mat-opt">
-                        <input type="radio" name="pcb_approved" value="NotApproved"<?= $bulkApprovedHeader === 'NotApproved' ? ' checked' : '' ?>>
-                        <span>Unapproved</span>
-                    </label>
-                </div>
-                <input type="hidden" id="pcbApproved" name="approved_status" value="<?= e($bulkApprovedHeader) ?>">
                 <div class="pcb-mat-seg" role="radiogroup" aria-label="Material type">
                     <label class="pcb-mat-opt">
                         <input type="radio" name="pcb_mat" value="all"<?= !in_array($bulkMatHeader, ['fabric', 'trims'], true) ? ' checked' : '' ?>>
@@ -196,22 +194,56 @@ $listCards = $isCostingView
                     </label>
                 </div>
                 <input type="hidden" id="pcbMat" name="mat_cat" value="<?= e(in_array($bulkMatHeader, ['fabric', 'trims'], true) ? $bulkMatHeader : 'all') ?>">
-                <label class="rpt-field pcb-header-brand" title="Filter by brand name">
-                    <span class="material-icons-round">sell</span>
-                    <select id="pcbBrand" name="brand" aria-label="Brand name">
-                        <option value="">All Brands</option>
-                        <?php foreach ($bulkBrandOptions as $b): ?>
-                            <?php
-                            $bCode = (string) ($b['code'] ?? '');
-                            $bName = (string) ($b['name'] ?? $bCode);
-                            if ($bCode === '') {
-                                continue;
-                            }
-                            ?>
-                            <option value="<?= e($bCode) ?>"<?= strcasecmp($bulkBrandHeader, $bCode) === 0 ? ' selected' : '' ?>><?= e($bName) ?> (<?= e($bCode) ?>)</option>
-                        <?php endforeach; ?>
-                    </select>
-                </label>
+                <div class="po-multi-dropdown pcb-header-brand" id="pcbBrandDropdown" title="Filter by brand name">
+                    <input type="hidden" name="brand" id="pcbBrand" value="<?= e(implode(',', $bulkSelectedBrands)) ?>">
+                    <button type="button" class="po-multi-trigger" id="pcbBrandTrigger" aria-haspopup="true" aria-expanded="false" aria-label="Brand name">
+                        <span class="material-icons-round po-multi-icon">sell</span>
+                        <span class="po-multi-label" id="pcbBrandLabel"><?= e($bulkBrandLabel) ?></span>
+                        <span class="po-multi-badge" id="pcbBrandBadge" style="<?= $bulkBrandCount ? '' : 'display:none;' ?>"><?= (int) $bulkBrandCount ?></span>
+                        <span class="material-icons-round po-multi-arrow">expand_more</span>
+                    </button>
+                    <div class="po-multi-menu" id="pcbBrandMenu" role="menu">
+                        <div class="po-multi-search-wrap">
+                            <span class="material-icons-round">search</span>
+                            <input type="text" id="pcbBrandSearch" class="po-multi-search" placeholder="Search brands..." autocomplete="off">
+                            <button type="button" id="pcbBrandSearchClear" class="po-multi-search-clear" style="display:none;" title="Clear search">
+                                <span class="material-icons-round">close</span>
+                            </button>
+                        </div>
+                        <div class="po-multi-actions">
+                            <button type="button" class="po-multi-action-btn" id="pcbBrandSelectAll">Select All</button>
+                            <span class="po-multi-action-dot">·</span>
+                            <button type="button" class="po-multi-action-btn" id="pcbBrandClearAll">Clear</button>
+                            <span class="po-multi-selected-info" id="pcbBrandCountInfo">
+                                <?= (int) $bulkBrandCount ?> of <?= count($bulkBrandOptions) ?> selected
+                            </span>
+                        </div>
+                        <div class="po-multi-list" id="pcbBrandList">
+                            <?php foreach ($bulkBrandOptions as $b): ?>
+                                <?php
+                                $bCode = (string) ($b['code'] ?? '');
+                                $bName = (string) ($b['name'] ?? $bCode);
+                                if ($bCode === '') {
+                                    continue;
+                                }
+                                $bChecked = in_array($bCode, $bulkSelectedBrands, true);
+                                ?>
+                                <label class="po-multi-item<?= $bChecked ? ' is-checked' : '' ?>" data-code="<?= e($bCode) ?>" data-name="<?= e(strtolower($bName)) ?>">
+                                    <input type="checkbox" class="po-multi-checkbox" value="<?= e($bCode) ?>"<?= $bChecked ? ' checked' : '' ?>>
+                                    <span class="po-multi-item-name"><?= e($bName) ?></span>
+                                    <span class="po-multi-item-code"><?= e($bCode) ?></span>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+                        <div class="po-multi-footer">
+                            <button type="button" class="po-multi-btn-cancel" id="pcbBrandCancel">Cancel</button>
+                            <button type="button" class="po-multi-btn-apply" id="pcbBrandApply">
+                                <span class="material-icons-round">check</span>
+                                <span>Apply</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
                 <input type="hidden" id="pcbRange" name="range" value="all">
                 <input type="hidden" id="pcbFrom" name="from" value="">
                 <input type="hidden" id="pcbTo" name="to" value="">
@@ -729,6 +761,7 @@ $pcbCurrentUserEmail = trim((string) (
     'passPoUrl'          => url('purchase-order/pass'),
     'esignSaveUrl'       => url('purchase-order/esign-save'),
     'esignSignatureUrl'  => url('purchase-order/esign-signature'),
+    'releaseStatusUrl'   => url('po-costing/related-po/status'),
     'passLogUrl'         => url('purchase-order/pass-log'),
     'sendMailUrl'        => url('purchase-order/send-mail'),
     'workflowUrl'        => url('purchase-order/workflow'),

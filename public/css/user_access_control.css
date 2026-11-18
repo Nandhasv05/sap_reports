@@ -655,6 +655,15 @@ body.rpt-body:has(.is-uac-page) {
   border-color: #16a34a;
 }
 
+.uac-right[data-action="related"] input:checked + .uac-right-ui {
+  border-color: #0d9488;
+  background: #f0fdfa;
+}
+.uac-right[data-action="related"] input:checked + .uac-right-ui .uac-right-check {
+  background: #0d9488;
+  border-color: #0d9488;
+}
+
 .uac-mod[data-kind="zcost"] .uac-right input:checked + .uac-right-ui {
   border-color: #b45309;
   background: #fff7ed;

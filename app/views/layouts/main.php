@@ -24,17 +24,24 @@ $bodyClass = $appShell ? 'rpt-body' : '';
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="<?= e(asset('css/app.css')) ?>?v=<?= @filemtime(base_path('public/css/app.css')) ?: time() ?>">
-    <link rel="stylesheet" href="<?= e(asset('css/loader.css')) ?>">
+    <link rel="stylesheet" href="<?= e(asset('css/loader.css')) ?>?v=<?= @filemtime(base_path('public/css/loader.css')) ?: time() ?>">
     <?php if (!empty($extraHead)) echo $extraHead; ?>
 </head>
 <body class="<?= e($bodyClass) ?>">
     <?php
-        // Single app-wide loading spinner (pages may set $loaderIcon / $loaderSteps / $loaderVisible).
+        // App-wide evolv boot spinner. Pages may set $loaderVisible / $loaderMessage / $loaderSteps / $loaderAutoHide.
+        if (!isset($loaderVisible)) {
+            $loaderVisible = true;
+        }
+        if (!isset($loaderAutoHide)) {
+            $loaderAutoHide = true;
+        }
         if (empty($loaderRendered)) {
             $loaderRendered = true;
             require base_path('app/views/partials/loader.php');
         }
     ?>
+    <script src="<?= e(asset('js/loader.js')) ?>?v=<?= @filemtime(base_path('public/js/loader.js')) ?: time() ?>"></script>
     <?php if ($appShell): ?>
         <?= $content ?>
     <?php else: ?>
@@ -42,7 +49,6 @@ $bodyClass = $appShell ? 'rpt-body' : '';
             <?= $content ?>
         </div>
     <?php endif; ?>
-    <script src="<?= e(asset('js/loader.js')) ?>"></script>
     <?php if (!empty($extraScripts)) echo $extraScripts; ?>
 </body>
 </html>

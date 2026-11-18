@@ -117,6 +117,32 @@ $esignUser = trim((string) (
                         </div>
                     </div>
 
+                    <!-- Status Update — Draft / Review / Released → dbo.po_release_log -->
+                    <div class="pcw-esign-release" id="pcwEsignReleaseBlock">
+                        <header class="pcw-esign-side-head">
+                            <span class="material-icons-round">flag</span>
+                            <div>
+                                <strong>Status Update</strong>
+                                <p>Draft, Review or Released</p>
+                            </div>
+                        </header>
+                        <label class="pcw-esign-field">
+                            <span>Status</span>
+                            <select id="pcwEsignReleaseStatus" class="pcw-esign-select" aria-label="Status update">
+                                <option value="">Select…</option>
+                                <option value="Draft">Draft</option>
+                                <option value="Review">Review</option>
+                                <option value="Released">Released</option>
+                            </select>
+                        </label>
+                        <label class="pcw-esign-field">
+                            <span>Remarks</span>
+                            <textarea id="pcwEsignReleaseRemarks" class="pcw-esign-textarea" rows="3"
+                                      maxlength="500" placeholder="Enter remarks…"
+                                      aria-label="Status remarks"></textarea>
+                        </label>
+                    </div>
+
                     <!-- Assign / Email / Remarks — only for Send PO mode -->
                     <div class="pcw-esign-assign" id="pcwEsignAssignBlock" hidden>
                         <label class="pcw-esign-field">

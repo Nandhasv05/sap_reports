@@ -101,6 +101,12 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
 
     <?php
         $loaderIcon = $isFabric ? 'texture' : 'sell';
+        // Lookup uses #rptBoot splash; report mode uses global loader with auto-hide.
+        $loaderVisible = !$isLookup;
+        if ($loaderVisible) {
+            $loaderAutoHide = true;
+            $loaderMessage = 'Preparing Utilization Report…';
+        }
         $loaderSteps = ['Connecting to SAP…', 'Fetching ' . strtolower($kindLabel) . ' utilization…', 'Matching BOM, PO & GRN…', 'Preparing report…'];
     ?>
 

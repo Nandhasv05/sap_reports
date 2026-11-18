@@ -70,11 +70,11 @@ $wbLoginUser = trim((string) (
 <section class="pcw" id="poCostingWorkbench" data-po="<?= e($wbPo) ?>" data-so="<?= e($wbSo) ?>" data-mat="<?= e($wbMat) ?>">
     <!-- Row 1: Status overview — Passed / Mapping Required / Need to Review only -->
     <div class="pcw-status-kpis" id="pcwStatusKpis" aria-label="Validation Status Overview">
-        <article class="pcb-kpi is-pass" data-card-key="status_pass" title="Passed — actual ≤ budget">
+        <article class="pcb-kpi is-pass" data-card-key="status_pass" title="Valid — actual ≤ budget">
             <span class="pcb-kpi-icon material-icons-round">check_circle</span>
             <div class="pcb-kpi-body">
                 <b id="pcwKpiPassed">—</b>
-                <small>Passed</small>
+                <small>Valid</small>
             </div>
         </article>
         <article class="pcb-kpi is-pending" data-card-key="status_mapping" title="Mapping Required — select zCOST line">
