@@ -664,6 +664,15 @@ body.rpt-body:has(.is-uac-page) {
   border-color: #0d9488;
 }
 
+.uac-right[data-action="find_po"] input:checked + .uac-right-ui {
+  border-color: #0284c7;
+  background: #f0f9ff;
+}
+.uac-right[data-action="find_po"] input:checked + .uac-right-ui .uac-right-check {
+  background: #0284c7;
+  border-color: #0284c7;
+}
+
 .uac-mod[data-kind="zcost"] .uac-right input:checked + .uac-right-ui {
   border-color: #b45309;
   background: #fff7ed;

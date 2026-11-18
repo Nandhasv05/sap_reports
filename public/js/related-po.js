@@ -2,7 +2,7 @@
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 18/11/2026
  * DESCRIPTION : Related PO — header Material/Brand filters + full-screen NotApproved list
- */
+*/
 (function () {
     'use strict';
 
@@ -619,8 +619,12 @@
                 if ((op === '>' && !(n > val)) || (op === '>=' && !(n >= val)) || (op === '<' && !(n < val)) || (op === '<=' && !(n <= val)) || (op === '=' && n !== val)) {
                     return false;
                 }
-            } else if (!(item.texts[f.col] || '').toLowerCase().includes(f.lower)) {
-                return false;
+            } else {
+                const idx = COLS.findIndex((c) => c.key === f.key);
+                const hay = String(
+                    (idx >= 0 ? item.texts[idx] : item.texts[f.col]) || ''
+                ).toLowerCase();
+                if (!hay.includes(f.lower)) return false;
             }
         }
         return true;
@@ -697,8 +701,9 @@
         }, visible.length);
         updateFooter(visible);
         updateSortHeaders();
+        // Reorder body/footer only — never touch the filter row while typing (keeps focus)
         if (columnPrefManager && typeof columnPrefManager.refresh === 'function') {
-            columnPrefManager.refresh();
+            columnPrefManager.refresh({ skipFilterRow: true });
         }
     }
 
@@ -739,12 +744,13 @@
             toggleBtn.classList.toggle('is-active', !!(hidden && hidden.length));
         }
 
-        function applyOrder(order) {
+        function applyOrder(order, opts = {}) {
             appliedOrder = [...order];
             const rows = Array.from(table.querySelectorAll('thead tr, tbody tr, tfoot tr')).filter(
                 (tr) => !tr.classList.contains('rpt-table-loading')
                     && !tr.classList.contains('rpt-table-no-match')
                     && tr.children.length > 1
+                    && !(opts.skipFilterRow && tr.id === 'pocRelatedFilterRow')
             );
             rows.forEach((tr) => {
                 const byId = {};
@@ -958,8 +964,8 @@
         }
 
         return {
-            refresh() {
-                applyOrder(currentState.columnOrder);
+            refresh(opts = {}) {
+                applyOrder(currentState.columnOrder, opts);
                 applyHidden(currentState.hiddenColumns);
             },
         };
@@ -979,15 +985,23 @@
             tr.setAttribute('data-orig-sno', String(index + 1));
             tr.innerHTML = COLS.map((c) => cellHtml(c.key, rec, index)).join('');
             const texts = COLS.map((c, i) => {
-                if (c.key === 'sno' || c.key === 'esign' || c.key === 'pdf' || c.key === 'sent' || c.key === 'sent_receive_log') {
-                    if (c.key === 'sent' || c.key === 'sent_receive_log') {
-                        return [rec.sent_receive_status, rec.mail_from, rec.mail_to, rec.mail_email, rec.mail_status]
-                            .filter(Boolean).join(' ');
-                    }
-                    return '';
-                }
+                if (c.key === 'sno') return String(index + 1);
                 if (c.key === 'status_update') return normalizeStatus(rec.status_update) || 'Draft';
                 if (c.key === 'status_remarks') return String(rec.status_remarks || '').trim();
+                if (c.key === 'sent' || c.key === 'sent_receive_log') {
+                    return [
+                        rec.sent_receive_status,
+                        rec.mail_from,
+                        rec.mail_to,
+                        rec.mail_email,
+                        rec.mail_status,
+                        rec.mail_remarks,
+                        c.key === 'sent' ? (rec.sent_receive_status || rec.mail_to || rec.mail_email ? 'Sent' : 'Send') : '',
+                        c.key === 'sent_receive_log' ? (rec.sent_receive_status || rec.mail_to || rec.mail_from || rec.mail_email ? 'Log' : 'No log') : '',
+                    ].filter(Boolean).join(' ');
+                }
+                if (c.key === 'esign') return 'eSign';
+                if (c.key === 'pdf') return 'View PDF PDF';
                 return (tr.children[i]?.textContent || '').replace(/\s+/g, ' ').trim();
             });
             return { rec, tr, origIndex: index, texts, searchText: texts.join(' ').toLowerCase(), visible: true };
@@ -1131,9 +1145,18 @@
 
         panel.querySelectorAll('#pocRelatedFilterRow .rpt-col-input').forEach((input) => {
             input.addEventListener('input', () => applyFilter());
+            input.addEventListener('keydown', (e) => {
+                // Stop Enter from submitting / jumping focus to the first filter
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    applyFilter();
+                }
+            });
             const clear = input.parentElement?.querySelector('.rpt-col-clear');
             clear?.addEventListener('click', () => {
                 input.value = '';
+                input.focus();
                 applyFilter();
             });
         });

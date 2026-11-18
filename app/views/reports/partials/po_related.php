@@ -114,8 +114,6 @@ $relatedCards = [
                                         <i class="fas fa-eraser"></i>
                                     </button>
                                 </th>
-                            <?php elseif (in_array($colKey, ['status_update', 'status_remarks', 'sent', 'sent_receive_log', 'esign', 'pdf'], true)): ?>
-                                <th data-col-id="<?= e($colKey) ?>"></th>
                             <?php else: ?>
                                 <th<?= ($col['type'] ?? '') === 'num' ? ' class="num"' : '' ?> data-col-id="<?= e($colKey) ?>">
                                     <div class="rpt-col-input-wrap">

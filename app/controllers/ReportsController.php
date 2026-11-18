@@ -688,6 +688,9 @@ class ReportsController extends Controller
             'canRelatedPage'        => function_exists('sap_reports_user_can')
                 ? sap_reports_user_can('po-costing', 'related')
                 : true,
+            'canFindPoPage'         => function_exists('sap_reports_user_can')
+                ? sap_reports_user_can('po-costing', 'find_po')
+                : true,
             'relatedPoDataUrl'      => url('po-costing/related-po'),
             'relatedPoStatusUrl'    => url('po-costing/related-po/status'),
             'relatedPoSentLogUrl'   => url('po-costing/related-po/sent-log'),

@@ -17291,6 +17291,47 @@ body:has(.rpt-app.is-po-costing) {
 .rpt-app.is-po-costing .poc-submit .material-icons-round {
     font-size: 20px;
 }
+.rpt-app.is-po-costing .poc-related-launch {
+    margin-top: 18px;
+}
+.rpt-app.is-po-costing .poc-related-launch .poc-or {
+    margin: 8px 0 14px;
+}
+.rpt-app.is-po-costing .poc-submit.is-related,
+a.rpt-app.is-po-costing .poc-submit.is-related {
+    text-decoration: none;
+    background: linear-gradient(135deg, #0f766e 0%, #115e59 100%);
+    box-shadow: 0 10px 22px rgba(15, 118, 110, .18);
+}
+.rpt-app.is-po-costing a.poc-submit.is-related {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 50px;
+    margin-top: 4px;
+    border: 0;
+    border-radius: 12px;
+    color: #fff;
+    font: inherit;
+    font-size: 15px;
+    font-weight: 800;
+    text-decoration: none;
+    box-sizing: border-box;
+    background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%);
+    box-shadow: 0 10px 22px rgba(13, 148, 136, .22);
+    transition: background .15s ease, transform .15s ease;
+}
+.rpt-app.is-po-costing a.poc-submit.is-related:hover {
+    background: linear-gradient(135deg, #0f766e 0%, #115e59 100%);
+    transform: translateY(-1px);
+    color: #fff;
+}
+.rpt-app.is-po-costing .poc-related-launch .poc-hint {
+    margin-top: 10px;
+    text-align: center;
+}
 @media (max-width: 900px) {
     .rpt-app.is-po-costing .poc-body,
     .rpt-app.is-po-costing .poc-body.is-full-width {

@@ -87,6 +87,7 @@ function sap_reports_user_can_access(string $module, ?array $user = null): bool
 
     if ($mod === 'po-costing') {
         return sap_reports_user_can($mod, 'view', $user)
+            || sap_reports_user_can($mod, 'find_po', $user)
             || sap_reports_user_can($mod, 'workbench', $user)
             || sap_reports_user_can($mod, 'approve', $user)
             || sap_reports_user_can($mod, 'assign', $user)
@@ -95,7 +96,8 @@ function sap_reports_user_can_access(string $module, ?array $user = null): bool
             || sap_reports_user_can($mod, 'receive', $user)
             || sap_reports_user_can($mod, 'sent', $user)
             || sap_reports_user_can($mod, 'workflow', $user)
-            || sap_reports_user_can($mod, 'approved', $user);
+            || sap_reports_user_can($mod, 'approved', $user)
+            || sap_reports_user_can($mod, 'related', $user);
     }
     if ($mod === 'zcost') {
         return sap_reports_user_can($mod, 'view', $user)
@@ -192,7 +194,7 @@ function sap_reports_user_can(string $module, string $action = 'view', ?array $u
     }
     if (!in_array($action, [
         'add', 'view', 'edit', 'approve', 'copy', 'assign', 'validate',
-        'receive', 'sent', 'workflow', 'approved', 'related',
+        'receive', 'sent', 'workflow', 'approved', 'related', 'find_po',
     ], true)) {
         $action = 'view';
     }
@@ -241,11 +243,15 @@ function sap_reports_user_can(string $module, string $action = 'view', ?array $u
         require_once base_path('app/core/Database.php');
         $pdo = Database::connection();
         $table = sap_reports_access_table();
-        if (in_array($action, ['copy', 'assign', 'validate', 'receive', 'sent', 'workflow', 'approved', 'related'], true)) {
+        if (in_array($action, ['copy', 'assign', 'validate', 'receive', 'sent', 'workflow', 'approved', 'related', 'find_po'], true)) {
             $len = $pdo->query("SELECT COL_LENGTH('dbo.{$table}', '{$col}')")->fetchColumn();
             if ((int) $len <= 0) {
                 // Fallback: older table without new columns
-                if (in_array($action, ['copy', 'receive', 'sent', 'workflow', 'approved', 'related'], true)) {
+                if (in_array($action, ['copy', 'receive', 'sent', 'workflow', 'approved', 'related', 'find_po'], true)) {
+                    // Find PO Costing used to be covered by View before can_find_po existed
+                    if ($action === 'find_po') {
+                        return sap_reports_user_can($module, 'view', $user);
+                    }
                     return false;
                 }
                 // assign/validate fall back to can_approve if column missing

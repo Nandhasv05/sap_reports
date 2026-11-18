@@ -81,9 +81,14 @@ if (!isset($canRelatedPage)) {
         : true;
 }
 $canRelatedPage = (bool) $canRelatedPage;
-// Aside pages follow Access Studio toggles only (not View / Pass PO / Assign)
-$canAsideDashboard = $canView || $canPassPo || $canAssign || $canValidate || $canEsign
-    || $canReceivePage || $canSentPage || $canWorkflowPage || $canApprovedPage || $canRelatedPage;
+if (!isset($canFindPoPage)) {
+    $canFindPoPage = function_exists('sap_reports_user_can')
+        ? sap_reports_user_can('po-costing', 'find_po')
+        : true;
+}
+$canFindPoPage = (bool) $canFindPoPage;
+// Aside pages follow Access Studio toggles (Find PO is separate from View / Related / etc.)
+$canAsideDashboard = $canFindPoPage;
 $canAsideReceive = $canReceivePage;
 $canAsideSent = $canSentPage;
 $canAsideWorkflow = $canWorkflowPage;
@@ -222,9 +227,9 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
         <aside class="poc-sidenav is-icons-only" aria-label="PO Costing sections">
             <nav class="poc-sidenav-menu" role="tablist" aria-label="PO Costing Sections">
                 <?php if ($canAsideDashboard): ?>
-                <a href="<?= e($panelHref('dashboard')) ?>" class="poc-sidenav-item is-active" data-poc-panel="dashboard" data-access="view" role="tab" aria-selected="true" title="Dashboard — Find PO Costing (View)">
+                <a href="<?= e($panelHref('dashboard')) ?>" class="poc-sidenav-item is-active" data-poc-panel="dashboard" data-access="find_po" role="tab" aria-selected="true" title="Find PO Costing — Access: Find PO">
                     <span class="poc-sidenav-ico" aria-hidden="true"><span class="material-icons-round">space_dashboard</span></span>
-                    <span class="poc-sidenav-copy">Dashboard</span>
+                    <span class="poc-sidenav-copy">Find PO</span>
                 </a>
                 <?php endif; ?>
                 <?php if ($canAsideReceive): ?>
@@ -334,6 +339,21 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
                                 Launch Costing Report
                             </button>
                         </form>
+
+                        <?php if (!empty($canAsideRelated)): ?>
+                        <div class="poc-related-launch" aria-label="Related PO">
+                            <div class="poc-or"><span>OR OPEN RELATED PO</span></div>
+                            <a href="<?= e($panelHref('related')) ?>"
+                               class="poc-submit is-related"
+                               id="pocOpenRelatedFromDashboard"
+                               data-poc-panel="related"
+                               title="Open Related PO list (Access: Related)">
+                                <span class="material-icons-round" aria-hidden="true">link</span>
+                                Open Related PO
+                            </a>
+                            <p class="poc-hint">Requires Related access — shows released / related purchase orders.</p>
+                        </div>
+                        <?php endif; ?>
                     </section>
                 </div>
             </div>
@@ -1877,9 +1897,9 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
         }
     }
 
-    var startPanel = 'dashboard';
+    var startPanel = firstAllowedPanel();
     try {
-        startPanel = new URL(window.location.href).searchParams.get('panel') || 'dashboard';
+        startPanel = new URL(window.location.href).searchParams.get('panel') || firstAllowedPanel();
     } catch (_) {}
     bindWorkflowPageUi();
     showPanel(startPanel);
