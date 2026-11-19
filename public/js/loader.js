@@ -71,13 +71,14 @@
             if (!visible) return;
             stepIdx = (stepIdx + 1) % steps.length;
             setMessage(steps[stepIdx]);
-        }, 1600);
+        }, 700);
     }
 
     function tick() {
         if (determinate || !visible) return;
         if (pct < 90) {
-            const step = pct < 40 ? 3.2 : (pct < 70 ? 1.6 : 0.55);
+            // Faster ramp so boot spinner does not linger on light pages
+            const step = pct < 40 ? 8 : (pct < 70 ? 4.5 : 1.8);
             setPct(pct + step);
         }
     }
@@ -87,7 +88,7 @@
         determinate = false;
         if (barEl) barEl.style.width = '';
         setPct(0);
-        timer = setInterval(tick, 180);
+        timer = setInterval(tick, 120);
         startStepCycle();
     }
 
@@ -203,14 +204,18 @@
         bootAutoHide = false;
     }
 
-    if (document.readyState === 'complete') {
-        window.setTimeout(autoHideBoot, 320);
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        window.setTimeout(autoHideBoot, 80);
     } else {
+        document.addEventListener('DOMContentLoaded', function () {
+            window.setTimeout(autoHideBoot, 80);
+        });
         window.addEventListener('load', function () {
-            window.setTimeout(autoHideBoot, 320);
+            window.setTimeout(autoHideBoot, 120);
         });
     }
-    window.setTimeout(autoHideBoot, 8000);
+    // Hard cap — never block the UI longer than a couple of seconds on boot
+    window.setTimeout(autoHideBoot, 2200);
 
     document.querySelectorAll('#rptFilterForm, [data-date-filter]').forEach(function (form) {
         form.addEventListener('submit', function () {

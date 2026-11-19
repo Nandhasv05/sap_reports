@@ -1112,7 +1112,7 @@ class SapPurchaseOrderService
                 static fn (string $p): string => "PurchaseOrder eq '" . str_replace("'", "''", $p) . "'",
                 $chunk
             );
-            $filter = '(' . implode(' or ', $orParts) . ") and ApprovedStatus eq 'Approved'";
+            $filter = '(' . implode(' or ', $orParts) . ") and ApprovedStatus eq 'APPROVED'";
             try {
                 $res = $this->client->fetchResults($service, [
                     '$filter' => $filter,

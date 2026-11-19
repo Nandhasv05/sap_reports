@@ -26,7 +26,7 @@ if ($isLive) {
 }
 
 return [
-    'name'      => 'SAP Reports',
+    'name'      => 'SAP Insight',
     'url'       => $url,
     'env'       => $envName,
     'base_path' => '',

@@ -1302,7 +1302,7 @@ HTML;
           </a>
         </td></tr>
         <tr><td style="padding:14px 24px 18px;background:#f8fafc;border-top:1px solid #e2e8f0;">
-          <div style="font-size:11px;color:#94a3b8;">Sent by <strong style="color:#64748b;">{$safeFrom}</strong> · Evolv Clothing · SAP Reports</div>
+          <div style="font-size:11px;color:#94a3b8;">Sent by <strong style="color:#64748b;">{$safeFrom}</strong> · Evolv Clothing · SAP Insight</div>
         </td></tr>
       </table>
     </td></tr>

@@ -47,12 +47,17 @@ class UserAccessControlController extends Controller
      */
     public static function getPagesCatalog(): array
     {
-        $viewOnly = [
-            ['key' => 'view', 'label' => 'View', 'column' => 'can_view'],
-        ];
-        $report = static function (array $page) use ($viewOnly): array {
+        $viewOnly = static function (string $tooltip) {
+            return [[
+                'key' => 'view',
+                'label' => 'View',
+                'column' => 'can_view',
+                'tooltip' => $tooltip,
+            ]];
+        };
+        $report = static function (array $page, string $viewTip) use ($viewOnly): array {
             $page['kind'] = 'report';
-            $page['actions'] = $viewOnly;
+            $page['actions'] = $viewOnly($viewTip);
             return $page;
         };
 
@@ -66,7 +71,7 @@ class UserAccessControlController extends Controller
                 'icon_color'  => '#3b82f6',
                 'icon_bg'     => '#eff6ff',
                 'description' => 'PO line items, supplier breakdown, conditions, delivery status & pricing'
-            ]),
+            ], 'View — why shown: grants access to open Purchase Order Report (lines, supplier, delivery & pricing).'),
             [
                 'page_no'     => 2,
                 'name'        => 'PO Costing Validation',
@@ -76,24 +81,86 @@ class UserAccessControlController extends Controller
                 'icon'        => 'fa-file-invoice-dollar',
                 'icon_color'  => '#10b981',
                 'icon_bg'     => '#ecfdf5',
-                'description' => 'Find PO + Workbench actions + aside pages (Receive / Sent / Workflow / Approved / Related)',
+                'description' => 'Released PO + Workbench actions + aside pages (Receive / Sent / Workflow / Approved / Draft PO / Search PO)',
                 'actions'     => [
-                    ['key' => 'view', 'label' => 'View', 'column' => 'can_view'],
-                    // Find PO Costing / Costing Workbench landing (sidenav Dashboard)
-                    ['key' => 'find_po', 'label' => 'Find PO', 'column' => 'can_find_po'],
-                    // Stored in can_add (unused for PO Costing otherwise)
-                    ['key' => 'workbench', 'label' => 'Workbench', 'column' => 'can_add'],
-                    ['key' => 'pass_po', 'label' => 'Pass PO', 'column' => 'can_approve'],
-                    ['key' => 'assign', 'label' => 'Assign', 'column' => 'can_assign'],
-                    ['key' => 'validate', 'label' => 'Validate', 'column' => 'can_validate'],
-                    // Stored in can_copy (unused for PO Costing otherwise)
-                    ['key' => 'esign', 'label' => 'eSign', 'column' => 'can_copy'],
-                    // Aside page access (PO Costing sidenav)
-                    ['key' => 'receive', 'label' => 'Receive', 'column' => 'can_receive'],
-                    ['key' => 'sent', 'label' => 'Sent', 'column' => 'can_sent'],
-                    ['key' => 'workflow', 'label' => 'Workflow', 'column' => 'can_workflow'],
-                    ['key' => 'approved', 'label' => 'Approved', 'column' => 'can_approved'],
-                    ['key' => 'related', 'label' => 'Related', 'column' => 'can_related'],
+                    [
+                        'key' => 'view',
+                        'label' => 'View',
+                        'column' => 'can_view',
+                        'tooltip' => 'View — why shown: lets the user open PO Costing Validation and read PO / costing data.',
+                    ],
+                    [
+                        'key' => 'find_po',
+                        'label' => 'Released PO',
+                        'column' => 'can_find_po',
+                        'tooltip' => 'Released PO — why shown: shows the Released Po sidenav and bulk purchase-order list.',
+                    ],
+                    [
+                        'key' => 'workbench',
+                        'label' => 'Workbench',
+                        'column' => 'can_add',
+                        'tooltip' => 'Workbench — why shown: lets the user open the PO vs zCOST validation workbench for a PO number.',
+                    ],
+                    [
+                        'key' => 'pass_po',
+                        'label' => 'Pass PO',
+                        'column' => 'can_approve',
+                        'tooltip' => 'Pass PO — why shown: lets the user pass a validated PO (Value = X) from the workbench.',
+                    ],
+                    [
+                        'key' => 'assign',
+                        'label' => 'Assign',
+                        'column' => 'can_assign',
+                        'tooltip' => 'Assign — why shown: lets the user assign reviewers / workflow users on a PO.',
+                    ],
+                    [
+                        'key' => 'validate',
+                        'label' => 'Validate',
+                        'column' => 'can_validate',
+                        'tooltip' => 'Validate — why shown: lets the user run PO vs zCOST line validation.',
+                    ],
+                    [
+                        'key' => 'esign',
+                        'label' => 'eSign',
+                        'column' => 'can_copy',
+                        'tooltip' => 'eSign — why shown: lets the user open e-signature and signed PDF flow for a PO.',
+                    ],
+                    [
+                        'key' => 'receive',
+                        'label' => 'Receive',
+                        'column' => 'can_receive',
+                        'tooltip' => 'Receive — why shown: shows the Receive PO sidenav (inbox of POs sent to this user).',
+                    ],
+                    [
+                        'key' => 'sent',
+                        'label' => 'Sent',
+                        'column' => 'can_sent',
+                        'tooltip' => 'Sent — why shown: shows the Sent PO sidenav (POs this user forwarded / mailed).',
+                    ],
+                    [
+                        'key' => 'workflow',
+                        'label' => 'Workflow',
+                        'column' => 'can_workflow',
+                        'tooltip' => 'Workflow — why shown: shows the Workflow sidenav to configure assignment rules.',
+                    ],
+                    [
+                        'key' => 'approved',
+                        'label' => 'Approved',
+                        'column' => 'can_approved',
+                        'tooltip' => 'Approved — why shown: shows the Approved PO sidenav for completed / approved POs.',
+                    ],
+                    [
+                        'key' => 'related',
+                        'label' => 'Draft PO',
+                        'column' => 'can_related',
+                        'tooltip' => 'Draft PO — why shown: shows the Draft PO sidenav (NotApproved / draft quotations from Z_QuotationZCostCom).',
+                    ],
+                    [
+                        'key' => 'search_po',
+                        'label' => 'Search PO',
+                        'column' => 'can_search_po',
+                        'tooltip' => 'Search PO — why shown: shows the Search PO sidenav and lets the user open a PO in Costing Workbench by number (even without the Workbench right).',
+                    ],
                 ],
             ],
             $report([
@@ -105,7 +172,7 @@ class UserAccessControlController extends Controller
                 'icon_color'  => '#8b5cf6',
                 'icon_bg'     => '#f5f3ff',
                 'description' => 'Sales KPIs, order fulfillment charts, revenue velocity & trends'
-            ]),
+            ], 'View — why shown: grants access to Sales Dashboard (KPIs, fulfillment & revenue trends).'),
             $report([
                 'page_no'     => 4,
                 'name'        => 'Fabric Utilization',
@@ -115,7 +182,7 @@ class UserAccessControlController extends Controller
                 'icon_color'  => '#0ea5e9',
                 'icon_bg'     => '#e0f2fe',
                 'description' => 'Fabric roll logs, cutting yield, wastage %, shrinkage & meter reconciliation'
-            ]),
+            ], 'View — why shown: grants access to Fabric Utilization (rolls, yield, wastage & shrinkage).'),
             $report([
                 'page_no'     => 5,
                 'name'        => 'Fabric Sale Order',
@@ -125,7 +192,7 @@ class UserAccessControlController extends Controller
                 'icon_color'  => '#059669',
                 'icon_bg'     => '#ecfdf5',
                 'description' => 'Fabric sale orders, stock reservations, pricing & dispatch tracking'
-            ]),
+            ], 'View — why shown: grants access to Fabric Sale Order (orders, reservations, pricing & dispatch).'),
             $report([
                 'page_no'     => 6,
                 'name'        => 'Production Report',
@@ -135,7 +202,7 @@ class UserAccessControlController extends Controller
                 'icon_color'  => '#d97706',
                 'icon_bg'     => '#fffbeb',
                 'description' => 'Assembly line efficiency, plant targets vs actuals, sewing output & WIP'
-            ]),
+            ], 'View — why shown: grants access to Production Report (targets vs actuals, sewing & WIP).'),
             $report([
                 'page_no'     => 7,
                 'name'        => 'Procurement Report',
@@ -145,7 +212,7 @@ class UserAccessControlController extends Controller
                 'icon_color'  => '#f97316',
                 'icon_bg'     => '#fff7ed',
                 'description' => 'Open PR status, vendor lead times, purchase orders & material lead metrics'
-            ]),
+            ], 'View — why shown: grants access to Procurement Report (PR status, vendors & lead times).'),
             $report([
                 'page_no'     => 8,
                 'name'        => 'Trims Utilization',
@@ -155,7 +222,7 @@ class UserAccessControlController extends Controller
                 'icon_color'  => '#ec4899',
                 'icon_bg'     => '#fdf2f8',
                 'description' => 'Buttons, zippers, badges, packaging stock balance & line issue ledger'
-            ]),
+            ], 'View — why shown: grants access to Trims Utilization (stock balance & issue ledger).'),
             $report([
                 'page_no'     => 9,
                 'name'        => 'Overall Utilization',
@@ -165,7 +232,7 @@ class UserAccessControlController extends Controller
                 'icon_color'  => '#6366f1',
                 'icon_bg'     => '#eef2ff',
                 'description' => 'Consolidated material balance, global yield benchmarks & scrap analysis'
-            ]),
+            ], 'View — why shown: grants access to Overall Utilization (material balance, yield & scrap).'),
             $report([
                 'page_no'     => 10,
                 'name'        => 'Audit Log',
@@ -175,8 +242,8 @@ class UserAccessControlController extends Controller
                 'icon'        => 'fa-clock-rotate-left',
                 'icon_color'  => '#475569',
                 'icon_bg'     => '#f1f5f9',
-                'description' => ''
-            ]),
+                'description' => 'Admin-only API / action audit trail'
+            ], 'View — why shown: grants access to Audit Log (admin-only API / action history).'),
             $report([
                 'page_no'     => 11,
                 'name'        => 'User Access Control',
@@ -186,8 +253,8 @@ class UserAccessControlController extends Controller
                 'icon'        => 'fa-user-lock',
                 'icon_color'  => '#e11d48',
                 'icon_bg'     => '#ffe4e6',
-                'description' => ''
-            ]),
+                'description' => 'Admin-only Access Studio to grant module rights'
+            ], 'View — why shown: grants access to User Access Control (admin-only Access Studio).'),
             [
                 'page_no'     => 12,
                 'name'        => 'Zcost Costing Sheet',
@@ -199,10 +266,30 @@ class UserAccessControlController extends Controller
                 'icon_bg'     => '#ffedd5',
                 'description' => 'Add sheet, update costing, copy costing, and approve costing.',
                 'actions'     => [
-                    ['key' => 'add', 'label' => 'Add', 'column' => 'can_add'],
-                    ['key' => 'update', 'label' => 'Update', 'column' => 'can_edit'],
-                    ['key' => 'copy', 'label' => 'Copy', 'column' => 'can_copy'],
-                    ['key' => 'approve', 'label' => 'Approve', 'column' => 'can_approve'],
+                    [
+                        'key' => 'add',
+                        'label' => 'Add',
+                        'column' => 'can_add',
+                        'tooltip' => 'Add — why shown: lets the user create a new ZCOST costing sheet.',
+                    ],
+                    [
+                        'key' => 'update',
+                        'label' => 'Update',
+                        'column' => 'can_edit',
+                        'tooltip' => 'Update — why shown: lets the user edit an existing ZCOST costing sheet.',
+                    ],
+                    [
+                        'key' => 'copy',
+                        'label' => 'Copy',
+                        'column' => 'can_copy',
+                        'tooltip' => 'Copy — why shown: lets the user duplicate an existing ZCOST costing sheet.',
+                    ],
+                    [
+                        'key' => 'approve',
+                        'label' => 'Approve',
+                        'column' => 'can_approve',
+                        'tooltip' => 'Approve — why shown: lets the user approve a ZCOST costing sheet.',
+                    ],
                 ],
             ],
         ];
@@ -286,7 +373,8 @@ class UserAccessControlController extends Controller
                        {$bitSelect('can_workflow')},
                        {$bitSelect('can_approved')},
                        {$bitSelect('can_related')},
-                       {$bitSelect('can_find_po')}
+                       {$bitSelect('can_find_po')},
+                       {$bitSelect('can_search_po')}
                 FROM [dbo].[{$table}]
             ";
             $stmt = $pdo->prepare($selectSql . ' WHERE user_id = ?');
@@ -316,7 +404,7 @@ class UserAccessControlController extends Controller
                         'copy' => 0, 'pass_po' => 0, 'update' => 0,
                         'assign' => 0, 'validate' => 0, 'esign' => 0, 'workbench' => 0,
                         'receive' => 0, 'sent' => 0, 'workflow' => 0, 'approved' => 0, 'related' => 0,
-                        'find_po' => 0,
+                        'find_po' => 0, 'search_po' => 0,
                     ];
                 }
                 $permissions[$pNo]['add'] = max($permissions[$pNo]['add'], (int) $row['can_add']);
@@ -336,6 +424,7 @@ class UserAccessControlController extends Controller
                 $permissions[$pNo]['approved'] = max($permissions[$pNo]['approved'], (int) ($row['can_approved'] ?? 0));
                 $permissions[$pNo]['related'] = max($permissions[$pNo]['related'], (int) ($row['can_related'] ?? 0));
                 $permissions[$pNo]['find_po'] = max($permissions[$pNo]['find_po'], (int) ($row['can_find_po'] ?? 0));
+                $permissions[$pNo]['search_po'] = max($permissions[$pNo]['search_po'], (int) ($row['can_search_po'] ?? 0));
             }
 
             $this->jsonResponse([
@@ -484,7 +573,7 @@ class UserAccessControlController extends Controller
         $colMap = $this->accessTableColumnMap($pdo);
         $optionalBits = [
             'can_copy', 'can_assign', 'can_validate',
-            'can_receive', 'can_sent', 'can_workflow', 'can_approved', 'can_related', 'can_find_po',
+            'can_receive', 'can_sent', 'can_workflow', 'can_approved', 'can_related', 'can_find_po', 'can_search_po',
         ];
         $bitCols = [];
         foreach ($optionalBits as $c) {
@@ -521,7 +610,7 @@ class UserAccessControlController extends Controller
                         'can_add' => 0, 'can_view' => 0, 'can_edit' => 0, 'can_approve' => 0,
                         'can_copy' => 0, 'can_assign' => 0, 'can_validate' => 0,
                         'can_receive' => 0, 'can_sent' => 0, 'can_workflow' => 0, 'can_approved' => 0,
-                        'can_related' => 0, 'can_find_po' => 0,
+                        'can_related' => 0, 'can_find_po' => 0, 'can_search_po' => 0,
                     ];
                 }
 
@@ -653,7 +742,7 @@ class UserAccessControlController extends Controller
     /**
      * @param array<string, mixed> $p
      * @param array<string, mixed> $meta
-     * @return array{can_add:int,can_view:int,can_edit:int,can_approve:int,can_copy:int,can_assign:int,can_validate:int,can_receive:int,can_sent:int,can_workflow:int,can_approved:int,can_related:int,can_find_po:int}
+     * @return array{can_add:int,can_view:int,can_edit:int,can_approve:int,can_copy:int,can_assign:int,can_validate:int,can_receive:int,can_sent:int,can_workflow:int,can_approved:int,can_related:int,can_find_po:int,can_search_po:int}
      */
     private function normalizePagePermissions(array $p, array $meta): array
     {
@@ -672,6 +761,7 @@ class UserAccessControlController extends Controller
             'can_approved' => 0,
             'can_related' => 0,
             'can_find_po' => 0,
+            'can_search_po' => 0,
         ];
         $actions = is_array($meta['actions'] ?? null) ? $meta['actions'] : [];
         foreach ($actions as $act) {
@@ -680,7 +770,13 @@ class UserAccessControlController extends Controller
             if ($column === '' || !array_key_exists($column, $flags)) {
                 continue;
             }
-            $on = !empty($p[$column]) || !empty($p[$key]) || ($key !== '' && !empty($p['can_' . $key]));
+            $on = !empty($p[$column])
+                || ($key !== '' && !empty($p[$key]))
+                || ($key !== '' && !empty($p['can_' . $key]))
+                // pass_po / workbench / esign aliases from client action keys
+                || ($key === 'pass_po' && !empty($p['approve']))
+                || ($key === 'workbench' && !empty($p['add']))
+                || ($key === 'esign' && !empty($p['copy']));
             if ($on) {
                 $flags[$column] = 1;
             }
@@ -699,6 +795,7 @@ class UserAccessControlController extends Controller
             $flags['can_approved'] = 0;
             $flags['can_related'] = 0;
             $flags['can_find_po'] = 0;
+            $flags['can_search_po'] = 0;
         } elseif ($kind === 'po-costing') {
             $flags['can_edit'] = 0;
             // can_add stores Workbench; can_copy stores eSign; page bits gate aside nav
@@ -714,6 +811,7 @@ class UserAccessControlController extends Controller
                 || $flags['can_approved'] === 1
                 || $flags['can_related'] === 1
                 || $flags['can_find_po'] === 1
+                || $flags['can_search_po'] === 1
             ) {
                 $flags['can_view'] = 1;
             }
@@ -726,6 +824,7 @@ class UserAccessControlController extends Controller
             $flags['can_approved'] = 0;
             $flags['can_related'] = 0;
             $flags['can_find_po'] = 0;
+            $flags['can_search_po'] = 0;
             $flags['can_view'] = (
                 $flags['can_add'] === 1
                 || $flags['can_edit'] === 1
@@ -808,6 +907,21 @@ class UserAccessControlController extends Controller
     }
 
     /**
+     * Public entry so PO Costing pages can ensure aside BIT columns before permission checks.
+     */
+    public static function ensureAccessBitColumns(): void
+    {
+        try {
+            require_once base_path('app/core/Database.php');
+            $pdo = Database::connection();
+            $ctl = new self();
+            $ctl->ensureBitColumns($pdo);
+        } catch (Throwable $e) {
+            error_log('ensureAccessBitColumns: ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Add missing PO Costing aside/action BIT columns (can_receive, can_sent, …).
      * Uses INFORMATION_SCHEMA + single-statement ALTER — ODBC often fails on batched IF/BEGIN DDL.
      */
@@ -816,7 +930,7 @@ class UserAccessControlController extends Controller
         $table = self::ACCESS_TABLE;
         $needed = [
             'can_copy', 'can_assign', 'can_validate',
-            'can_receive', 'can_sent', 'can_workflow', 'can_approved', 'can_related', 'can_find_po',
+            'can_receive', 'can_sent', 'can_workflow', 'can_approved', 'can_related', 'can_find_po', 'can_search_po',
         ];
         $existing = $this->accessTableColumnMap($pdo);
         $addedFindPo = false;
@@ -875,6 +989,7 @@ class UserAccessControlController extends Controller
                 error_log('ensureBitColumns backfill can_find_po: ' . $e->getMessage());
             }
         }
+        // Search PO (can_search_po) defaults to 0 — grant only via Access Studio checkbox
     }
 
     /** @deprecated use ensureBitColumns — kept so older call sites do not fatally error */
@@ -916,6 +1031,7 @@ class UserAccessControlController extends Controller
                 [can_approved] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_approved] DEFAULT 0,
                 [can_related] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_related] DEFAULT 0,
                 [can_find_po] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_find_po] DEFAULT 0,
+                [can_search_po] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_search_po] DEFAULT 0,
                 [created_at] DATETIME NOT NULL CONSTRAINT [DF_uac_{$suffix}_created] DEFAULT GETDATE(),
                 [updated_at] DATETIME NOT NULL CONSTRAINT [DF_uac_{$suffix}_updated] DEFAULT GETDATE(),
                 CONSTRAINT [PK_uac_{$suffix}] PRIMARY KEY ([id]),
@@ -930,7 +1046,7 @@ class UserAccessControlController extends Controller
                     INSERT INTO [dbo].[{$temp}]
                     (user_id, username, page_no, page_name, page_route,
                      can_add, can_view, can_edit, can_approve, can_copy, can_assign, can_validate,
-                     can_receive, can_sent, can_workflow, can_approved, can_related, can_find_po,
+                     can_receive, can_sent, can_workflow, can_approved, can_related, can_find_po, can_search_po,
                      created_at, updated_at)
                     SELECT
                         user_id,
@@ -951,6 +1067,7 @@ class UserAccessControlController extends Controller
                         CAST(ISNULL(can_approved,0) AS BIT),
                         CAST(ISNULL(can_related,0) AS BIT),
                         CAST(ISNULL(can_find_po, CASE WHEN ISNULL(can_view,0) = 1 AND page_no = 2 THEN 1 ELSE 0 END) AS BIT),
+                        CAST(ISNULL(can_search_po, 0) AS BIT),
                         ISNULL(created_at, GETDATE()),
                         ISNULL(updated_at, GETDATE())
                     FROM [dbo].[{$table}]
@@ -1091,6 +1208,7 @@ class UserAccessControlController extends Controller
                         [can_approved] BIT NOT NULL CONSTRAINT [DF_{$table}_approved] DEFAULT 0,
                         [can_related] BIT NOT NULL CONSTRAINT [DF_{$table}_related] DEFAULT 0,
                         [can_find_po] BIT NOT NULL CONSTRAINT [DF_{$table}_find_po] DEFAULT 0,
+                        [can_search_po] BIT NOT NULL CONSTRAINT [DF_{$table}_search_po] DEFAULT 0,
                         [created_at] DATETIME NOT NULL CONSTRAINT [DF_{$table}_created] DEFAULT GETDATE(),
                         [updated_at] DATETIME NOT NULL CONSTRAINT [DF_{$table}_updated] DEFAULT GETDATE(),
                         CONSTRAINT [PK_{$table}] PRIMARY KEY ([id]),

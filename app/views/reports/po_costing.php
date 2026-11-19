@@ -51,6 +51,12 @@ if (!isset($canEsign)) {
         : true;
 }
 $canEsign = (bool) $canEsign;
+if (!isset($canWorkbench)) {
+    $canWorkbench = function_exists('sap_reports_user_can')
+        ? sap_reports_user_can('po-costing', 'workbench')
+        : true;
+}
+$canWorkbench = (bool) $canWorkbench;
 if (!isset($canReceivePage)) {
     $canReceivePage = function_exists('sap_reports_user_can')
         ? sap_reports_user_can('po-costing', 'receive')
@@ -97,6 +103,14 @@ $canAsideRelated = $canRelatedPage;
 $relatedPoDataUrl = (string) ($relatedPoDataUrl ?? url('po-costing/related-po'));
 $relatedPoStatusUrl = (string) ($relatedPoStatusUrl ?? url('po-costing/related-po/status'));
 $relatedPoSentLogUrl = (string) ($relatedPoSentLogUrl ?? url('po-costing/related-po/sent-log'));
+$searchPoDataUrl = (string) ($searchPoDataUrl ?? url('po-costing/search-po'));
+if (!isset($canSearchPoPage)) {
+    $canSearchPoPage = function_exists('sap_reports_user_can')
+        ? sap_reports_user_can('po-costing', 'search_po')
+        : true;
+}
+$canSearchPoPage = (bool) $canSearchPoPage;
+$canAsideSearchPo = $canSearchPoPage;
 $costingHomeUrl = (string) ($costingHomeUrl ?? url('po-costing'));
 $panelHref = static function (string $panel) use ($costingHomeUrl): string {
     $panel = trim($panel);
@@ -107,7 +121,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
     return $costingHomeUrl . $sep . 'panel=' . rawurlencode($panel);
 };
 ?>
-<div class="rpt-app is-po-costing is-lookup is-poc-v2" id="poCostingPage"
+<div class="rpt-app is-po-costing is-workflow is-costing-bulk is-released-po is-poc-v2" id="poCostingPage"
      data-po-base="<?= e($poBaseUrl) ?>"
      data-pass-log="<?= e($passLogUrl) ?>"
      data-pass-log-page="<?= e($passLogPageUrl) ?>"
@@ -123,6 +137,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
      data-related-po-url="<?= e($relatedPoDataUrl) ?>"
      data-related-po-status-url="<?= e($relatedPoStatusUrl) ?>"
      data-related-po-sent-log-url="<?= e($relatedPoSentLogUrl) ?>"
+     data-search-po-url="<?= e($searchPoDataUrl) ?>"
      data-can-view="<?= $canView ? '1' : '0' ?>"
      data-can-pass-po="<?= $canPassPo ? '1' : '0' ?>"
      data-can-esign="<?= $canEsign ? '1' : '0' ?>"
@@ -135,18 +150,29 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
      data-aside-sent="<?= $canAsideSent ? '1' : '0' ?>"
      data-aside-workflow="<?= $canAsideWorkflow ? '1' : '0' ?>"
      data-aside-approved="<?= $canAsideApproved ? '1' : '0' ?>"
-     data-aside-related="<?= $canAsideRelated ? '1' : '0' ?>">
+     data-aside-related="<?= $canAsideRelated ? '1' : '0' ?>"
+     data-aside-search="<?= $canAsideSearchPo ? '1' : '0' ?>">
 
     <?php
-        $loaderVisible = true;
+        // Soft panels (Related / Search PO): skip full-page boot spinner — nothing heavy to load
+        $startPanelHint = strtolower(trim((string) ($_GET['panel'] ?? '')));
+        $skipBootLoader = (
+            ($startPanelHint === 'related' && !empty($canAsideRelated))
+            || ($startPanelHint === 'search' && !empty($canAsideSearchPo))
+        );
+        $loaderVisible = !$skipBootLoader;
         $loaderAutoHide = true;
-        $loaderMessage = 'Preparing PO Costing…';
-        $loaderSteps = ['Connecting…', 'Loading PO Costing Validation…', 'Preparing PO Costing…'];
+        $loaderMessage = $startPanelHint === 'search'
+            ? 'Opening Search PO…'
+            : 'Preparing PO eSign…';
+        $loaderSteps = $startPanelHint === 'search'
+            ? ['Opening Search PO…']
+            : ['Connecting…', 'Loading PO eSign…', 'Preparing PO eSign…'];
     ?>
     <?php $relatedBrandOptions = is_array($brands ?? null) ? $brands : []; ?>
     <header class="rpt-bar">
         <div class="rpt-bar-left">
-            <a href="<?= e($catalogHome) ?>" class="rpt-brand" aria-label="EVOLV" title="SAP Reports">
+            <a href="<?= e($home) ?>" class="rpt-brand" aria-label="EVOLV" title="EVOLV Portal Dashboard">
                 <img src="<?= e($logoUrl) ?>" alt="evolv">
             </a>
             <a href="<?= e($catalogHome) ?>" class="rpt-home" aria-label="All Reports" title="Reports Catalog">
@@ -155,10 +181,121 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
             <a href="<?= e($home) ?>" class="rpt-home" aria-label="Portal home" title="Portal Dashboard">
                 <span class="material-icons-round">home</span>
             </a>
-            <div class="rpt-name">PO Costing Validation</div>
+            <div class="rpt-name pcb-bar-title" id="pocPageTitle"><strong>Released Po</strong></div>
         </div>
+        <?php $brandOptions = is_array($brands ?? null) ? $brands : []; ?>
+        <?php if (!empty($canAsideDashboard)): ?>
+        <?php
+            require_once base_path('app/services/SapPurchaseOrderService.php');
+            $bulkMatHeader = 'all';
+            $bulkBrandOptions = $brandOptions;
+            $bulkSelectedBrands = [];
+            $bulkBrandCount = 0;
+            $bulkBrandLabel = 'All Brands';
+        ?>
+        <form class="rpt-search prod-filters po-filters pcb-header-filters poc-released-header-filters" id="pcbFilterForm" autocomplete="off" novalidate aria-label="Released Po filters">
+            <input type="hidden" name="view" value="costing">
+            <div class="pcb-mat-seg" role="radiogroup" aria-label="Material type">
+                <label class="pcb-mat-opt">
+                    <input type="radio" name="pcb_mat" value="all" checked>
+                    <span>All</span>
+                </label>
+                <label class="pcb-mat-opt">
+                    <input type="radio" name="pcb_mat" value="fabric">
+                    <span>Fabric</span>
+                </label>
+                <label class="pcb-mat-opt">
+                    <input type="radio" name="pcb_mat" value="trims">
+                    <span>Trims</span>
+                </label>
+            </div>
+            <input type="hidden" id="pcbMat" name="mat_cat" value="all">
+            <div class="po-multi-dropdown pcb-header-brand" id="pcbBrandDropdown" title="Filter by brand name">
+                <input type="hidden" name="brand" id="pcbBrand" value="">
+                <button type="button" class="po-multi-trigger" id="pcbBrandTrigger" aria-haspopup="true" aria-expanded="false" aria-label="Brand name">
+                    <span class="material-icons-round po-multi-icon">sell</span>
+                    <span class="po-multi-label" id="pcbBrandLabel"><?= e($bulkBrandLabel) ?></span>
+                    <span class="po-multi-badge" id="pcbBrandBadge" style="display:none;">0</span>
+                    <span class="material-icons-round po-multi-arrow">expand_more</span>
+                </button>
+                <div class="po-multi-menu" id="pcbBrandMenu" role="menu">
+                    <div class="po-multi-search-wrap">
+                        <span class="material-icons-round">search</span>
+                        <input type="text" id="pcbBrandSearch" class="po-multi-search" placeholder="Search brands..." autocomplete="off">
+                        <button type="button" id="pcbBrandSearchClear" class="po-multi-search-clear" style="display:none;" title="Clear search">
+                            <span class="material-icons-round">close</span>
+                        </button>
+                    </div>
+                    <div class="po-multi-actions">
+                        <button type="button" class="po-multi-action-btn" id="pcbBrandSelectAll">Select All</button>
+                        <span class="po-multi-action-dot">·</span>
+                        <button type="button" class="po-multi-action-btn" id="pcbBrandClearAll">Clear</button>
+                        <span class="po-multi-selected-info" id="pcbBrandCountInfo">
+                            0 of <?= count($bulkBrandOptions) ?> selected
+                        </span>
+                    </div>
+                    <div class="po-multi-list" id="pcbBrandList">
+                        <?php foreach ($bulkBrandOptions as $b): ?>
+                            <?php
+                            $bCode = (string) ($b['code'] ?? '');
+                            $bName = (string) ($b['name'] ?? $bCode);
+                            if ($bCode === '') {
+                                continue;
+                            }
+                            ?>
+                            <label class="po-multi-item" data-code="<?= e($bCode) ?>" data-name="<?= e(strtolower($bName)) ?>">
+                                <input type="checkbox" class="po-multi-checkbox" value="<?= e($bCode) ?>">
+                                <span class="po-multi-item-name"><?= e($bName) ?></span>
+                                <span class="po-multi-item-code"><?= e($bCode) ?></span>
+                            </label>
+                        <?php endforeach; ?>
+                    </div>
+                    <div class="po-multi-footer">
+                        <button type="button" class="po-multi-btn-cancel" id="pcbBrandCancel">Cancel</button>
+                        <button type="button" class="po-multi-btn-apply" id="pcbBrandApply">
+                            <span class="material-icons-round">check</span>
+                            <span>Apply</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <input type="hidden" id="pcbRange" name="range" value="all">
+            <input type="hidden" id="pcbFrom" name="from" value="">
+            <input type="hidden" id="pcbTo" name="to" value="">
+            <label class="rpt-field po-direct-search pcb-header-search poc-released-po-search" title="Search PO number — Enter opens Costing Workbench">
+                <span class="material-icons-round">search</span>
+                <input type="search" id="pcbPoSearch" name="po_search" value=""
+                       placeholder="Search PO #"
+                       inputmode="numeric" maxlength="10" autocomplete="off"
+                       aria-label="Search purchase order number">
+            </label>
+            <button type="button" class="poc-find-header-search" id="pcbPoSearchBtn"
+                    title="Search PO — find in list or open Costing Workbench">
+                <span class="material-icons-round">search</span>
+                <span>Search</span>
+            </button>
+        </form>
+        <?php endif; ?>
+        <?php if (!empty($canAsideSearchPo)): ?>
+        <form class="rpt-search poc-search-header-filters" id="pocSearchPoHeaderFilters" autocomplete="off" hidden aria-label="Search PO">
+            <label class="rpt-field po-direct-search poc-search-po-field"
+                   title="Purchase order number — type up to 10 digits, then Search to open Costing Workbench.">
+                <span class="material-icons-round">receipt_long</span>
+                <input type="search" id="pocSearchPoInput" name="po" value=""
+                       placeholder="Enter PO # (e.g. 4000008618)"
+                       inputmode="numeric" maxlength="10" autocomplete="off"
+                       aria-label="Purchase order number"
+                       title="Enter a purchase order number (up to 10 digits).">
+            </label>
+            <button type="submit" class="poc-find-header-search" id="pocSearchPoBtn"
+                    title="Search — enter a PO number and open the Costing Workbench (needs Workbench access to use actions there).">
+                <span class="material-icons-round">search</span>
+                <span>Search</span>
+            </button>
+        </form>
+        <?php endif; ?>
         <?php if (!empty($canAsideRelated)): ?>
-        <form class="rpt-search poc-related-header-filters" id="pocRelatedHeaderFilters" autocomplete="off" hidden aria-label="Related PO filters">
+        <form class="rpt-search poc-related-header-filters" id="pocRelatedHeaderFilters" autocomplete="off" hidden aria-label="Draft PO filters">
             <label class="rpt-field rpt-field-mat-cat" title="Filter by Fabric, Trims, or All materials">
                 <span class="material-icons-round">category</span>
                 <select id="pocRelatedMatCat" name="mat_cat" aria-label="Material category">
@@ -214,7 +351,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
                     </div>
                 </div>
             </div>
-            <button type="button" class="poc-related-clear" id="pocRelatedClearHeaderBtn" title="Clear Related PO filters">
+            <button type="button" class="poc-related-clear" id="pocRelatedClearHeaderBtn" title="Clear Draft PO filters">
                 <span class="material-icons-round">filter_alt_off</span>
                 <span>Clear Filter</span>
             </button>
@@ -227,134 +364,68 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
         <aside class="poc-sidenav is-icons-only" aria-label="PO Costing sections">
             <nav class="poc-sidenav-menu" role="tablist" aria-label="PO Costing Sections">
                 <?php if ($canAsideDashboard): ?>
-                <a href="<?= e($panelHref('dashboard')) ?>" class="poc-sidenav-item is-active" data-poc-panel="dashboard" data-access="find_po" role="tab" aria-selected="true" title="Find PO Costing — Access: Find PO">
+                <a href="<?= e($panelHref('dashboard')) ?>" class="poc-sidenav-item is-active" data-poc-panel="dashboard" data-access="find_po" role="tab" aria-selected="true"
+                   title="Released Po — shown because Access Studio granted Released PO. Bulk list of purchase orders for costing validation.">
                     <span class="poc-sidenav-ico" aria-hidden="true"><span class="material-icons-round">space_dashboard</span></span>
-                    <span class="poc-sidenav-copy">Find PO</span>
+                    <span class="poc-sidenav-copy">Released Po</span>
                 </a>
                 <?php endif; ?>
                 <?php if ($canAsideReceive): ?>
-                <a href="<?= e($panelHref('received')) ?>" class="poc-sidenav-item" data-poc-panel="received" data-access="receive" role="tab" aria-selected="false" title="Receive PO — Access: Receive">
+                <a href="<?= e($panelHref('received')) ?>" class="poc-sidenav-item" data-poc-panel="received" data-access="receive" role="tab" aria-selected="false"
+                   title="Receive PO — shown because Access Studio granted Receive. Inbox of POs sent / assigned to you.">
                     <span class="poc-sidenav-ico" aria-hidden="true"><span class="material-icons-round">move_to_inbox</span></span>
                     <span class="poc-sidenav-copy">Receive PO</span>
                     <span class="poc-tab-badge is-recv" id="pocTabBadgeRecv">0</span>
                 </a>
                 <?php endif; ?>
                 <?php if ($canAsideSent): ?>
-                <a href="<?= e($panelHref('sent')) ?>" class="poc-sidenav-item" data-poc-panel="sent" data-access="sent" role="tab" aria-selected="false" title="Sent PO — Access: Sent">
+                <a href="<?= e($panelHref('sent')) ?>" class="poc-sidenav-item" data-poc-panel="sent" data-access="sent" role="tab" aria-selected="false"
+                   title="Sent PO — shown because Access Studio granted Sent. POs you forwarded or mailed.">
                     <span class="poc-sidenav-ico" aria-hidden="true"><span class="material-icons-round">send</span></span>
                     <span class="poc-sidenav-copy">Sent PO</span>
                     <span class="poc-tab-badge is-sent" id="pocTabBadgeSent">0</span>
                 </a>
                 <?php endif; ?>
                 <?php if ($canAsideWorkflow): ?>
-                <a href="<?= e($panelHref('workflow')) ?>" class="poc-sidenav-item" data-poc-panel="workflow" data-access="workflow" role="tab" aria-selected="false" title="Workflow Assignment — Access: Workflow">
+                <a href="<?= e($panelHref('workflow')) ?>" class="poc-sidenav-item" data-poc-panel="workflow" data-access="workflow" role="tab" aria-selected="false"
+                   title="Workflow — shown because Access Studio granted Workflow. Configure who reviews / approves POs.">
                     <span class="poc-sidenav-ico" aria-hidden="true"><span class="material-icons-round">account_tree</span></span>
                     <span class="poc-sidenav-copy">Workflow</span>
                 </a>
                 <?php endif; ?>
                 <?php if ($canAsideApproved): ?>
-                <a href="<?= e($panelHref('approved')) ?>" class="poc-sidenav-item" data-poc-panel="approved" data-access="approved" role="tab" aria-selected="false" title="Approved PO — Access: Approved">
+                <a href="<?= e($panelHref('approved')) ?>" class="poc-sidenav-item" data-poc-panel="approved" data-access="approved" role="tab" aria-selected="false"
+                   title="Approved PO — shown because Access Studio granted Approved. Completed / approved purchase orders.">
                     <span class="poc-sidenav-ico" aria-hidden="true"><span class="material-icons-round">verified</span></span>
                     <span class="poc-sidenav-copy">Approved PO</span>
                     <span class="poc-tab-badge is-approved" id="pocTabBadgeApproved">0</span>
                 </a>
                 <?php endif; ?>
                 <?php if ($canAsideRelated): ?>
-                <a href="<?= e($panelHref('related')) ?>" class="poc-sidenav-item" data-poc-panel="related" data-access="view" role="tab" aria-selected="false" title="Related PO — NotApproved from Z_QuotationZCostCom">
+                <a href="<?= e($panelHref('related')) ?>" class="poc-sidenav-item" data-poc-panel="related" data-access="view" role="tab" aria-selected="false"
+                   title="Draft PO — shown because Access Studio granted Draft PO. NotApproved / draft quotations from Z_QuotationZCostCom.">
                     <span class="poc-sidenav-ico" aria-hidden="true"><span class="material-icons-round">link</span></span>
-                    <span class="poc-sidenav-copy">Related PO</span>
+                    <span class="poc-sidenav-copy">Draft PO</span>
+                </a>
+                <?php endif; ?>
+                <?php if (!empty($canAsideSearchPo)): ?>
+                <a href="<?= e($panelHref('search')) ?>" class="poc-sidenav-item" data-poc-panel="search" data-access="search_po" role="tab" aria-selected="false"
+                   title="Search PO — shown because Access Studio granted Search PO. Open a purchase order in Costing Workbench by PO number.">
+                    <span class="poc-sidenav-ico" aria-hidden="true"><span class="material-icons-round">travel_explore</span></span>
+                    <span class="poc-sidenav-copy">Search PO</span>
                 </a>
                 <?php endif; ?>
             </nav>
         </aside>
 
         <main class="poc-landing" id="poCostingLanding">
-            <!-- 1. Dashboard: Find PO -->
+            <!-- 1. Released Po — same UI as PO Validation bulk list -->
             <div class="poc-panel is-active" id="pocPanelDashboard" data-panel="dashboard">
-                <div class="poc-shell">
-                    <header class="poc-intro">
-                        <p class="poc-intro-kicker">Costing Workbench</p>
-                        <h1>Find PO Costing</h1>
-                        <p class="poc-intro-lead">Open a purchase order directly, or browse the list by approval status, material category, and brand.</p>
-                    </header>
-
-                    <section class="poc-card" aria-label="Find PO costing">
-                        <form id="poCostingLaunchForm" class="poc-form" autocomplete="off" novalidate>
-                            <input type="hidden" name="view" value="costing">
-                            <input type="hidden" name="range" value="all">
-
-                            <div class="poc-field is-hero">
-                                <label class="poc-field-label" for="poCostingPoSearch">Purchase Order Number</label>
-                                <div class="poc-control">
-                                    <span class="material-icons-round" aria-hidden="true">receipt_long</span>
-                                    <input type="text" id="poCostingPoSearch" name="po" value=""
-                                           placeholder="Enter 10-digit PO number (e.g. 1000027973)" inputmode="numeric" maxlength="10" autocomplete="off"
-                                           aria-label="Purchase order number">
-                                </div>
-                                <p class="poc-hint">Directly opens the PO vs zCOST validation dual workbench.</p>
-                            </div>
-
-                            <div class="poc-or"><span>OR FILTER PO LIST</span></div>
-
-                            <?php $brandOptions = is_array($brands ?? null) ? $brands : []; ?>
-                            <!-- Always NotApproved via Z_QuotationZCostCom?$filter=ApprovedStatus eq 'NotApproved' -->
-                            <input type="hidden" id="poCostingApprovedStatus" name="approved_status" value="NotApproved">
-                            <div class="poc-grid">
-                                <div class="poc-field">
-                                    <label class="poc-field-label" for="poCostingMatCat">Material Category</label>
-                                    <div class="poc-control is-select">
-                                        <span class="material-icons-round" aria-hidden="true">category</span>
-                                        <select id="poCostingMatCat" name="mat_cat" aria-label="Material type">
-                                            <option value="all" selected>All Materials</option>
-                                            <option value="fabric">Fabric</option>
-                                            <option value="trims">Trims</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                <div class="poc-field">
-                                    <label class="poc-field-label" for="poCostingBrand">Brand Name</label>
-                                    <div class="poc-control is-select">
-                                        <span class="material-icons-round" aria-hidden="true">sell</span>
-                                        <select id="poCostingBrand" name="brand" aria-label="Brand name">
-                                            <option value="" selected>All Brands</option>
-                                            <?php foreach ($brandOptions as $b): ?>
-                                                <?php
-                                                $bCode = (string) ($b['code'] ?? '');
-                                                $bName = (string) ($b['name'] ?? $bCode);
-                                                if ($bCode === '') {
-                                                    continue;
-                                                }
-                                                ?>
-                                                <option value="<?= e($bCode) ?>"><?= e($bName) ?> (<?= e($bCode) ?>)</option>
-                                            <?php endforeach; ?>
-                                        </select>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <p class="poc-form-error" role="alert" id="poCostingFormError" hidden></p>
-
-                            <button class="poc-submit" type="submit" id="poCostingLaunchBtn">
-                                <span class="material-icons-round">search</span>
-                                Launch Costing Report
-                            </button>
-                        </form>
-
-                        <?php if (!empty($canAsideRelated)): ?>
-                        <div class="poc-related-launch" aria-label="Related PO">
-                            <div class="poc-or"><span>OR OPEN RELATED PO</span></div>
-                            <a href="<?= e($panelHref('related')) ?>"
-                               class="poc-submit is-related"
-                               id="pocOpenRelatedFromDashboard"
-                               data-poc-panel="related"
-                               title="Open Related PO list (Access: Related)">
-                                <span class="material-icons-round" aria-hidden="true">link</span>
-                                Open Related PO
-                            </a>
-                            <p class="poc-hint">Requires Related access — shows released / related purchase orders.</p>
-                        </div>
-                        <?php endif; ?>
-                    </section>
+                <div class="poc-panel-frame is-native is-rpt-style is-released-po-frame" id="pocReleasedFrame">
+                    <div class="rpt-alert" id="poAlert" hidden></div>
+                    <?php if (!empty($canAsideDashboard)): ?>
+                        <?php require base_path('app/views/reports/partials/po_costing_bulk.php'); ?>
+                    <?php endif; ?>
                 </div>
             </div>
 
@@ -496,6 +567,11 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
             <?php if ($canAsideRelated): ?>
                 <?php require base_path('app/views/reports/partials/po_related.php'); ?>
             <?php endif; ?>
+
+            <!-- 6. Search PO — header search opens Costing Workbench -->
+            <?php if (!empty($canAsideSearchPo)): ?>
+                <?php require base_path('app/views/reports/partials/po_search.php'); ?>
+            <?php endif; ?>
         </main>
     </div>
 
@@ -508,11 +584,12 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
     var page = document.getElementById('poCostingPage');
     if (!page) return;
 
-    var form = document.getElementById('poCostingLaunchForm');
-    var poInput = document.getElementById('poCostingPoSearch');
-    var matSel = document.getElementById('poCostingMatCat');
-    var brandSel = document.getElementById('poCostingBrand');
-    var formError = document.getElementById('poCostingFormError');
+    var form = null;
+    var findHeaderFilters = document.getElementById('pcbFilterForm');
+    var poInput = null;
+    var matSel = null;
+    var brandSel = null;
+    var formError = null;
     var poBaseUrl = page.getAttribute('data-po-base') || '';
     var passLogUrl = page.getAttribute('data-pass-log') || '';
     var passLogPageUrl = page.getAttribute('data-pass-log-page') || '';
@@ -534,6 +611,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
         workflow: page.getAttribute('data-aside-workflow') !== '0',
         approved: page.getAttribute('data-aside-approved') !== '0',
         related: page.getAttribute('data-aside-related') !== '0',
+        search: page.getAttribute('data-aside-search') !== '0',
         mailbox: page.getAttribute('data-aside-received') !== '0' || page.getAttribute('data-aside-sent') !== '0'
     };
     function firstAllowedPanel() {
@@ -543,6 +621,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
         if (asideAccess.workflow) return 'workflow';
         if (asideAccess.approved) return 'approved';
         if (asideAccess.related) return 'related';
+        if (asideAccess.search) return 'search';
         return 'dashboard';
     }
     function canOpenPanel(name) {
@@ -957,7 +1036,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
     }
 
     function clearPo() {
-        if (poInput) poInput.value = '';
+        // no-op (PO number input removed from Find PO page)
     }
 
     function clearFilters() {
@@ -1617,7 +1696,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
     function showPanel(name) {
         var key = String(name || 'dashboard');
         if (key === 'flow') key = 'workflow';
-        if (['dashboard', 'received', 'sent', 'mailbox', 'workflow', 'approved', 'related'].indexOf(key) < 0) key = 'dashboard';
+        if (['dashboard', 'received', 'sent', 'mailbox', 'workflow', 'approved', 'related', 'search'].indexOf(key) < 0) key = 'dashboard';
         if (!canOpenPanel(key)) {
             key = firstAllowedPanel();
         }
@@ -1639,21 +1718,55 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
             b.setAttribute('aria-selected', active ? 'true' : 'false');
         });
 
+        if (window.pocSearchPo && typeof window.pocSearchPo.close === 'function' && key !== 'search') {
+            window.pocSearchPo.close();
+        }
+
         if (key === 'related') {
             page.classList.toggle('is-lookup', false);
             page.classList.toggle('is-workflow', true);
             page.classList.add('is-related-po', 'is-related-results');
-            page.classList.remove('is-related-lookup');
+            page.classList.remove('is-related-lookup', 'is-costing-bulk', 'is-released-po', 'is-search-po');
+            if (findHeaderFilters) findHeaderFilters.hidden = true;
+            var relatedTitle = document.getElementById('pocPageTitle');
+            if (relatedTitle) relatedTitle.innerHTML = '<strong>Draft PO</strong>';
+            try { if (window.rptLoader) window.rptLoader.hide(true); } catch (_) {}
             if (window.pocRelatedPo && typeof window.pocRelatedPo.open === 'function') {
                 window.pocRelatedPo.open();
             }
+        } else if (key === 'search') {
+            if (window.pocRelatedPo && typeof window.pocRelatedPo.close === 'function') {
+                window.pocRelatedPo.close();
+            }
+            page.classList.remove('is-related-po', 'is-related-results', 'is-related-lookup', 'is-costing-bulk', 'is-released-po', 'is-workflow');
+            page.classList.add('is-lookup', 'is-search-po');
+            if (findHeaderFilters) findHeaderFilters.hidden = true;
+            try { if (window.rptLoader) window.rptLoader.hide(true); } catch (_) {}
+            if (window.pocSearchPo && typeof window.pocSearchPo.open === 'function') {
+                window.pocSearchPo.open();
+            }
+        } else if (key === 'dashboard') {
+            if (window.pocRelatedPo && typeof window.pocRelatedPo.close === 'function') {
+                window.pocRelatedPo.close();
+            }
+            page.classList.remove('is-related-po', 'is-related-results', 'is-related-lookup', 'is-lookup', 'is-search-po');
+            page.classList.add('is-workflow', 'is-costing-bulk', 'is-released-po');
+            if (findHeaderFilters) findHeaderFilters.hidden = false;
+            var titleEl = document.getElementById('pocPageTitle');
+            if (titleEl) titleEl.innerHTML = '<strong>Released Po</strong>';
+            // Load Released Po list now (deferred when user landed on Search PO / other panels)
+            try {
+                if (window.pcbBulkList && typeof window.pcbBulkList.ensureLoaded === 'function') {
+                    window.pcbBulkList.ensureLoaded();
+                }
+            } catch (_) {}
         } else {
             if (window.pocRelatedPo && typeof window.pocRelatedPo.close === 'function') {
                 window.pocRelatedPo.close();
             }
-            page.classList.remove('is-related-po', 'is-related-results', 'is-related-lookup');
-            page.classList.toggle('is-lookup', key === 'dashboard');
-            page.classList.toggle('is-workflow', key !== 'dashboard');
+            page.classList.remove('is-related-po', 'is-related-results', 'is-related-lookup', 'is-lookup', 'is-costing-bulk', 'is-released-po', 'is-search-po');
+            page.classList.toggle('is-workflow', true);
+            if (findHeaderFilters) findHeaderFilters.hidden = true;
         }
 
         if (panelKey === 'mailbox') {
@@ -1810,58 +1923,6 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
         });
     }
 
-    if (poInput) {
-        poInput.addEventListener('input', function () {
-            showError('');
-            if (String(poInput.value || '').trim() !== '') clearFilters();
-        });
-    }
-    if (matSel) {
-        matSel.addEventListener('change', function () {
-            showError('');
-            if (matSel.value && matSel.value !== 'all') clearPo();
-        });
-    }
-    if (brandSel) {
-        brandSel.addEventListener('change', function () {
-            showError('');
-            if (brandSel.value) clearPo();
-        });
-    }
-
-    if (form) {
-        form.addEventListener('submit', function (e) {
-            e.preventDefault();
-            showError('');
-            var po = String(poInput && poInput.value || '').replace(/\D/g, '');
-            if (poInput) poInput.value = po;
-            // Fixed: Z_QuotationZCostCom ApprovedStatus eq 'NotApproved' (no UI toggle)
-            var status = 'NotApproved';
-            var mat = String(matSel && matSel.value || 'all').trim() || 'all';
-            var brand = String(brandSel && brandSel.value || '').trim();
-
-            var url = new URL(poBaseUrl || form.action, window.location.origin);
-            url.searchParams.set('view', 'costing');
-
-            if (po) {
-                if (!/^\d{1,10}$/.test(po)) {
-                    showError('Purchase order must be a number of up to 10 digits.');
-                    if (poInput) poInput.focus();
-                    return;
-                }
-                url.searchParams.set('po', po);
-                window.location.href = url.toString();
-                return;
-            }
-
-            url.searchParams.set('range', 'all');
-            url.searchParams.set('approved_status', status);
-            if (mat !== 'all') url.searchParams.set('mat_cat', mat);
-            if (brand) url.searchParams.set('brand', brand);
-            window.location.href = url.toString();
-        });
-    }
-
     // Preload counts for badges silently
     function preloadBadges() {
         if (sentBoxUrl) {
@@ -1907,14 +1968,103 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
     // Ensure full-page loader is never left stuck after soft panel boot
     try { if (window.rptLoader) window.rptLoader.hide(true); } catch (_) {}
 
-    if (startPanel === 'dashboard' && poInput) {
-        setTimeout(function () { poInput.focus(); }, 40);
-    }
 })();
 </script>
-<?php if (!empty($canAsideRelated)): ?>
 <?php
     require_once base_path('app/services/TableColumnRegistry.php');
+    $pcbPortalUser = function_exists('portal_user') ? portal_user() : null;
+    $pcbCurrentUser = trim((string) (
+        ($pcbPortalUser['username'] ?? null)
+        ?? $_SESSION['username']
+        ?? $_SESSION['user_name']
+        ?? $_SESSION['name']
+        ?? $_SESSION['email']
+        ?? ''
+    ));
+    $pcbCurrentUserEmail = trim((string) (
+        ($pcbPortalUser['email'] ?? null)
+        ?? $_SESSION['email']
+        ?? ''
+    ));
+?>
+<?php if (!empty($canAsideDashboard)): ?>
+<script type="application/json" id="poConfig"><?= json_encode([
+    'mode'               => 'list',
+    'po'                 => '',
+    'range'              => ['preset' => 'all', 'from' => '', 'to' => '', 'label' => 'All'],
+    'rangeError'         => null,
+    'plant'              => '',
+    'supplier'           => '',
+    'suppliers'          => [],
+    'salesOrder'         => '',
+    'poType'             => '',
+    'matCat'             => 'all',
+    'brand'              => '',
+    'brands'             => is_array($brands ?? null) ? $brands : [],
+    'approvedStatus'     => 'NotApproved',
+    'presetDates'        => [],
+    'dataUrl'            => url('purchase-order/data'),
+    'validateUrl'        => url('purchase-order/validate'),
+    'manualMapUrl'       => url('purchase-order/manual-map'),
+    'pdfUrl'             => url('purchase-order/pdf'),
+    'passPoUrl'          => url('purchase-order/pass'),
+    'esignSaveUrl'       => url('purchase-order/esign-save'),
+    'esignSignatureUrl'  => url('purchase-order/esign-signature'),
+    'releaseStatusUrl'   => url('po-costing/related-po/status'),
+    'passLogUrl'         => url('purchase-order/pass-log'),
+    'sendMailUrl'        => url('purchase-order/send-mail'),
+    'workflowUrl'        => url('purchase-order/workflow'),
+    'workflowSaveUrl'    => url('purchase-order/workflow/save'),
+    'workflowNotifyUrl'  => url('purchase-order/workflow/notify'),
+    'workflowDecideUrl'  => url('purchase-order/workflow/decide'),
+    'workflowAckUrl'     => url('purchase-order/workflow/ack'),
+    'zcostUrl'           => url('zcost'),
+    'zcostAppUrl'        => url('zcost'),
+    'usersUrl'           => url('purchase-order/users'),
+    'validationLogUrl'   => url('purchase-order/validation-log'),
+    'pageUrl'            => url('purchase-order'),
+    'view'               => 'costing',
+    'isCostingView'      => true,
+    'isCostingWorkbench' => false,
+    'isCostingBulk'      => true,
+    'columns'            => [],
+    'currentUser'        => $pcbCurrentUser,
+    'currentUserEmail'   => $pcbCurrentUserEmail,
+    'canPassPo'          => !empty($canPassPo),
+    'canAssign'          => !empty($canAssign),
+    'canValidate'        => !empty($canValidate),
+    'canEsign'           => !empty($canEsign),
+    'canWorkbench'       => !empty($canWorkbench),
+    'canSearchPo'        => !empty($canSearchPoPage),
+], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
+<?php
+    $bulkTableKey = 'purchase_order_costing_bulk_table';
+    $bulkTableDef = TableColumnRegistry::get($bulkTableKey);
+    $itemTableKey = 'purchase_order_costing_items_table';
+    $itemTableDef = TableColumnRegistry::get($itemTableKey);
+?>
+<script type="application/json" id="pcbTablePrefs"><?= json_encode([
+    'tableKey'      => $bulkTableKey,
+    'apiUrl'        => url('api/user/table-preferences/' . $bulkTableKey),
+    'userId'        => (string) ($_SESSION['user_id'] ?? ''),
+    'columns'       => $bulkTableDef['columns'] ?? [],
+    'defaultHidden' => $bulkTableDef['defaultHidden'] ?? [],
+], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
+<script type="application/json" id="pcbItemTablePrefs"><?= json_encode([
+    'tableKey'      => $itemTableKey,
+    'apiUrl'        => url('api/user/table-preferences/' . $itemTableKey),
+    'userId'        => (string) ($_SESSION['user_id'] ?? ''),
+    'columns'       => $itemTableDef['columns'] ?? [],
+    'defaultHidden' => $itemTableDef['defaultHidden'] ?? [],
+], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
+<?php endif; ?>
+<script src="<?= e(asset('js/table-columns.js')) ?>?v=<?= @filemtime(base_path('public/js/table-columns.js')) ?: time() ?>"></script>
+<script src="<?= e(asset('js/excel-export.js')) ?>?v=<?= @filemtime(base_path('public/js/excel-export.js')) ?: time() ?>"></script>
+<?php if (!empty($canAsideDashboard)): ?>
+<script src="<?= e(asset('js/po-costing-bulk.js')) ?>?v=<?= @filemtime(base_path('public/js/po-costing-bulk.js')) ?: time() ?>"></script>
+<?php endif; ?>
+<?php if (!empty($canAsideRelated)): ?>
+<?php
     $relatedTableKey = 'purchase_order_related_po_table';
     $relatedTableDef = TableColumnRegistry::get($relatedTableKey) ?? ['columns' => [], 'defaultHidden' => []];
 ?>
@@ -1925,9 +2075,11 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
     'columns'       => $relatedTableDef['columns'] ?? [],
     'defaultHidden' => $relatedTableDef['defaultHidden'] ?? [],
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
-<script src="<?= e(asset('js/table-columns.js')) ?>?v=<?= @filemtime(base_path('public/js/table-columns.js')) ?: time() ?>"></script>
-<script src="<?= e(asset('js/excel-export.js')) ?>?v=<?= @filemtime(base_path('public/js/excel-export.js')) ?: time() ?>"></script>
 <script src="<?= e(asset('js/related-po.js')) ?>?v=<?= @filemtime(base_path('public/js/related-po.js')) ?: time() ?>"></script>
+<?php endif; ?>
+<?php if (!empty($canAsideSearchPo)): ?>
+<script src="<?= e(asset('js/search-po.js')) ?>?v=<?= @filemtime(base_path('public/js/search-po.js')) ?: time() ?>"></script>
+<?php endif; ?>
 <script>
 (function () {
     try {
@@ -1937,7 +2089,11 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
         } else if (window.pocRelatedPo && typeof window.pocRelatedPo.close === 'function') {
             window.pocRelatedPo.close();
         }
+        if (panel === 'search' && window.pocSearchPo && typeof window.pocSearchPo.open === 'function') {
+            window.pocSearchPo.open();
+        } else if (window.pocSearchPo && typeof window.pocSearchPo.close === 'function' && panel !== 'search') {
+            window.pocSearchPo.close();
+        }
     } catch (_) {}
 })();
 </script>
-<?php endif; ?>

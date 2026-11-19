@@ -29,7 +29,7 @@ $extraHead = '
 
     <header class="rpt-bar uac-topbar">
         <div class="rpt-bar-left">
-            <a href="<?= e($catalogHome) ?>" class="rpt-brand" aria-label="EVOLV" title="SAP Reports Catalog">
+            <a href="<?= e($home) ?>" class="rpt-brand" aria-label="EVOLV" title="EVOLV Portal Dashboard">
                 <img src="<?= e($logoUrl) ?>" alt="evolv">
             </a>
             <a href="<?= e($catalogHome) ?>" class="rpt-home" aria-label="All Reports" title="Reports Catalog">
@@ -54,14 +54,17 @@ $extraHead = '
                 <label for="uacSearchInput">Find user</label>
                 <div class="uac-input-shell">
                     <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
-                    <input type="text" id="uacSearchInput" placeholder="Name, email, or role…" autocomplete="off" aria-label="Search user">
+                    <input type="text" id="uacSearchInput" placeholder="Name, email, or role…" autocomplete="off"
+                           aria-label="Search user"
+                           title="Find user — filter the target list by name, email, or role.">
                 </div>
             </div>
 
             <div class="uac-field">
                 <label for="uacUserSelect">Target user</label>
                 <div class="uac-select-shell">
-                    <select id="uacUserSelect" aria-label="Target User">
+                    <select id="uacUserSelect" aria-label="Target User"
+                            title="Target user — pick whose module rights you are editing.">
                         <?php if (empty($users)): ?>
                             <option value="">No active users found</option>
                         <?php else: ?>
@@ -102,13 +105,16 @@ $extraHead = '
             </div>
 
             <div class="uac-rail-actions">
-                <button type="button" class="uac-btn is-ghost" id="btnSelectAll" title="Select all available rights">
+                <button type="button" class="uac-btn is-ghost" id="btnSelectAll"
+                        title="Select all — turn on every visible right for the selected user (admin-only modules stay hidden for non-admins).">
                     <i class="fas fa-check-double"></i> Select all
                 </button>
-                <button type="button" class="uac-btn is-ghost" id="btnClearAll" title="Clear all permissions">
+                <button type="button" class="uac-btn is-ghost" id="btnClearAll"
+                        title="Clear — remove every checked right for the selected user before saving.">
                     <i class="fas fa-eraser"></i> Clear
                 </button>
-                <button type="button" class="uac-btn is-save" id="btnSavePermissions" title="Save permissions">
+                <button type="button" class="uac-btn is-save" id="btnSavePermissions"
+                        title="Save permissions — write the checked rights for the selected user to the access database.">
                     <i class="fas fa-floppy-disk"></i>
                     <span>Save permissions</span>
                 </button>
@@ -123,7 +129,7 @@ $extraHead = '
                 </div>
                 <div class="uac-legend">
                     <span><i class="uac-dot is-view"></i> Reports · View</span>
-                    <span><i class="uac-dot is-pass"></i> PO Costing · View / Pass PO / Assign / Validate / eSign + Receive / Sent / Workflow / Approved</span>
+                    <span><i class="uac-dot is-pass"></i> PO Costing · View / Released PO / Workbench / Pass PO / Assign / Validate / eSign + Receive / Sent / Workflow / Approved / Draft PO / Search PO</span>
                     <span><i class="uac-dot is-zcost"></i> ZCOST · Add / Update / Copy / Approve</span>
                 </div>
             </header>
@@ -140,10 +146,20 @@ $extraHead = '
                              data-kind="<?= e($kind) ?>"
                              data-admin-only="<?= $adminOnly ? '1' : '0' ?>"
                              style="--uac-stagger: <?= (int) $idx + 1 ?>">
-                        <div class="uac-mod-icon" style="--icon-bg: <?= e($p['icon_bg'] ?? '#f1f5f9') ?>; --icon-fg: <?= e($p['icon_color'] ?? '#475569') ?>;" title="P<?= (int) $p['page_no'] ?>">
+                        <?php
+                            $modTip = trim((string) ($p['description'] ?? ''));
+                            if ($modTip === '') {
+                                $modTip = (string) ($p['name'] ?? 'Module');
+                            }
+                            if (!empty($adminOnly)) {
+                                $modTip .= ' (Admin-only module — visible only for admin users in Access Studio.)';
+                            }
+                        ?>
+                        <div class="uac-mod-icon" style="--icon-bg: <?= e($p['icon_bg'] ?? '#f1f5f9') ?>; --icon-fg: <?= e($p['icon_color'] ?? '#475569') ?>;"
+                             title="P<?= (int) $p['page_no'] ?> — <?= e($modTip) ?>">
                             <i class="fas <?= e($p['icon'] ?? 'fa-file') ?>"></i>
                         </div>
-                        <div class="uac-mod-meta">
+                        <div class="uac-mod-meta" title="<?= e($modTip) ?>">
                             <span class="uac-mod-no">P<?= (int) $p['page_no'] ?></span>
                             <h4 class="uac-mod-name"><?= e($p['name']) ?></h4>
                         </div>
@@ -152,13 +168,19 @@ $extraHead = '
                                 $actKey = (string) ($act['key'] ?? '');
                                 $actLabel = (string) ($act['label'] ?? $actKey);
                                 $actCol = (string) ($act['column'] ?? '');
+                                $actTip = trim((string) ($act['tooltip'] ?? ''));
+                                if ($actTip === '') {
+                                    $actTip = $actLabel . ' — enable this right for ' . (string) ($p['name'] ?? 'this module') . '.';
+                                }
                             ?>
-                                <label class="uac-right" data-action="<?= e($actKey) ?>" title="<?= e($actLabel) ?>">
+                                <label class="uac-right" data-action="<?= e($actKey) ?>" title="<?= e($actTip) ?>">
                                     <input type="checkbox"
                                            class="uac-checkbox col-<?= e($actKey) ?>"
                                            data-page="<?= (int) $p['page_no'] ?>"
                                            data-action="<?= e($actKey) ?>"
-                                           data-column="<?= e($actCol) ?>">
+                                           data-column="<?= e($actCol) ?>"
+                                           title="<?= e($actTip) ?>"
+                                           aria-label="<?= e($actTip) ?>">
                                     <span class="uac-right-ui">
                                         <span class="uac-right-check" aria-hidden="true"></span>
                                         <span class="uac-right-label"><?= e($actLabel) ?></span>
@@ -182,13 +204,22 @@ $extraHead = '
 
 <script type="application/json" id="uacConfig"><?= json_encode([
     'pages'   => array_values(array_map(static function ($p) {
+        $actions = is_array($p['actions'] ?? null) ? $p['actions'] : [];
         return [
             'page_no' => (int) ($p['page_no'] ?? 0),
             'name' => (string) ($p['name'] ?? ''),
             'route' => (string) ($p['route'] ?? ''),
             'kind' => (string) ($p['kind'] ?? 'report'),
+            'description' => (string) ($p['description'] ?? ''),
             'admin_only' => !empty($p['admin_only']),
-            'actions' => is_array($p['actions'] ?? null) ? $p['actions'] : [],
+            'actions' => array_values(array_map(static function ($a) {
+                return [
+                    'key' => (string) ($a['key'] ?? ''),
+                    'label' => (string) ($a['label'] ?? ''),
+                    'column' => (string) ($a['column'] ?? ''),
+                    'tooltip' => (string) ($a['tooltip'] ?? ''),
+                ];
+            }, $actions)),
         ];
     }, is_array($pages ?? null) ? $pages : [])),
     'users'   => array_values(array_map(static function ($u) {

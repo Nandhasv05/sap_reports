@@ -19,7 +19,7 @@ $qs = static function (array $extra = []) use ($report, $search, $from, $to, $pa
 ?>
 <a class="back" href="<?= e(sap_reports_evol_url('portal_dashboard.php')) ?>">
     <i class="fas fa-arrow-left"></i>
-    All SAP Reports
+    All SAP Insight
 </a>
 <h1><?= e($item['title']) ?></h1>
 <p class="lede"><?= e($item['blurb']) ?></p>

@@ -5,6 +5,7 @@
  * DESCRIPTION : Full-page API Activity Audit Log — one table for all API calls
  */
 $records = is_array($records ?? null) ? $records : [];
+$home = sap_reports_evol_url('portal_dashboard.php');
 $catalogHome = url('/');
 $auditApiUrl = url('api/audit-log');
 $logoUrl = sap_reports_logo_url();
@@ -112,7 +113,7 @@ $encodeAuditRow = static function (array $row) use ($normalizeCreated, $utf8, $c
 <div class="audit-page" id="auditPageRoot" data-tz="Asia/Kolkata">
     <header class="audit-topbar">
         <div class="rpt-brand">
-            <a class="rpt-brand-link" href="<?= e($catalogHome) ?>" title="Back to reports catalog">
+            <a class="rpt-brand-link" href="<?= e($home) ?>" title="EVOLV Portal Dashboard">
                 <img src="<?= e($logoUrl) ?>" alt="EVOLV" class="rpt-logo">
             </a>
             <div class="rpt-brand-text">

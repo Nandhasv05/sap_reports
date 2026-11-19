@@ -12071,8 +12071,19 @@ body.pcw-pdf-open { overflow: hidden; }
     min-height: 36px;
     padding: 0 16px;
 }
-.is-costing-workbench .rpt-table-wrap.is-scroll-body {
-    max-height: calc(100vh - 280px);
+/* Full table view — no Scroll Body Only / Expand Table; page scrolls, table shows all rows */
+.is-costing-workbench .rpt-table-wrap,
+.is-costing-workbench .rpt-table-wrap.is-full-view,
+.is-costing-workbench .rpt-table-wrap.is-scroll-body,
+.is-costing-workbench .rpt-table-wrap.is-expanded,
+.is-costing-workbench .rpt-table-wrap.is-h-expanded {
+    position: relative;
+    max-height: none !important;
+    height: auto !important;
+    min-height: 0;
+    overflow-x: auto !important;
+    overflow-y: visible !important;
+    -webkit-overflow-scrolling: touch;
 }
 .pcw-detail { border: 1px solid #e2e8f0; border-radius: 16px; background: #fff; padding: 16px 18px 18px; box-shadow: 0 10px 28px rgba(15,23,42,.04); }
 .pcw-detail-head h2 { margin: 0; font-size: 1.05rem; }
@@ -20467,7 +20478,9 @@ body:has(.rpt-app.is-po-costing) {
     flex: 0 0 auto;
     margin-left: 0;
 }
-.rpt-app.is-po-costing .poc-related-header-filters {
+.rpt-app.is-po-costing .poc-released-header-filters,
+.rpt-app.is-po-costing .poc-related-header-filters,
+.rpt-app.is-po-costing .poc-search-header-filters {
     display: none;
     align-items: center;
     gap: 8px;
@@ -20477,8 +20490,396 @@ body:has(.rpt-app.is-po-costing) {
     flex: 0 1 auto;
     min-width: 0;
 }
+.rpt-app.is-po-costing.is-released-po .poc-released-header-filters:not([hidden]) {
+    display: inline-flex !important;
+}
+.rpt-app.is-po-costing.is-released-po .poc-released-header-filters .pcb-header-search,
+.rpt-app.is-po-costing.is-released-po .poc-released-header-filters .poc-released-po-search {
+    flex: 0 1 160px;
+    max-width: 180px;
+    min-width: 140px;
+    margin: 0;
+}
+.rpt-app.is-po-costing.is-released-po .poc-released-header-filters .poc-find-header-search {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 38px;
+    padding: 0 12px;
+    border: 1px solid #0f766e;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #0d9488 0%, #059669 100%);
+    color: #fff;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.rpt-app.is-po-costing.is-released-po .poc-released-header-filters .poc-find-header-search .material-icons-round {
+    font-size: 17px;
+    color: #fff;
+}
 .rpt-app.is-po-costing.is-related-po .poc-related-header-filters:not([hidden]) {
     display: inline-flex !important;
+}
+.rpt-app.is-po-costing.is-search-po .poc-search-header-filters:not([hidden]) {
+    display: inline-flex !important;
+}
+.rpt-app.is-po-costing .poc-search-launch-shell {
+    display: grid;
+    place-items: center;
+    min-height: min(60vh, 520px);
+    padding: 24px;
+}
+.rpt-app.is-po-costing .poc-search-launch-card {
+    max-width: 420px;
+    text-align: center;
+    padding: 28px 24px;
+    border-radius: 16px;
+    background: #fff;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+.rpt-app.is-po-costing .poc-search-launch-ico {
+    font-size: 36px;
+    color: #0f766e;
+    margin-bottom: 8px;
+}
+.rpt-app.is-po-costing .poc-search-launch-card h2 {
+    margin: 0 0 8px;
+    font-size: 20px;
+    font-weight: 800;
+    color: #0f172a;
+}
+.rpt-app.is-po-costing .poc-search-launch-card p {
+    margin: 0;
+    font-size: 14px;
+    color: #64748b;
+    line-height: 1.45;
+}
+.rpt-app.is-po-costing .poc-released-header-filters[hidden],
+.rpt-app.is-po-costing .poc-related-header-filters[hidden],
+.rpt-app.is-po-costing .poc-search-header-filters[hidden] {
+    display: none !important;
+}
+.rpt-app.is-po-costing .poc-search-header-filters .poc-search-po-field {
+    min-width: 220px;
+    max-width: 280px;
+    margin: 0;
+}
+.rpt-app.is-po-costing .poc-search-header-filters .poc-find-header-search {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 38px;
+    padding: 0 14px;
+    border: 1px solid #0f766e;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #0d9488 0%, #059669 100%);
+    color: #fff;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.rpt-app.is-po-costing .poc-search-header-filters .poc-find-header-search .material-icons-round {
+    font-size: 17px;
+    color: #fff;
+}
+.rpt-app.is-po-costing.is-search-po.is-lookup .poc-panel[data-panel="search"].is-active {
+    width: 100%;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+    height: 100%;
+    min-height: 0;
+    overflow: auto;
+    padding: 16px 18px 28px;
+    background: #f4f7fb;
+}
+.rpt-app.is-po-costing.is-search-po .poc-search-launch-shell,
+.rpt-app.is-po-costing.is-search-po .poc-search-report {
+    width: 100%;
+    margin: 0;
+}
+.rpt-app.is-po-costing .poc-search-report-title {
+    margin: 0 0 14px;
+    font-size: 22px;
+    font-weight: 800;
+    color: #0f172a;
+    letter-spacing: -0.02em;
+}
+.rpt-app.is-po-costing .poc-search-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 14px;
+}
+.rpt-app.is-po-costing .poc-search-metric {
+    display: grid;
+    grid-template-columns: 42px 1fr;
+    grid-template-rows: auto auto;
+    column-gap: 10px;
+    align-items: center;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: #fff;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+}
+.rpt-app.is-po-costing .poc-search-metric-ico {
+    grid-row: 1 / span 2;
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+}
+.rpt-app.is-po-costing .poc-search-metric.is-pending .poc-search-metric-ico { background: #eff6ff; color: #2563eb; }
+.rpt-app.is-po-costing .poc-search-metric.is-created .poc-search-metric-ico { background: #fffbeb; color: #d97706; }
+.rpt-app.is-po-costing .poc-search-metric.is-signed .poc-search-metric-ico { background: #ecfdf5; color: #059669; }
+.rpt-app.is-po-costing .poc-search-metric-label {
+    font-size: 13px;
+    color: #64748b;
+    font-weight: 600;
+}
+.rpt-app.is-po-costing .poc-search-metric-value {
+    font-size: 28px;
+    font-weight: 800;
+    color: #0f172a;
+    line-height: 1.1;
+}
+.rpt-app.is-po-costing .poc-search-card {
+    background: #fff;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 16px;
+    padding: 14px 16px 18px;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+.rpt-app.is-po-costing .poc-search-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+.rpt-app.is-po-costing .poc-search-card-title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 800;
+    color: #0f172a;
+}
+.rpt-app.is-po-costing .poc-search-esign-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #0f766e;
+    text-decoration: none;
+}
+.rpt-app.is-po-costing .poc-search-filters {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+    gap: 10px;
+    align-items: end;
+    margin-bottom: 8px;
+}
+.rpt-app.is-po-costing .poc-search-field {
+    display: grid;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #64748b;
+}
+.rpt-app.is-po-costing .poc-search-field input,
+.rpt-app.is-po-costing .poc-search-field select {
+    height: 38px;
+    border: 1px solid #dbe3ef;
+    border-radius: 10px;
+    padding: 0 10px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    color: #0f172a;
+    background: #fff;
+}
+.rpt-app.is-po-costing .poc-search-filter-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.rpt-app.is-po-costing .poc-search-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 38px;
+    padding: 0 12px;
+    border-radius: 10px;
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    color: #0f172a;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.rpt-app.is-po-costing .poc-search-btn.is-primary {
+    border-color: #0f766e;
+    background: linear-gradient(135deg, #0d9488 0%, #059669 100%);
+    color: #fff;
+}
+.rpt-app.is-po-costing .poc-search-btn .material-icons-round { font-size: 16px; }
+.rpt-app.is-po-costing .poc-search-clear {
+    border: 0;
+    background: transparent;
+    color: #64748b;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    text-decoration: underline;
+}
+.rpt-app.is-po-costing .poc-search-filter-meta {
+    margin: 0 0 10px;
+    font-size: 12px;
+    color: #64748b;
+    font-weight: 600;
+}
+.rpt-app.is-po-costing .poc-search-table-wrap {
+    overflow: auto;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+}
+.rpt-app.is-po-costing .poc-search-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 980px;
+    background: #fff;
+}
+.rpt-app.is-po-costing .poc-search-table th {
+    text-align: left;
+    padding: 10px 12px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #475569;
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+    white-space: nowrap;
+}
+.rpt-app.is-po-costing .poc-search-table th .th-muted {
+    font-weight: 600;
+    text-transform: none;
+    color: #94a3b8;
+    letter-spacing: 0;
+}
+.rpt-app.is-po-costing .poc-search-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #f1f5f9;
+    font-size: 13px;
+    color: #0f172a;
+    vertical-align: top;
+}
+.rpt-app.is-po-costing .poc-search-table tr.is-empty td {
+    text-align: center;
+    color: #64748b;
+    padding: 40px 12px;
+}
+.rpt-app.is-po-costing .poc-search-po-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.rpt-app.is-po-costing .poc-search-po-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+.rpt-app.is-po-costing .poc-search-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    color: #0f766e;
+    text-decoration: none;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+}
+.rpt-app.is-po-costing .poc-search-action:hover { background: #f0fdfa; }
+.rpt-app.is-po-costing .poc-search-action .material-icons-round { font-size: 18px; }
+.rpt-app.is-po-costing .poc-search-targeted {
+    background: #fff1f2;
+    font-weight: 700;
+}
+.rpt-app.is-po-costing .poc-search-targeted.po-sla-green { background: #ecfdf5; color: #047857; }
+.rpt-app.is-po-costing .poc-search-targeted.po-sla-orange { background: #fffbeb; color: #b45309; }
+.rpt-app.is-po-costing .poc-search-targeted.po-sla-red { background: #fff1f2; color: #be123c; }
+.rpt-app.is-po-costing .poc-search-status {
+    display: block;
+    font-weight: 800;
+}
+.rpt-app.is-po-costing .poc-search-status.is-pending { color: #ea580c; }
+.rpt-app.is-po-costing .poc-search-status.is-completed { color: #059669; }
+.rpt-app.is-po-costing .poc-search-status-sub {
+    display: block;
+    margin-top: 2px;
+    font-size: 12px;
+    color: #475569;
+    font-weight: 600;
+}
+.rpt-app.is-po-costing .poc-search-dash { color: #94a3b8; }
+@media (max-width: 1100px) {
+    .rpt-app.is-po-costing .poc-search-filters {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .rpt-app.is-po-costing .poc-search-metrics {
+        grid-template-columns: 1fr;
+    }
+}
+.rpt-app.is-po-costing.is-released-po .poc-panel[data-panel="dashboard"].is-active {
+    width: 100%;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    height: 100%;
+    margin: 0;
+}
+.rpt-app.is-po-costing.is-released-po .poc-released-po-frame {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+    background: #f8fafc;
+}
+.rpt-app.is-po-costing.is-released-po .poc-released-po-frame > .pcb {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+.rpt-app.is-po-costing.is-released-po .rpt-name.pcb-bar-title strong {
+    font-size: 15px;
+    font-weight: 800;
+    color: #0f172a;
 }
 .rpt-app.is-po-costing .poc-related-header-filters .rpt-field {
     margin: 0;
@@ -20617,9 +21018,116 @@ body:has(.rpt-app.is-po-costing) {
     border: 1px solid #e9d5ff;
     border-radius: 0;
     background: #fff;
+    position: relative;
 }
-.rpt-app.is-po-costing .poc-related-wrap.is-expanded {
-    overflow: visible;
+.rpt-app.is-po-costing .poc-related-wrap.is-scroll-body {
+    max-height: calc(100vh - 240px) !important;
+    overflow: auto !important;
+}
+.rpt-app.is-po-costing .poc-related-wrap.is-expanded,
+.rpt-app.is-po-costing .poc-related-wrap:not(.is-scroll-body) {
+    max-height: none !important;
+    overflow: visible !important;
+}
+.rpt-app.is-po-costing .poc-related-loading-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 40; /* above sticky thead (z-index 9–10) */
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: min(24vh, 160px);
+    background:
+        radial-gradient(520px 260px at 20% 18%, rgba(99, 102, 241, 0.10), transparent 60%),
+        radial-gradient(480px 240px at 80% 70%, rgba(244, 63, 94, 0.08), transparent 55%),
+        rgba(255, 255, 255, 0.78);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    pointer-events: all;
+}
+.rpt-app.is-po-costing .poc-related-loading-overlay[hidden] {
+    display: none !important;
+}
+.rpt-app.is-po-costing .poc-related-wrap.is-loading #pocRelatedTable thead th,
+.rpt-app.is-po-costing .poc-related-wrap.is-loading #pocRelatedTable tfoot th {
+    z-index: 1 !important;
+}
+.rpt-app.is-po-costing .poc-related-loading-card {
+    position: relative;
+    z-index: 41;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    min-width: 260px;
+    max-width: min(92vw, 320px);
+    padding: 26px 30px 22px;
+    margin: 0;
+    color: #0f172a;
+}
+.rpt-app.is-po-costing .poc-related-rpt-loader {
+    width: 78px;
+    height: 78px;
+    margin: 0 auto 14px;
+}
+.rpt-app.is-po-costing .poc-related-rpt-loader .rpt-loader-logo {
+    position: absolute;
+    inset: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: linear-gradient(145deg, #ffffff, #f8fafc);
+    box-shadow: 0 4px 14px rgba(99, 102, 241, 0.18);
+    overflow: hidden;
+}
+.rpt-app.is-po-costing .poc-related-rpt-loader .rpt-loader-logo img {
+    width: 70%;
+    height: auto;
+    object-fit: contain;
+}
+.rpt-app.is-po-costing .poc-related-loading-card .rpt-loader-title {
+    margin: 0;
+    font-size: 16px;
+}
+.rpt-app.is-po-costing .poc-related-loading-sub {
+    display: block;
+    margin: 0 0 6px;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 600;
+}
+.rpt-app.is-po-costing .poc-related-loading-card .rpt-loader-dots {
+    margin-top: 4px;
+}
+.rpt-app.is-po-costing .poc-related-inline-load {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    color: #4f46e5;
+    font-size: 14px;
+    font-weight: 800;
+}
+.rpt-app.is-po-costing .poc-related-mini-loader {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 14px;
+}
+.rpt-app.is-po-costing .poc-related-mini-loader i {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #6366f1;
+    animation: pocRelatedDotPulse 0.9s ease-in-out infinite;
+}
+.rpt-app.is-po-costing .poc-related-mini-loader i:nth-child(1) { background: #06b6d4; animation-delay: 0s; }
+.rpt-app.is-po-costing .poc-related-mini-loader i:nth-child(2) { background: #6366f1; animation-delay: .15s; }
+.rpt-app.is-po-costing .poc-related-mini-loader i:nth-child(3) { background: #f43f5e; animation-delay: .3s; }
+@keyframes pocRelatedDotPulse {
+    0%, 80%, 100% { transform: scale(0.7); opacity: 0.45; }
+    40% { transform: scale(1); opacity: 1; }
 }
 .rpt-app.is-po-costing #pocRelatedTable thead tr.rpt-header-row th {
     background: #f3e8ff;

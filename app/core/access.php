@@ -44,7 +44,7 @@ function sap_reports_require_access(): void
     $user = (string) ($_SESSION['username'] ?? '');
     if (!function_exists('portal_user_can_sap_reports') || !portal_user_can_sap_reports($role, $user)) {
         if (sap_reports_wants_json()) {
-            sap_reports_json_error(403, 'You do not have access to SAP Reports.', 'no_access');
+            sap_reports_json_error(403, 'You do not have access to SAP Insight.', 'no_access');
         }
         header('Location: ' . sap_reports_evol_url('portal_dashboard.php'));
         exit;
@@ -97,7 +97,8 @@ function sap_reports_user_can_access(string $module, ?array $user = null): bool
             || sap_reports_user_can($mod, 'sent', $user)
             || sap_reports_user_can($mod, 'workflow', $user)
             || sap_reports_user_can($mod, 'approved', $user)
-            || sap_reports_user_can($mod, 'related', $user);
+            || sap_reports_user_can($mod, 'related', $user)
+            || sap_reports_user_can($mod, 'search_po', $user);
     }
     if ($mod === 'zcost') {
         return sap_reports_user_can($mod, 'view', $user)
@@ -194,7 +195,7 @@ function sap_reports_user_can(string $module, string $action = 'view', ?array $u
     }
     if (!in_array($action, [
         'add', 'view', 'edit', 'approve', 'copy', 'assign', 'validate',
-        'receive', 'sent', 'workflow', 'approved', 'related', 'find_po',
+        'receive', 'sent', 'workflow', 'approved', 'related', 'find_po', 'search_po',
     ], true)) {
         $action = 'view';
     }
@@ -243,15 +244,17 @@ function sap_reports_user_can(string $module, string $action = 'view', ?array $u
         require_once base_path('app/core/Database.php');
         $pdo = Database::connection();
         $table = sap_reports_access_table();
-        if (in_array($action, ['copy', 'assign', 'validate', 'receive', 'sent', 'workflow', 'approved', 'related', 'find_po'], true)) {
+        if (in_array($action, ['copy', 'assign', 'validate', 'receive', 'sent', 'workflow', 'approved', 'related', 'find_po', 'search_po'], true)) {
             $len = $pdo->query("SELECT COL_LENGTH('dbo.{$table}', '{$col}')")->fetchColumn();
             if ((int) $len <= 0) {
                 // Fallback: older table without new columns
-                if (in_array($action, ['copy', 'receive', 'sent', 'workflow', 'approved', 'related', 'find_po'], true)) {
-                    // Find PO Costing used to be covered by View before can_find_po existed
+                if (in_array($action, ['copy', 'receive', 'sent', 'workflow', 'approved', 'related', 'find_po', 'search_po'], true)) {
+                    // Find PO used to be covered by View before can_find_po existed
                     if ($action === 'find_po') {
                         return sap_reports_user_can($module, 'view', $user);
                     }
+                    // Search PO is a dedicated aside right — never inherit View
+                    // (missing column = denied until Access Studio creates/saves can_search_po)
                     return false;
                 }
                 // assign/validate fall back to can_approve if column missing

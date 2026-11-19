@@ -15,7 +15,7 @@ class ReportsController extends Controller
     {
         $model = new ReportsModel();
         $this->view('reports/index', [
-            'pageTitle'  => 'SAP Reports',
+            'pageTitle'  => 'SAP Insight',
             'catalog'    => $model->catalog(),
             'appShell'   => true,
         ]);
@@ -631,9 +631,16 @@ class ReportsController extends Controller
             $this->redirect(url('/'));
             return;
         }
+        // Ensure PO Costing aside bits (incl. can_search_po) exist before permission checks
+        try {
+            require_once base_path('app/controllers/UserAccessControlController.php');
+            UserAccessControlController::ensureAccessBitColumns();
+        } catch (Throwable $e) {
+            error_log('showPoCosting ensureAccessBitColumns: ' . $e->getMessage());
+        }
         require_once base_path('app/services/SapPurchaseOrderService.php');
         $this->view('reports/po_costing', [
-            'pageTitle'   => 'PO Costing Validation',
+            'pageTitle'   => 'PO eSign',
             'appShell'    => true,
             'layoutWide'  => true,
             'presets'     => SapPurchaseOrderService::rangePresets(),
@@ -691,11 +698,73 @@ class ReportsController extends Controller
             'canFindPoPage'         => function_exists('sap_reports_user_can')
                 ? sap_reports_user_can('po-costing', 'find_po')
                 : true,
+            'canSearchPoPage'       => function_exists('sap_reports_user_can')
+                ? sap_reports_user_can('po-costing', 'search_po')
+                : true,
             'relatedPoDataUrl'      => url('po-costing/related-po'),
             'relatedPoStatusUrl'    => url('po-costing/related-po/status'),
             'relatedPoSentLogUrl'   => url('po-costing/related-po/sent-log'),
+            'searchPoDataUrl'       => url('po-costing/search-po'),
             'extraScripts'          => '',
         ]);
+    }
+
+    /*
+     * Search PO — Z_QuotationZCostCom by PurchaseOrder across NOTAPPROVED / DRAFT / APPROVED
+     * GET po-costing/search-po?po=4000008618
+     */
+    public function searchPoData(): void
+    {
+        if (function_exists('sap_reports_user_can_access') && !sap_reports_user_can_access('po-costing')) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Access restricted.',
+                'error'   => 'Access restricted.',
+                'data'    => [],
+            ], 403);
+            return;
+        }
+        if (function_exists('sap_reports_user_can') && !sap_reports_user_can('po-costing', 'search_po')) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Access restricted: Search PO permission required.',
+                'error'   => 'Access restricted: Search PO permission required.',
+                'data'    => [],
+            ], 403);
+            return;
+        }
+        if (!is_file(base_path('app/services/PoCostValidationService.php'))) {
+            $message = 'PO costing validation is not deployed on this server.';
+            $this->jsonResponse(['success' => false, 'message' => $message, 'error' => $message, 'data' => []], 503);
+            return;
+        }
+        require_once base_path('app/services/PoCostValidationService.php');
+        try {
+            $payload = (new PoCostValidationService())->searchPurchaseOrder($_GET);
+            if (!empty($payload['error']) && ($payload['records'] ?? []) === []) {
+                $this->jsonResponse([
+                    'success' => false,
+                    'message' => (string) $payload['error'],
+                    'error'   => (string) $payload['error'],
+                    'data'    => $payload,
+                ], str_contains((string) $payload['error'], 'Enter a valid') ? 422 : 502);
+                return;
+            }
+            $this->jsonResponse([
+                'success' => true,
+                'message' => ($payload['records'] ?? []) === []
+                    ? 'No purchase order found for this number.'
+                    : 'Search PO data loaded',
+                'data'    => $payload,
+            ]);
+        } catch (Throwable $e) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Unable to search purchase order. Please try again.',
+                'error'   => $e->getMessage(),
+                'data'    => [],
+            ], 500);
+        }
     }
 
     /*
@@ -1008,17 +1077,27 @@ class ReportsController extends Controller
         $input = preg_replace('/[\s,]/', '', (string) ($_GET['po'] ?? '')) ?? '';
         $error = $input !== '' && !preg_match('/^\d{1,10}$/', $input) ? 'Purchase order must be a number of up to 10 digits.' : null;
         $mode = ($input !== '' && $error === null) ? 'detail' : 'list';
-        // Workbench (PO detail costing view) — Workbench access, or eSign-only when ?open=esign
+        // Workbench (PO detail costing view):
+        // - Workbench right, or
+        // - Search PO right (Search PO page opens a PO by number), or
+        // - eSign-only when ?open=esign
         $openMode = strtolower(trim((string) ($_GET['open'] ?? '')));
+        $fromPanel = strtolower(trim((string) ($_GET['from'] ?? '')));
         $canOpenWorkbench = !function_exists('sap_reports_user_can')
             || sap_reports_user_can('po-costing', 'workbench')
+            || sap_reports_user_can('po-costing', 'search_po')
             || (
                 $openMode === 'esign'
                 && sap_reports_user_can('po-costing', 'esign')
             );
         if ($isCosting && $mode === 'detail' && !$canOpenWorkbench) {
-            $_SESSION['flash_error'] = 'Access restricted: You do not have Workbench / eSign permission for PO Costing Validation.';
-            $this->redirect(url('purchase-order') . '?view=costing');
+            $_SESSION['flash_error'] = 'Access restricted: You do not have Workbench / Search PO permission for PO Costing Validation.';
+            // Prefer returning to Search PO when that is where the user came from
+            if ($fromPanel === 'search') {
+                $this->redirect(url('po-costing') . '?panel=search');
+            } else {
+                $this->redirect(url('purchase-order') . '?view=costing');
+            }
             return;
         }
 
@@ -1138,9 +1217,9 @@ class ReportsController extends Controller
             return;
         }
 
-        $listTitle = $isCostingView ? 'PO Costing Validation' : 'Purchase Order Report';
+        $listTitle = $isCostingView ? 'PO eSign' : 'Purchase Order Report';
         $detailTitle = $isCostingView
-            ? ('PO Costing ' . $input)
+            ? ('PO eSign ' . $input)
             : ('Purchase Order ' . $input);
         $activeColumns = $mode === 'detail'
             ? ($isCostingView && $costingColumns !== [] ? $costingColumns : $detailColumns)
@@ -1675,7 +1754,7 @@ class ReportsController extends Controller
 
     /*
      * Stream PO PDF (no unsigned auto-save):
-     *  1) Verified signed PDF under EVOL/uploads/po_esign/PO-{po}.pdf (DB + file)
+     *  1) Verified signed PDF under EVOL/uploads/po_esign/PO_New_Module/PO-{po}.pdf (DB + file)
      *  2) Else SAP POPDFSet → stream in memory (never write unsigned PDF to disk)
      * GET purchase-order/pdf?po=1000000543
      * GET purchase-order/pdf?po=…&ensure=1  → JSON status only (does not cache)
@@ -1784,8 +1863,16 @@ class ReportsController extends Controller
                 $customer,
                 $endUser
             );
-            // No local/manual store — workbench shows Z_QuotationZCostCom API values only
-            $payload['manual_mappings'] = [];
+            // Re-apply saved Manual Map Costing so refresh / other users keep the mapping
+            if (!empty($payload['records']) && is_array($payload['records'])) {
+                require_once base_path('app/services/PoManualCostingMapService.php');
+                $mapSvc = new PoManualCostingMapService();
+                $payload['records'] = $mapSvc->applyToRecords($po, $payload['records']);
+                $payload['summary'] = $this->recountPoCostSummary($payload['records'], $payload['summary'] ?? []);
+                $payload['manual_mappings'] = $mapSvc->listForPo($po);
+            } else {
+                $payload['manual_mappings'] = [];
+            }
             // APPROVEDSTATUS from Z_QuotationZCostCom only (no local Pass log override)
             $sapApproved = trim((string) ($payload['approved_status'] ?? $payload['header']['approved_status'] ?? ''));
             if ($sapApproved !== 'Approved' && $sapApproved !== 'NotApproved') {
@@ -2094,7 +2181,7 @@ class ReportsController extends Controller
         </tr>
         <tr>
           <td style="padding:14px 24px 18px;background:#f8fafc;border-top:1px solid #e2e8f0;">
-            <div style="font-size:11px;color:#94a3b8;">Sent by <strong style="color:#64748b;">{$safeFrom}</strong> · Evolv Clothing · SAP Reports</div>
+            <div style="font-size:11px;color:#94a3b8;">Sent by <strong style="color:#64748b;">{$safeFrom}</strong> · Evolv Clothing · SAP Insight</div>
           </td>
         </tr>
       </table>
@@ -2861,7 +2948,7 @@ HTML;
         <tr>
           <td style="padding:14px 24px 18px;background:#f8fafc;border-top:1px solid #e2e8f0;">
             <div style="font-size:11px;color:#94a3b8;line-height:1.5;">
-              Sent by <strong style="color:#64748b;">{$safeFrom}</strong> · Evolv Clothing · SAP Reports
+              Sent by <strong style="color:#64748b;">{$safeFrom}</strong> · Evolv Clothing · SAP Insight
             </div>
           </td>
         </tr>

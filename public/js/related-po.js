@@ -283,13 +283,78 @@
         const raw = String(v || '').trim().toLowerCase();
         if (!raw) return '';
         if (raw === 'draft') return 'Draft';
-        if (raw === 'review' || raw === 'passed' || raw === 'pass') return 'Review';
+        if (raw === 'review' || raw === 'passed' || raw === 'pass' || raw === 'reviewed') return 'Review';
         if (['released', 'release', 'related', 'relasted', 'moved', 'move'].includes(raw)) return 'Released';
         if (['draft', 'review', 'released'].includes(raw)) {
             return raw.charAt(0).toUpperCase() + raw.slice(1);
         }
         const pretty = String(v || '').trim();
         return pretty;
+    }
+
+    function poDigits(v) {
+        return String(v || '').replace(/\D/g, '').replace(/^0+/, '') || '';
+    }
+
+    /**
+     * Patch Status / Remarks on an already-loaded Related PO row (after Save Signed PDF).
+     */
+    function applyStatusUpdate(detail) {
+        if (!detail || !loaded) return false;
+        const target = poDigits(detail.po);
+        if (!target) return false;
+        const status = normalizeStatus(detail.status);
+        const remarks = detail.remarks != null ? String(detail.remarks).trim() : null;
+        let hit = false;
+        allRows.forEach((rec) => {
+            if (poDigits(rec.purchase_order) !== target) return;
+            if (status) rec.status_update = status;
+            if (remarks != null) rec.status_remarks = remarks;
+            if (detail.updated_by) rec.status_updated_by = String(detail.updated_by);
+            if (detail.updated_on) rec.status_updated_on = String(detail.updated_on);
+            hit = true;
+        });
+        if (hit) {
+            renderRows(allRows);
+        }
+        return hit;
+    }
+
+    function applyPendingStatusFromStorage() {
+        try {
+            const raw = localStorage.getItem('poc-related-status-v1');
+            if (!raw) return;
+            const payload = JSON.parse(raw);
+            if (!payload || !payload.po) return;
+            // Ignore stale broadcasts older than 30 minutes
+            if (payload.t && (Date.now() - Number(payload.t)) > 30 * 60 * 1000) return;
+            applyStatusUpdate(payload);
+        } catch (_) {}
+    }
+
+    function bindStatusSync() {
+        window.addEventListener('poc-related-status', (e) => {
+            applyStatusUpdate(e?.detail || {});
+        });
+        window.addEventListener('storage', (e) => {
+            if (e.key !== 'poc-related-status-v1' || !e.newValue) return;
+            try {
+                applyStatusUpdate(JSON.parse(e.newValue));
+            } catch (_) {}
+        });
+        try {
+            const bc = new BroadcastChannel('poc-related-status');
+            bc.onmessage = (ev) => applyStatusUpdate(ev?.data || {});
+        } catch (_) {}
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState !== 'visible') return;
+            if (!panel.classList.contains('is-active') || panel.hidden) return;
+            applyPendingStatusFromStorage();
+        });
+        window.addEventListener('focus', () => {
+            if (!panel.classList.contains('is-active') || panel.hidden) return;
+            applyPendingStatusFromStorage();
+        });
     }
 
     function materialTypeHtml(rec) {
@@ -1010,6 +1075,16 @@
         applyFilter();
     }
 
+    function setRelatedLoadingUi(on) {
+        const overlay = $('pocRelatedLoadingOverlay');
+        const wrap = $('pocRelatedTableWrap');
+        if (overlay) overlay.hidden = !on;
+        wrap?.classList.toggle('is-loading', !!on);
+        if ($('pocRelatedCount')) {
+            $('pocRelatedCount').textContent = on ? 'Loading…' : ($('pocRelatedCount').textContent || '');
+        }
+    }
+
     function showLoading() {
         const body = $('pocRelatedBody');
         const empty = $('pocRelatedEmpty');
@@ -1020,12 +1095,18 @@
             loadingRow = document.createElement('tr');
             loadingRow.id = 'pocRelatedLoading';
             loadingRow.className = 'rpt-table-loading';
-            loadingRow.innerHTML = `<td colspan="${COLS.length}" class="rpt-table-skeleton"><div class="rpt-skel-rows" aria-label="Loading"><i></i><i></i><i></i><i></i><i></i></div></td>`;
+            loadingRow.innerHTML = `<td colspan="${COLS.length}" class="rpt-table-skeleton">
+                <div class="poc-related-inline-load" aria-label="Loading">
+                    <span class="poc-related-mini-loader" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span>Loading Related POs…</span>
+                </div>
+                <div class="rpt-skel-rows"><i></i><i></i><i></i><i></i><i></i></div>
+            </td>`;
             if (empty) body.insertBefore(loadingRow, empty);
             else body.appendChild(loadingRow);
         }
         loadingRow.hidden = false;
-        if ($('pocRelatedCount')) $('pocRelatedCount').textContent = 'Loading…';
+        setRelatedLoadingUi(true);
     }
 
     function queryKey() {
@@ -1040,13 +1121,15 @@
         const key = queryKey();
         if (loaded && !force && key === lastQueryKey) {
             applyFilter();
+            applyPendingStatusFromStorage();
             return;
         }
         loading = true;
         setResultsMode();
+        // Keep page usable: dismiss full-page boot spinner; show in-table skeleton only
+        try { if (window.rptLoader) window.rptLoader.hide(true); } catch (_) {}
         showLoading();
         try {
-            if (window.rptLoader) window.rptLoader.show('Loading Related POs…');
             const params = new URLSearchParams({ _: String(Date.now()) });
             if (activeMat && activeMat !== 'all') params.set('mat_cat', activeMat);
             if (activeBrand) params.set('brand', activeBrand);
@@ -1064,6 +1147,7 @@
             loaded = true;
             lastQueryKey = key;
             renderRows(allRows);
+            applyPendingStatusFromStorage();
             if (!allRows.length) {
                 fillStats(data.totals || {}, 0);
                 const empty = $('pocRelatedEmpty');
@@ -1088,6 +1172,9 @@
             if ($('pocRelatedCount')) $('pocRelatedCount').textContent = 'Load failed';
         } finally {
             loading = false;
+            setRelatedLoadingUi(false);
+            const loadingRow = $('pocRelatedLoading');
+            if (loadingRow) loadingRow.hidden = true;
             try { if (window.rptLoader) window.rptLoader.hide(true); } catch (_) {}
         }
     }
@@ -1171,15 +1258,37 @@
             $('pocRelatedColFilters')?.classList.toggle('is-active', filtersVisible);
         });
 
-        $('pocRelatedStickyScroll')?.addEventListener('click', () => {
+        const applyRelatedSticky = (enabled) => {
             const wrap = $('pocRelatedTableWrap');
             if (!wrap) return;
-            const on = wrap.classList.toggle('is-scroll-body');
+            const on = !!enabled;
+            wrap.classList.toggle('is-scroll-body', on);
             wrap.classList.toggle('is-expanded', !on);
+            if (on) {
+                wrap.style.maxHeight = '';
+                wrap.style.overflow = '';
+            } else {
+                wrap.style.maxHeight = 'none';
+                wrap.style.overflow = 'visible';
+            }
             $('pocRelatedStickyScroll')?.classList.toggle('is-active', on);
             if ($('pocRelatedStickyLabel')) {
                 $('pocRelatedStickyLabel').textContent = on ? 'Scroll Body Only' : 'Expand Table';
             }
+            try {
+                localStorage.setItem('poc_related_sticky_scroll', on ? '1' : '0');
+            } catch (_) {}
+        };
+        let relatedStickyOn = true;
+        try {
+            const saved = localStorage.getItem('poc_related_sticky_scroll');
+            if (saved === '0' || saved === '1') relatedStickyOn = saved === '1';
+        } catch (_) {}
+        applyRelatedSticky(relatedStickyOn);
+        $('pocRelatedStickyScroll')?.addEventListener('click', () => {
+            const wrap = $('pocRelatedTableWrap');
+            if (!wrap) return;
+            applyRelatedSticky(!wrap.classList.contains('is-scroll-body'));
         });
 
         panel.querySelectorAll('#pocRelatedTable thead .rpt-header-row th.is-sortable').forEach((th) => {
@@ -1254,9 +1363,11 @@
         close: hideRelatedChrome,
         load: (force) => loadRelated(!!force),
         isLoaded: () => loaded,
+        applyStatusUpdate,
     };
 
     bindUi();
+    bindStatusSync();
     setHeaderFiltersVisible(false);
 
     if (panel.classList.contains('is-active') && !panel.hidden) {

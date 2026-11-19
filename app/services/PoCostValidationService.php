@@ -378,7 +378,7 @@ class PoCostValidationService
                 ? "(PurchaseOrder eq '{$poDisplay}' or PurchaseOrder eq '{$poPadded}')"
                 : "PurchaseOrder eq '{$poDisplay}'";
         } else {
-            $filter = "ApprovedStatus eq 'NotApproved'";
+            $filter = "ApprovedStatus eq 'NOTAPPROVED'";
         }
 
         $res = $this->odata->fetchResults($service, [
@@ -652,6 +652,47 @@ class PoCostValidationService
     }
 
     /**
+     * Search PO page — Z_QuotationZCostCom by PO across NOTAPPROVED / DRAFT / APPROVED.
+     * Example filter:
+     *   (ApprovedStatus eq 'NOTAPPROVED' or ApprovedStatus eq 'DRAFT' or ApprovedStatus eq 'APPROVED')
+     *   and PurchaseOrder eq '4000008618'
+     *   &$expand=to_Fabric,to_Trim,to_Packing,to_Special
+     *
+     * @param array<string,mixed> $filters
+     * @return array{records:list,total:int,totals:array,columns:list,error:?string,source:string}
+     */
+    public function searchPurchaseOrder(array $filters = []): array
+    {
+        $filters['_search_all_statuses'] = true;
+        $po = preg_replace('/\D/', '', (string) ($filters['po'] ?? $filters['q'] ?? '')) ?? '';
+        if ($po === '' || !preg_match('/^\d{1,10}$/', $po)) {
+            return [
+                'records'       => [],
+                'total'         => 0,
+                'totals'        => [
+                    'pos_count'       => 0,
+                    'items_count'     => 0,
+                    'total_qty'       => 0,
+                    'total_value'     => 0,
+                    'currency'        => 'INR',
+                    'suppliers_count' => 0,
+                ],
+                'columns'       => self::relatedPoColumns(),
+                'truncated'     => false,
+                'items_fetched' => 0,
+                'error'         => 'Enter a valid purchase order number (up to 10 digits).',
+                'source'        => 'Z_QUOTATIONZCOSTCOM_CDS',
+                'odata_filter'  => '',
+                'approved_status' => 'NOTAPPROVED|DRAFT|APPROVED',
+                'mat_cat'       => 'all',
+                'brand'         => '',
+            ];
+        }
+        $filters['po'] = $po;
+        return $this->listRelatedPurchaseOrders($filters);
+    }
+
+    /**
      * Related PO sidebar — Z_QuotationZCostCom NotApproved with expand navigations.
      * Aggregates to one row per purchase order for the professional list table.
      *
@@ -667,6 +708,7 @@ class PoCostValidationService
         if ($searchPo !== '' && !preg_match('/^\d{1,10}$/', $searchPo)) {
             $searchPo = '';
         }
+        $searchAllStatuses = !empty($filters['_search_all_statuses']);
 
         $matCat = strtolower(trim((string) ($filters['mat_cat'] ?? $filters['category'] ?? 'all')));
         if (!in_array($matCat, ['all', 'fabric', 'trims'], true)) {
@@ -679,11 +721,17 @@ class PoCostValidationService
             $poPadded = preg_match('/^\d+$/', $poDisplay)
                 ? str_pad($poDisplay, 10, '0', STR_PAD_LEFT)
                 : $poDisplay;
-            $filter = ($poPadded !== '' && $poPadded !== $poDisplay)
+            $poFilter = ($poPadded !== '' && $poPadded !== $poDisplay)
                 ? "(PurchaseOrder eq '{$poDisplay}' or PurchaseOrder eq '{$poPadded}')"
                 : "PurchaseOrder eq '{$poDisplay}'";
+            if ($searchAllStatuses) {
+                // Search PO: any of NOTAPPROVED / DRAFT / APPROVED for the given PO
+                $filter = "(ApprovedStatus eq 'NOTAPPROVED' or ApprovedStatus eq 'DRAFT' or ApprovedStatus eq 'APPROVED') and {$poFilter}";
+            } else {
+                $filter = $poFilter;
+            }
         } else {
-            $filter = "ApprovedStatus eq 'NotApproved'";
+            $filter = "ApprovedStatus eq 'NOTAPPROVED'";
         }
 
         $res = $this->odata->fetchResults($service, [
@@ -931,7 +979,9 @@ class PoCostValidationService
             'error'         => null,
             'source'        => 'Z_QUOTATIONZCOSTCOM_CDS',
             'odata_filter'  => $filter,
-            'approved_status' => $searchPo !== '' ? '' : 'NotApproved',
+            'approved_status' => $searchAllStatuses
+                ? 'NOTAPPROVED|DRAFT|APPROVED'
+                : ($searchPo !== '' ? '' : 'NotApproved'),
             'mat_cat'       => $matCat,
             'brand'         => implode(',', $brands),
         ];
@@ -1084,8 +1134,8 @@ class PoCostValidationService
         $quoteMeta = [];
 
         foreach ($rows as $row) {
-            if ($this->normalizeApprovedStatus($row['ApprovedStatus'] ?? $row['APPROVEDSTATUS'] ?? null) === 'Approved') {
-                $approvedStatus = 'Approved';
+            if ($this->normalizeApprovedStatus($row['ApprovedStatus'] ?? $row['APPROVEDSTATUS'] ?? null) === 'APPROVED') {
+                $approvedStatus = 'APPROVED';
             }
             if ($header === []) {
                 $header = [
@@ -1398,15 +1448,15 @@ class PoCostValidationService
     }
 
     /**
-     * Normalize SAP ApprovedStatus / APPROVEDSTATUS → Approved | NotApproved.
+     * Normalize SAP ApprovedStatus / APPROVEDSTATUS → APPROVED | NOTAPPROVED.
      */
     private function normalizeApprovedStatus(mixed $raw): string
     {
         $v = strtolower(preg_replace('/\s+/', '', (string) $raw) ?? '');
-        if ($v === 'approved' || $v === 'x' || $v === 'true' || $v === '1') {
-            return 'Approved';
+        if ($v === 'A' || $v === 'x' || $v === 'true' || $v === '1') {
+            return 'APPROVED';
         }
-        return 'NotApproved';
+        return 'NOTAPPROVED';
     }
 
     /**

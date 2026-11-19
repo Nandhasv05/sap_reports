@@ -33,7 +33,7 @@ class SimpleMailService
         }, $toEmails))));
 
         $cfgFrom = (string) ($this->cfg['from']['address'] ?? 'apps@evolvclothing.com');
-        $cfgName = (string) ($this->cfg['from']['name'] ?? 'SAP Reports');
+        $cfgName = (string) ($this->cfg['from']['name'] ?? 'SAP Insight');
         $fromEmail = trim($fromEmail);
         if ($fromEmail === '' || !filter_var($fromEmail, FILTER_VALIDATE_EMAIL)) {
             $fromEmail = $cfgFrom;

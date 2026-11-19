@@ -52,7 +52,7 @@ $extraScripts = ob_get_clean();
 
     <header class="rpt-bar">
         <div class="rpt-bar-left">
-            <a href="<?= e($catalogHome) ?>" class="hub-brand" aria-label="EVOLV" title="SAP Reports Analytics Hub">
+            <a href="<?= e($home) ?>" class="hub-brand" aria-label="EVOLV" title="EVOLV Portal Dashboard">
                 <img src="<?= e($logoUrl) ?>" alt="evolv" class="hub-brand-logo">
                 <div class="hub-brand-text">
                     <span class="hub-brand-title">Sales Report</span>

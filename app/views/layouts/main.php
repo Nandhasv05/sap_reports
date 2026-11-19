@@ -4,7 +4,7 @@
  * DATE : 03/09/2026
  * DESCRIPTION : Main layout
  */
-$pageTitle = $pageTitle ?? 'SAP Reports';
+$pageTitle = $pageTitle ?? 'SAP Insight';
 $dashboardUrl = sap_reports_evol_url('portal_dashboard.php');
 $iconHref = sap_reports_logo_url();
 $layoutWide = !empty($layoutWide);

@@ -514,7 +514,7 @@ body.rpt-body:has(.is-uac-page) {
 }
 
 .uac-right {
-  cursor: pointer;
+  cursor: help;
   user-select: none;
   position: relative;
 }
@@ -671,6 +671,15 @@ body.rpt-body:has(.is-uac-page) {
 .uac-right[data-action="find_po"] input:checked + .uac-right-ui .uac-right-check {
   background: #0284c7;
   border-color: #0284c7;
+}
+
+.uac-right[data-action="search_po"] input:checked + .uac-right-ui {
+  border-color: #0f766e;
+  background: #f0fdfa;
+}
+.uac-right[data-action="search_po"] input:checked + .uac-right-ui .uac-right-check {
+  background: #0f766e;
+  border-color: #0f766e;
 }
 
 .uac-mod[data-kind="zcost"] .uac-right input:checked + .uac-right-ui {

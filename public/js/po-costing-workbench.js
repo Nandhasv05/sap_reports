@@ -1615,7 +1615,7 @@
             saveBtn.classList.remove('is-signed');
             saveBtn.title = isSent
                 ? 'Sign PDF and send/forward to the selected user'
-                : 'Save the signed PDF to EVOL/uploads/po_esign (PO-{number}.pdf)';
+                : 'Save the signed PDF to EVOL/uploads/po_esign/PO_New_Module (PO-{number}.pdf)';
             const icon = saveBtn.querySelector('.material-icons-round');
             if (icon) icon.textContent = isSent ? 'send' : 'save';
         }
@@ -1691,8 +1691,50 @@
     }
 
     /**
+     * Notify Related PO list (same tab / opener / other tabs) so Status + Remarks update without reload.
+     */
+    function broadcastRelatedPoStatus(detail) {
+        const po = String(detail?.po || '').replace(/\D/g, '');
+        if (!po) return;
+        const payload = {
+            po,
+            status: normalizeReleaseStatus(detail?.status || '') || String(detail?.status || '').trim(),
+            remarks: String(detail?.remarks ?? '').trim(),
+            updated_by: String(detail?.updated_by || '').trim(),
+            updated_on: String(detail?.updated_on || '').trim(),
+            signed: !!detail?.signed,
+            t: Date.now(),
+        };
+        try {
+            window.dispatchEvent(new CustomEvent('poc-related-status', { detail: payload }));
+        } catch (_) {}
+        try {
+            if (typeof window.pocRelatedPo?.applyStatusUpdate === 'function') {
+                window.pocRelatedPo.applyStatusUpdate(payload);
+            }
+        } catch (_) {}
+        try {
+            if (window.opener && !window.opener.closed) {
+                window.opener.dispatchEvent(new CustomEvent('poc-related-status', { detail: payload }));
+                if (typeof window.opener.pocRelatedPo?.applyStatusUpdate === 'function') {
+                    window.opener.pocRelatedPo.applyStatusUpdate(payload);
+                }
+            }
+        } catch (_) {}
+        try {
+            localStorage.setItem('poc-related-status-v1', JSON.stringify(payload));
+        } catch (_) {}
+        try {
+            if (!window.__pocRelatedStatusBc) {
+                window.__pocRelatedStatusBc = new BroadcastChannel('poc-related-status');
+            }
+            window.__pocRelatedStatusBc.postMessage(payload);
+        } catch (_) {}
+    }
+
+    /**
      * Persist Draft/Review/Released + remarks. Called only from Save Signed PDF / Send PO.
-     * @returns {Promise<{ok:boolean,skipped?:boolean,error?:string}>}
+     * @returns {Promise<{ok:boolean,skipped?:boolean,error?:string,po?:string,status?:string,remarks?:string}>}
      */
     async function saveEsignReleaseStatus() {
         const endpoint = releaseStatusEndpoint();
@@ -1703,13 +1745,13 @@
             return { ok: false, error: 'Status save URL is not configured.' };
         }
         if (!status) {
-            return { ok: true, skipped: true };
+            return { ok: true, skipped: true, po, status: '', remarks };
         }
         if (
             status === esignReleaseSaved.status
             && remarks === esignReleaseSaved.remarks
         ) {
-            return { ok: true, skipped: true };
+            return { ok: true, skipped: true, po, status, remarks };
         }
         try {
             const res = await fetch(endpoint, {
@@ -1731,13 +1773,19 @@
                 throw new Error(json.message || json.error || 'Failed to save status');
             }
             const data = json.data || {};
-            setEsignReleaseFields(
-                data.status || status,
-                data.remarks != null ? data.remarks : remarks
-            );
-            return { ok: true };
+            const savedStatus = data.status || status;
+            const savedRemarks = data.remarks != null ? data.remarks : remarks;
+            setEsignReleaseFields(savedStatus, savedRemarks);
+            return {
+                ok: true,
+                po,
+                status: savedStatus,
+                remarks: String(savedRemarks || '').trim(),
+                updated_by: String(data.created_by || data.updated_by || '').trim(),
+                updated_on: String(data.created_on || data.updated_on || '').trim(),
+            };
         } catch (err) {
-            return { ok: false, error: String(err.message || 'Unable to save status update.') };
+            return { ok: false, error: String(err.message || 'Unable to save status update.'), po, status, remarks };
         }
     }
 
@@ -3443,6 +3491,20 @@
 
             // Status + remarks save only with Save Signed PDF / Send PO (not on dropdown change)
             const releaseSave = await saveEsignReleaseStatus();
+
+            // Keep Related PO list in sync immediately (no full page reload required)
+            if (releaseSave.ok || releaseStatus) {
+                broadcastRelatedPoStatus({
+                    po,
+                    status: releaseSave.status || releaseStatus,
+                    remarks: releaseSave.remarks != null
+                        ? releaseSave.remarks
+                        : remarks,
+                    updated_by: releaseSave.updated_by || '',
+                    updated_on: releaseSave.updated_on || '',
+                    signed: true,
+                });
+            }
 
             // Save signed PDF only — does NOT approve in SAP and does NOT set local APPROVED
             syncPassRevertButtons(summarizeRows(rows));
@@ -6345,6 +6407,33 @@
         });
     }
 
+    function syncPcwStickyOffsets() {
+        if (!table || !wrap) return;
+        const groupRow = table.querySelector('thead tr.pcw-group-row');
+        const headerRow = table.querySelector('thead tr.rpt-header-row');
+        const filterRow = table.querySelector('thead tr.rpt-filter-row');
+        const groupH = groupRow && groupRow.offsetParent !== null ? groupRow.offsetHeight : 0;
+        const headerH = headerRow && headerRow.offsetParent !== null ? headerRow.offsetHeight : 0;
+        const filterVisible = filterRow
+            && filterRow.offsetParent !== null
+            && window.getComputedStyle(filterRow).display !== 'none';
+        const filterH = filterVisible ? filterRow.offsetHeight : 0;
+        document.documentElement.style.setProperty('--pcw-group-h', `${Math.max(0, groupH)}px`);
+        document.documentElement.style.setProperty('--rpt-header-h', `${Math.max(0, headerH)}px`);
+        document.documentElement.style.setProperty('--pcw-filter-h', `${Math.max(0, filterH)}px`);
+    }
+
+    function applyFullTableView() {
+        if (!wrap) return;
+        wrap.classList.add('is-full-view');
+        wrap.classList.remove('is-scroll-body', 'is-expanded', 'is-h-expanded');
+        wrap.style.maxHeight = 'none';
+        wrap.style.height = 'auto';
+        wrap.style.overflowX = 'auto';
+        wrap.style.overflowY = 'visible';
+        requestAnimationFrame(() => syncPcwStickyOffsets());
+    }
+
     function renderTable() {
         if (!tbody) return;
         const query = searchQuery();
@@ -6445,6 +6534,7 @@
         syncGroupHeaders();
         syncSelectionUi();
         syncSameValueHighlights();
+        requestAnimationFrame(() => syncPcwStickyOffsets());
     }
 
     async function runValidate(opts) {
@@ -7334,30 +7424,49 @@
         });
     }
 
-    function onMatchApply() {
+    async function onMatchApply() {
         if (matchRowIndex === null || !matchPickKey) return;
         const list = $('pcwMatchList');
         const lines = list?._pcwLines || [];
         const line = lines.find((l, i) => lineKey(l, i) === matchPickKey);
         if (!line || !rows[matchRowIndex]) return;
 
+        const applyBtn = $('pcwMatchApply');
+        if (applyBtn) {
+            applyBtn.disabled = true;
+            applyBtn.setAttribute('aria-busy', 'true');
+        }
+
         const targetRow = rows[matchRowIndex];
         delete targetRow._matchEditSnapshot;
         applyCostLineToRow(targetRow, line);
         targetRow.matched_line_key = matchPickKey;
         targetRow.selected = true;
+        targetRow.manual_match = true;
+        targetRow.needs_manual_match = false;
+        targetRow._editingMatch = false;
 
-        // Persist so User2 / refresh sees the same mapping
-        void persistManualMapping(targetRow, line);
+        // Persist so refresh / other users keep the same mapping
+        const saved = await persistManualMapping(targetRow, line);
+
+        if (applyBtn) {
+            applyBtn.disabled = false;
+            applyBtn.removeAttribute('aria-busy');
+        }
 
         closeMatchPicker();
         fillKpis(summarizeRows(rows));
         renderTable();
+
+        if (!saved) {
+            // Keep on-screen mapping, but warn that DB write failed
+            return;
+        }
     }
 
     async function persistManualMapping(r, line) {
         const po = headerPo() || String(r?.pono || r?.purchase_order || '').replace(/\D/g, '');
-        if (!po || !r) return;
+        if (!po || !r) return false;
         const endpoint = cfg.manualMapUrl || 'purchase-order/manual-map';
         const payload = {
             purchase_order: po,
@@ -7395,6 +7504,7 @@
             if (!res.ok || json.success === false) {
                 throw new Error(json.message || json.error || `HTTP ${res.status}`);
             }
+            return true;
         } catch (err) {
             console.warn('manual map save failed', err);
             const toast = document.createElement('div');
@@ -7402,6 +7512,7 @@
             toast.textContent = `Mapped on screen, but not saved for other users: ${String(err.message || err)}`;
             document.body.appendChild(toast);
             setTimeout(() => toast.remove(), 6500);
+            return false;
         }
     }
 
@@ -7459,16 +7570,11 @@
                 'title',
                 filterVisible ? 'Hide column filter inputs' : 'Show column filter inputs'
             );
+            requestAnimationFrame(() => syncPcwStickyOffsets());
         });
 
-        $('rptToggleStickyScroll')?.addEventListener('click', () => {
-            const on = !wrap?.classList.contains('is-scroll-body');
-            wrap?.classList.toggle('is-scroll-body', on);
-            $('rptToggleStickyScroll')?.classList.toggle('is-active', on);
-            if ($('rptStickyScrollLabel')) {
-                $('rptStickyScrollLabel').textContent = on ? 'Scroll Body Only' : 'Expand Table';
-            }
-        });
+        applyFullTableView();
+        window.addEventListener('resize', () => syncPcwStickyOffsets());
 
         table?.querySelector('thead tr.rpt-header-row')?.addEventListener('click', (e) => {
             if (e.target.closest('select, input, button, a')) return;

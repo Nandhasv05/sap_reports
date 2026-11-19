@@ -14,7 +14,7 @@ if ($loaderMessage === '' && $loaderSteps !== []) {
 }
 if ($loaderMessage === '') {
     $title = trim((string) ($pageTitle ?? ''));
-    $loaderMessage = $title !== '' && strcasecmp($title, 'SAP Reports') !== 0
+    $loaderMessage = $title !== '' && strcasecmp($title, 'SAP Insight') !== 0 && strcasecmp($title, 'SAP Reports') !== 0
         ? ('Preparing ' . $title . '…')
         : 'Loading…';
 }

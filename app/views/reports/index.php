@@ -46,17 +46,17 @@ $totalVisibleCards = ($canUtil ? 1 : 0) + ($canFabric ? 1 : 0) + ($canTrims ? 1 
         <div class="hub-header-container">
             <!-- Left: Brand / Logo + Quick Nav Icons + Live SAP Indicator with Heartbeat -->
             <div class="hub-header-left">
-                <a href="<?= e(url('/')) ?>" class="hub-brand" title="SAP Reports Analytics Hub">
+                <a href="<?= e($homeUrl) ?>" class="hub-brand" title="EVOLV Portal Dashboard">
                     <img src="<?= e($logoUrl) ?>" alt="EVOLV Logo" class="hub-brand-logo">
                     <div class="hub-brand-text">
-                        <span class="hub-brand-title">SAP Reports</span>
+                        <span class="hub-brand-title">SAP Insight</span>
                         <span class="hub-brand-subtitle">Analytics Hub</span>
                     </div>
                 </a>
 
                 <!-- Quick Navigation Shortcut Buttons (matches report view header) -->
                 <div class="hub-quick-nav">
-                    <a href="<?= e(url('/')) ?>" class="hub-quick-icon-btn is-active" title="SAP Reports Catalog" aria-label="Reports Catalog">
+                    <a href="<?= e(url('/')) ?>" class="hub-quick-icon-btn is-active" title="SAP Insight Catalog" aria-label="SAP Insight Catalog">
                         <span class="material-icons-round">apps</span>
                     </a>
                     <a href="<?= e($homeUrl) ?>" class="hub-quick-icon-btn" title="Portal Dashboard" aria-label="Portal Dashboard">

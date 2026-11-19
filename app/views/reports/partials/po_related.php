@@ -87,6 +87,32 @@ $relatedCards = [
         </div>
 
         <div class="rpt-table-wrap is-scroll-body poc-related-wrap" id="pocRelatedTableWrap">
+            <?php
+                $relatedLoaderLogo = function_exists('sap_reports_logo_url')
+                    ? sap_reports_logo_url()
+                    : (function_exists('asset') ? asset('css/zcost/logo.png') : '/sap_reports/public/css/zcost/logo.png');
+            ?>
+            <div class="poc-related-loading-overlay" id="pocRelatedLoadingOverlay" hidden aria-live="polite" aria-busy="true">
+                <div class="poc-related-loading-card rpt-spinner-card">
+                    <div class="rpt-loader poc-related-rpt-loader" aria-hidden="true">
+                        <span class="rpt-loader-ring ring-1"></span>
+                        <span class="rpt-loader-ring ring-2"></span>
+                        <span class="rpt-loader-ring ring-3"></span>
+                        <span class="rpt-loader-orbit">
+                            <i class="dot-1"></i>
+                            <i class="dot-2"></i>
+                            <i class="dot-3"></i>
+                            <i class="dot-4"></i>
+                        </span>
+                        <span class="rpt-loader-logo">
+                            <img src="<?= e($relatedLoaderLogo) ?>" alt="evolv">
+                        </span>
+                    </div>
+                    <p class="rpt-loader-title">Loading Related POs…</p>
+                    <small class="poc-related-loading-sub">Fetching purchase orders from SAP</small>
+                    <span class="rpt-loader-dots" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                </div>
+            </div>
             <table class="rpt-table prod-table po-page-table text-nowrap" id="pocRelatedTable">
                 <thead>
                     <tr class="rpt-header-row">
@@ -131,7 +157,13 @@ $relatedCards = [
                 <tbody id="pocRelatedBody">
                     <tr class="rpt-table-loading" id="pocRelatedLoading">
                         <td colspan="<?= (int) $relatedColCount ?>" class="rpt-table-skeleton">
-                            <div class="rpt-skel-rows" aria-label="Loading related purchase orders"><i></i><i></i><i></i><i></i><i></i></div>
+                            <div class="poc-related-inline-load" aria-label="Loading related purchase orders">
+                                <span class="poc-related-mini-loader" aria-hidden="true">
+                                    <i></i><i></i><i></i>
+                                </span>
+                                <span>Loading Related POs…</span>
+                            </div>
+                            <div class="rpt-skel-rows"><i></i><i></i><i></i><i></i><i></i></div>
                         </td>
                     </tr>
                     <tr id="pocRelatedEmpty" class="rpt-table-no-match" hidden>

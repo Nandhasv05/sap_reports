@@ -198,11 +198,6 @@ $wbLoginUser = trim((string) (
         <div class="rpt-tb-actions">
             <span class="rpt-tb-count" id="rptTableCount">—</span>
 
-            <button type="button" class="rpt-tb-btn is-active" id="rptToggleStickyScroll" title="Keep table header fixed and scroll body only">
-                <i class="fas fa-arrows-up-down"></i>
-                <span id="rptStickyScrollLabel">Scroll Body Only</span>
-            </button>
-
             <div class="rpt-cat-dropdown" id="rptColumnToggleDropdown">
                 <button type="button" class="rpt-tb-btn" id="rptColumnToggleBtn" title="Manage columns: reorder, show or hide (saved to your account)">
                     <i class="fas fa-columns"></i>
@@ -451,7 +446,7 @@ $wbLoginUser = trim((string) (
         </div>
     </div>
 
-    <div class="rpt-table-wrap is-scroll-body" id="rptTableWrap">
+    <div class="rpt-table-wrap is-full-view" id="rptTableWrap">
         <table class="rpt-table prod-table po-page-table text-nowrap pcw-unified-table" id="rptDataTable">
             <thead>
                 <tr class="pcw-group-row" id="pcwGroupRow">

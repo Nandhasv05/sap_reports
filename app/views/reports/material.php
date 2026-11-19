@@ -113,7 +113,7 @@ $modeClass = $isLookup ? 'is-lookup is-first' : 'is-report';
     <?php if (!$isEmbedded): ?>
     <header class="rpt-bar">
         <div class="rpt-bar-left">
-            <a href="<?= e($catalogHome) ?>" class="rpt-brand" aria-label="EVOLV" title="SAP Reports">
+            <a href="<?= e($home) ?>" class="rpt-brand" aria-label="EVOLV" title="EVOLV Portal Dashboard">
                 <img src="<?= e($logoUrl) ?>" alt="evolv">
             </a>
             <a href="<?= e($catalogHome) ?>" class="rpt-home" aria-label="All Reports" title="Reports Catalog">

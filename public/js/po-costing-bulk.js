@@ -126,15 +126,35 @@
 
     /*
     * Handle Spinner Functionality
+    * On po-costing, only show the full-page overlay while Released Po is active —
+    * otherwise Search PO / Related see a stuck or flashing spinner over a blank panel.
     */
+    function bulkOwnsPageLoader() {
+        const page = document.getElementById('poCostingPage');
+        if (!page) return true; // standalone purchase-order list
+        return page.classList.contains('is-released-po')
+            || page.classList.contains('is-costing-bulk');
+    }
+
     function showSpinner(on) {
+        if (on && !bulkOwnsPageLoader()) return;
         if (window.rptLoader && typeof window.rptLoader.show === 'function') {
-            if (on) window.rptLoader.show({ solid: true });
+            if (on) window.rptLoader.show({ solid: true, message: 'Loading purchase orders…' });
             else window.rptLoader.hide(true);
             return;
         }
         if (spinner) spinner.hidden = !on;
         document.body.classList.toggle('rpt-loading', !!on);
+    }
+
+    function shouldAutoloadBulkList() {
+        try {
+            const panel = String(new URL(window.location.href).searchParams.get('panel') || '').trim().toLowerCase();
+            // Default / empty = Released Po (dashboard)
+            return !panel || panel === 'dashboard';
+        } catch (_) {
+            return true;
+        }
     }
 
     /*
@@ -881,9 +901,9 @@
             case 'sno':
                 return String(rowIndex);
             case 'po':
-                const canWb = cfg.canWorkbench !== false;
+                const canWb = canOpenWorkbenchFromList();
                 return `<button type="button" class="pcb-po-link${canWb ? '' : ' is-disabled'}" data-po="${esc(r.purchase_order)}"
-                    title="${canWb ? 'Open workbench in new tab' : 'Workbench permission required'}"
+                    title="${canWb ? 'Open workbench in new tab' : 'Workbench / Search PO permission required'}"
                     ${canWb ? '' : 'disabled'}>${esc(r.purchase_order)}</button>`;
             case 'date':
                 return fmtDate(r.date);
@@ -1993,19 +2013,33 @@
             closeOffcanvas();
             applyFilter();
             updateValidatedBtn();
-            const u = new URL(cfg.pageUrl || 'purchase-order', window.location.origin);
-            u.searchParams.set('view', 'costing');
-            u.searchParams.set('range', range);
-            u.searchParams.set('page', String(page));
-            if (from) u.searchParams.set('from', from);
-            if (to) u.searchParams.set('to', to);
-            if (supplier) u.searchParams.set('supplier', supplier);
-            if (mat !== 'all') u.searchParams.set('mat_cat', mat);
-            if (brand) u.searchParams.set('brand', brand);
-            if (approvedStatus === 'Approved' || approvedStatus === 'NotApproved') {
-                u.searchParams.set('approved_status', approvedStatus);
-            }
-            window.history.replaceState({}, '', u.pathname + u.search);
+            // Only sync address bar when this bulk UI owns the purchase-order page.
+            // Embedded on po-costing (Released Po) must NOT rewrite URL → otherwise
+            // reload/back lands on purchase-order?view=costing&range=all&page=1.
+            try {
+                const bulkPagePath = new URL(cfg.pageUrl || 'purchase-order', window.location.origin).pathname
+                    .replace(/\/+$/, '');
+                const here = String(window.location.pathname || '').replace(/\/+$/, '');
+                const onPurchaseOrderBulk = here === bulkPagePath || /\/purchase-order$/i.test(here);
+                const embeddedInPoCosting = !!document.getElementById('poCostingPage')
+                    || /\/po-costing(-validation)?$/i.test(here);
+                if (onPurchaseOrderBulk && !embeddedInPoCosting) {
+                    const u = new URL(cfg.pageUrl || 'purchase-order', window.location.origin);
+                    u.searchParams.set('view', 'costing');
+                    u.searchParams.set('range', range);
+                    u.searchParams.set('page', String(page));
+                    if (from) u.searchParams.set('from', from);
+                    if (to) u.searchParams.set('to', to);
+                    if (supplier) u.searchParams.set('supplier', supplier);
+                    if (mat !== 'all') u.searchParams.set('mat_cat', mat);
+                    if (brand) u.searchParams.set('brand', brand);
+                    if (approvedStatus === 'Approved' || approvedStatus === 'NotApproved') {
+                        u.searchParams.set('approved_status', approvedStatus);
+                    }
+                    window.history.replaceState({}, '', u.pathname + u.search);
+                }
+                // When embedded on po-costing: leave the address bar alone.
+            } catch (_) { /* ignore URL sync errors */ }
 
             // Always auto-validate this page for list status/value (SAP compare is read-only).
             // Manual "Validated" button stays gated by canValidate.
@@ -2098,7 +2132,8 @@
         }
 
         applyFilter();
-        if (po.length >= 8 && cfg.canWorkbench !== false) {
+        const canOpenWb = cfg.canWorkbench !== false || cfg.canSearchPo === true;
+        if (po.length >= 8 && canOpenWb) {
             toast(`PO ${po} not in list filters — opening workbench.`, 'info');
             openDrill(po);
             return;
@@ -3312,10 +3347,14 @@
         renderTable();
     }
 
+    function canOpenWorkbenchFromList() {
+        return cfg.canWorkbench !== false || cfg.canSearchPo === true;
+    }
+
     function openDrill(po) {
         if (!po) return;
-        if (cfg.canWorkbench === false) {
-            alert('You do not have Workbench access for PO Costing Validation.');
+        if (!canOpenWorkbenchFromList()) {
+            alert('You do not have Workbench / Search PO access for PO Costing Validation.');
             return;
         }
         const href = workbenchUrl(po);
@@ -3913,8 +3952,16 @@
             const wrap = $('pcbTableWrap');
             if (!wrap) return;
             applyListStickyMode(!wrap.classList.contains('is-scroll-body'));
+            try {
+                localStorage.setItem('pcb_sticky_scroll', wrap.classList.contains('is-scroll-body') ? '1' : '0');
+            } catch (_) {}
         });
-        applyListStickyMode(false); // default: expand — show all page rows
+        let pcbStickyOn = false;
+        try {
+            const saved = localStorage.getItem('pcb_sticky_scroll');
+            if (saved === '0' || saved === '1') pcbStickyOn = saved === '1';
+        } catch (_) {}
+        applyListStickyMode(pcbStickyOn);
         $('pcbTable')?.querySelector('thead')?.addEventListener('click', (e) => {
             const th = e.target.closest('th.is-sortable');
             if (!th || e.target.closest('input,button,a,label')) return;
@@ -3995,13 +4042,13 @@
                 e.stopPropagation();
                 return;
             }
-            // Only PO Number opens the workbench (new tab) — Workbench access required
+            // Only PO Number opens the workbench (new tab)
             const poLink = e.target.closest('button.pcb-po-link');
             if (!poLink) return;
             e.preventDefault();
             e.stopPropagation();
-            if (poLink.disabled || cfg.canWorkbench === false) {
-                alert('You do not have Workbench access for PO Costing Validation.');
+            if (poLink.disabled || !canOpenWorkbenchFromList()) {
+                alert('You do not have Workbench / Search PO access for PO Costing Validation.');
                 return;
             }
             const po = poLink.getAttribute('data-po');
@@ -4263,9 +4310,23 @@
     }
 
     bind();
-    {
+
+    let bulkListLoadedOnce = false;
+    async function ensureBulkListLoaded(force) {
+        if (!force && bulkListLoadedOnce) return;
         const urlPage = Number(new URLSearchParams(window.location.search).get('page') || 1);
         const startPage = Number.isFinite(urlPage) && urlPage > 1 ? Math.floor(urlPage) : 1;
-        void fetchPos(null, startPage > 1 ? { page: startPage, resetCache: true } : {});
+        await fetchPos(null, startPage > 1 ? { page: startPage, resetCache: true } : {});
+        bulkListLoadedOnce = true;
+    }
+
+    window.pcbBulkList = {
+        refresh: () => ensureBulkListLoaded(true),
+        ensureLoaded: () => ensureBulkListLoaded(false),
+    };
+
+    // Do not fetch (or flash the page spinner) when landing on Search PO / other soft panels
+    if (shouldAutoloadBulkList()) {
+        void ensureBulkListLoaded(false);
     }
 })();

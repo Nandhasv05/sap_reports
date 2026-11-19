@@ -172,6 +172,10 @@
                     || !!Number(row[colKey])
                     || (action === 'pass_po' && !!Number(row.approve))
                     || (action === 'esign' && (!!Number(row.esign) || !!Number(row.copy)))
+                    || (action === 'workbench' && (!!Number(row.workbench) || !!Number(row.add)))
+                    || (action === 'find_po' && (!!Number(row.find_po) || !!Number(row.can_find_po)))
+                    || (action === 'search_po' && (!!Number(row.search_po) || !!Number(row.can_search_po)))
+                    || (action === 'related' && (!!Number(row.related) || !!Number(row.can_related)))
                     || (action === 'update' && !!Number(row.edit))
                     || (action === 'assign' && !!Number(row.assign))
                     || (action === 'validate' && !!Number(row.validate));
@@ -282,7 +286,21 @@
                 can_copy: 0,
                 can_assign: 0,
                 can_validate: 0,
+                can_receive: 0,
+                can_sent: 0,
+                can_workflow: 0,
+                can_approved: 0,
+                can_related: 0,
+                can_find_po: 0,
+                can_search_po: 0,
             };
+            // Ensure every catalog action column exists on the payload (Related / Find PO / etc.)
+            (Array.isArray(p.actions) ? p.actions : []).forEach((act) => {
+                const col = String(act.column || '');
+                if (col && !Object.prototype.hasOwnProperty.call(payload, col)) {
+                    payload[col] = 0;
+                }
+            });
             if (p.admin_only && !allowAdminOnly) {
                 return payload;
             }
@@ -290,10 +308,15 @@
                 if (!cb.checked) return;
                 const column = cb.getAttribute('data-column') || '';
                 const action = cb.getAttribute('data-action') || '';
-                if (column && Object.prototype.hasOwnProperty.call(payload, column)) {
+                if (column) {
                     payload[column] = 1;
                 }
-                if (action) payload[action] = 1;
+                if (action) {
+                    payload[action] = 1;
+                    // Alias: action key → can_<action> so server always sees the column bit
+                    const canKey = action.indexOf('can_') === 0 ? action : ('can_' + action);
+                    payload[canKey] = 1;
+                }
             });
             return payload;
         });

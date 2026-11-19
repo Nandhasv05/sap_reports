@@ -36,6 +36,9 @@ if (method_exists(ReportsController::class, 'showPoPassLog')) {
 if (method_exists(ReportsController::class, 'showPoValidationHistory')) {
     $router->get('po-costing/validation-history', [ReportsController::class, 'showPoValidationHistory']);
 }
+if (method_exists(ReportsController::class, 'searchPoData')) {
+    $router->get('po-costing/search-po', [ReportsController::class, 'searchPoData']);
+}
 if (method_exists(ReportsController::class, 'relatedPoData')) {
     $router->get('po-costing/related-po', [ReportsController::class, 'relatedPoData']);
 }

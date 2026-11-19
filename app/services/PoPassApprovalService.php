@@ -331,29 +331,25 @@ class PoPassApprovalService
     }
 
     /**
-     * Canonical save folder: EVOL/uploads/po_esign (not date / PO_New_Module subfolders).
+     * Canonical save folder: EVOL/uploads/po_esign/PO_New_Module only.
      */
     public function poEsignSaveDir(): ?string
     {
         $root = $this->esignStorageRoot();
         if ($root === null || $root === '') {
-            // Hard fallback under htdocs/EVOL
+            // Hard fallback under htdocs/EVOL — always PO_New_Module
             $htdocs = dirname(base_path());
             $fallback = $htdocs . DIRECTORY_SEPARATOR . 'EVOL' . DIRECTORY_SEPARATOR
-                . 'uploads' . DIRECTORY_SEPARATOR . 'po_esign';
+                . 'uploads' . DIRECTORY_SEPARATOR . 'po_esign' . DIRECTORY_SEPARATOR . 'PO_New_Module';
             if (!@is_dir($fallback)) {
                 @mkdir($fallback, 0775, true);
             }
             return @is_dir($fallback) ? $fallback : null;
         }
+        // Always save under configured root (…/po_esign/PO_New_Module) — never parent po_esign
         $base = basename(rtrim($root, '\\/'));
-        // Config often points at .../po_esign/PO_New_Module — save in parent po_esign
-        if (strcasecmp($base, 'PO_New_Module') === 0) {
-            $parent = dirname($root);
-            if (!@is_dir($parent)) {
-                @mkdir($parent, 0775, true);
-            }
-            return @is_dir($parent) ? $parent : $root;
+        if (strcasecmp($base, 'po_esign') === 0) {
+            $root = rtrim($root, '\\/') . DIRECTORY_SEPARATOR . 'PO_New_Module';
         }
         if (!@is_dir($root)) {
             @mkdir($root, 0775, true);
@@ -362,7 +358,7 @@ class PoPassApprovalService
     }
 
     /**
-     * Save signed PDF as EVOL/uploads/po_esign/PO-{po}.pdf (overwrite same name — no duplicates).
+     * Save signed PDF as EVOL/uploads/po_esign/PO_New_Module/PO-{po}.pdf (overwrite same name — no duplicates).
      * Does not create unsigned cache files.
      *
      * @return array{path:?string,folder:?string,file:?string,error:?string,verified:bool}
@@ -380,7 +376,7 @@ class PoPassApprovalService
                 'path' => null,
                 'folder' => $folder,
                 'file' => $fileName,
-                'error' => 'Could not create folder EVOL/uploads/po_esign',
+                'error' => 'Could not create folder EVOL/uploads/po_esign/PO_New_Module',
                 'verified' => false,
             ];
         }
@@ -428,7 +424,7 @@ class PoPassApprovalService
     }
 
     /**
-     * Locate signed PDF under EVOL/uploads/po_esign (canonical PO-{po}.pdf + legacy names).
+     * Locate signed PDF under EVOL/uploads/po_esign/PO_New_Module (canonical PO-{po}.pdf + legacy names).
      *
      * @return array{has_file:bool,path:?string,pdf_file:?string,folder:?string,network_path:?string,is_signed:bool}
      */
@@ -451,7 +447,15 @@ class PoPassApprovalService
             'po-' . $displayPo . '.pdf',
         ];
         $candidates = [];
-        $bases = array_values(array_unique(array_filter([$saveDir, $primary, $root])));
+        // Only PO_New_Module (and optional date subfolders under it) — never parent po_esign/
+        $bases = array_values(array_unique(array_filter([$saveDir, $primary, $root], static function ($dir) {
+            if ($dir === null || $dir === '') {
+                return false;
+            }
+            $norm = str_replace('\\', '/', (string) $dir);
+            // Reject bare …/po_esign (no PO_New_Module)
+            return !preg_match('#/po_esign/?$#i', $norm);
+        })));
         foreach ($bases as $base) {
             foreach ($legacyNames as $name) {
                 $isLegacySignedName = str_contains(strtolower($name), 'signed');
@@ -1315,7 +1319,7 @@ class PoPassApprovalService
             ? url('purchase-order/signed-file?po=' . rawurlencode($displayPo))
             : ('purchase-order/signed-file?po=' . rawurlencode($displayPo));
 
-        // 1) REQUIRED: save signed PDF to EVOL/uploads/po_esign/PO-{po}.pdf (verify before DB)
+        // 1) REQUIRED: save signed PDF to EVOL/uploads/po_esign/PO_New_Module/PO-{po}.pdf (verify before DB)
         try {
             $esignNet = $this->writeEsignNetworkPdf($displayPo, $signedBin);
         } catch (Throwable $netErr) {
@@ -1333,7 +1337,7 @@ class PoPassApprovalService
             return [
                 'success' => false,
                 'path' => null,
-                'error' => (string) ($esignNet['error'] ?? 'Could not save signed PDF to EVOL/uploads/po_esign.'),
+                'error' => (string) ($esignNet['error'] ?? 'Could not save signed PDF to EVOL/uploads/po_esign/PO_New_Module.'),
                 'network_folder' => $esignNetworkFolder,
                 'pdf_url' => null,
                 'file_url' => null,
