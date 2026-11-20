@@ -258,6 +258,49 @@ body.rpt-loading {
     cursor: wait;
 }
 
+/* PO Costing: loader covers main content only — aside + header stay visible */
+body.is-poc-loader-scoped #rptSpinner.is-content-scoped,
+body.is-poc-loader-scoped #rptSpinner.is-content-scoped.is-boot,
+body.is-poc-loader-scoped #rptSpinner.is-content-scoped.is-solid,
+body.is-poc-loader-scoped #rptSpinner.is-content-scoped.is-colorful,
+body:has(#poCostingPage) #rptSpinner.is-content-scoped,
+body:has(#poCostingPage) #rptSpinner.is-content-scoped.is-boot,
+body:has(#poCostingPage) #rptSpinner.is-content-scoped.is-solid,
+body:has(#poCostingPage) #rptSpinner.is-content-scoped.is-colorful {
+    inset: auto !important;
+    top: var(--poc-loader-top, 64px) !important;
+    left: var(--poc-loader-left, 72px) !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: auto !important;
+    height: auto !important;
+    z-index: 45 !important;
+    border-radius: 0;
+    box-shadow: inset 1px 0 0 rgba(148, 163, 184, 0.25);
+}
+body.is-poc-loader-scoped.rpt-loading,
+body:has(#poCostingPage).rpt-loading {
+    overflow: hidden;
+}
+body.is-poc-loader-scoped.rpt-loading .rpt-app.is-po-costing > .rpt-bar,
+body.is-poc-loader-scoped.rpt-loading .rpt-app.is-po-costing .poc-sidenav {
+    pointer-events: auto;
+    z-index: 60;
+}
+@media (max-width: 900px) {
+    body.is-poc-loader-scoped #rptSpinner.is-content-scoped,
+    body.is-poc-loader-scoped #rptSpinner.is-content-scoped.is-boot,
+    body.is-poc-loader-scoped #rptSpinner.is-content-scoped.is-solid,
+    body.is-poc-loader-scoped #rptSpinner.is-content-scoped.is-colorful,
+    body:has(#poCostingPage) #rptSpinner.is-content-scoped,
+    body:has(#poCostingPage) #rptSpinner.is-content-scoped.is-boot,
+    body:has(#poCostingPage) #rptSpinner.is-content-scoped.is-solid,
+    body:has(#poCostingPage) #rptSpinner.is-content-scoped.is-colorful {
+        left: 0 !important;
+        top: var(--poc-loader-top, 120px) !important;
+    }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .rpt-spinner .rpt-loader-ring,
     .rpt-spinner .rpt-loader-orbit,

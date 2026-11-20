@@ -98,7 +98,8 @@ function sap_reports_user_can_access(string $module, ?array $user = null): bool
             || sap_reports_user_can($mod, 'workflow', $user)
             || sap_reports_user_can($mod, 'approved', $user)
             || sap_reports_user_can($mod, 'related', $user)
-            || sap_reports_user_can($mod, 'search_po', $user);
+            || sap_reports_user_can($mod, 'search_po', $user)
+            || sap_reports_user_can($mod, 'valuation_report', $user);
     }
     if ($mod === 'zcost') {
         return sap_reports_user_can($mod, 'view', $user)
@@ -196,6 +197,7 @@ function sap_reports_user_can(string $module, string $action = 'view', ?array $u
     if (!in_array($action, [
         'add', 'view', 'edit', 'approve', 'copy', 'assign', 'validate',
         'receive', 'sent', 'workflow', 'approved', 'related', 'find_po', 'search_po',
+        'valuation_report',
     ], true)) {
         $action = 'view';
     }
@@ -244,17 +246,17 @@ function sap_reports_user_can(string $module, string $action = 'view', ?array $u
         require_once base_path('app/core/Database.php');
         $pdo = Database::connection();
         $table = sap_reports_access_table();
-        if (in_array($action, ['copy', 'assign', 'validate', 'receive', 'sent', 'workflow', 'approved', 'related', 'find_po', 'search_po'], true)) {
+        if (in_array($action, ['copy', 'assign', 'validate', 'receive', 'sent', 'workflow', 'approved', 'related', 'find_po', 'search_po', 'valuation_report'], true)) {
             $len = $pdo->query("SELECT COL_LENGTH('dbo.{$table}', '{$col}')")->fetchColumn();
             if ((int) $len <= 0) {
                 // Fallback: older table without new columns
-                if (in_array($action, ['copy', 'receive', 'sent', 'workflow', 'approved', 'related', 'find_po', 'search_po'], true)) {
+                if (in_array($action, ['copy', 'receive', 'sent', 'workflow', 'approved', 'related', 'find_po', 'search_po', 'valuation_report'], true)) {
                     // Find PO used to be covered by View before can_find_po existed
                     if ($action === 'find_po') {
                         return sap_reports_user_can($module, 'view', $user);
                     }
-                    // Search PO is a dedicated aside right — never inherit View
-                    // (missing column = denied until Access Studio creates/saves can_search_po)
+                    // Search PO / poValaition Report are dedicated aside rights — never inherit View
+                    // (missing column = denied until Access Studio creates/saves the bit)
                     return false;
                 }
                 // assign/validate fall back to can_approve if column missing

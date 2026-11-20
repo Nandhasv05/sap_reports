@@ -774,6 +774,7 @@ $pcbCurrentUserEmail = trim((string) (
     'usersUrl'           => url('purchase-order/users'),
     'validationLogUrl'   => url('purchase-order/validation-log'),
     'pageUrl'            => $pageUrl,
+    'costingHomeUrl'     => $costingHomeUrl,
     'view'               => $isCostingView ? 'costing' : '',
     'isCostingView'      => $isCostingView,
     'isCostingWorkbench' => $isCostingWorkbench,

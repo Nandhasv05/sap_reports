@@ -38,6 +38,7 @@ if (method_exists(ReportsController::class, 'showPoValidationHistory')) {
 }
 if (method_exists(ReportsController::class, 'searchPoData')) {
     $router->get('po-costing/search-po', [ReportsController::class, 'searchPoData']);
+    $router->get('po-costing/valuation-report', [ReportsController::class, 'poValuationReportData']);
 }
 if (method_exists(ReportsController::class, 'relatedPoData')) {
     $router->get('po-costing/related-po', [ReportsController::class, 'relatedPoData']);
@@ -53,6 +54,11 @@ if (method_exists(ReportsController::class, 'relatedPoSentLogGet')) {
 }
 $router->get('po-costing', [ReportsController::class, 'showPoCosting']);
 $router->get('po-costing-validation', [ReportsController::class, 'showPoCosting']);
+if (method_exists(ReportsController::class, 'cronDailyEsignReport')) {
+    // Token-gated — no portal session (for Task Scheduler / curl at 23:00 IST)
+    $router->get('cron/daily-esign-report', [ReportsController::class, 'cronDailyEsignReport']);
+    $router->post('cron/daily-esign-report', [ReportsController::class, 'cronDailyEsignReport']);
+}
 $router->get('sale', function () {
     header('Location: ' . url('sales'));
     exit;
@@ -112,6 +118,7 @@ if (method_exists(ReportsController::class, 'purchaseOrderSignedFile')) {
 }
 if (method_exists(ReportsController::class, 'purchaseOrderValidate')) {
     $router->get('purchase-order/validate', [ReportsController::class, 'purchaseOrderValidate']);
+    $router->get('purchase-order/charges', [ReportsController::class, 'purchaseOrderCharges']);
 }
 if (method_exists(ReportsController::class, 'purchaseOrderManualMapSave')) {
     $router->post('purchase-order/manual-map', [ReportsController::class, 'purchaseOrderManualMapSave']);

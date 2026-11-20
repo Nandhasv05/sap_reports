@@ -10,6 +10,9 @@ $iconHref = sap_reports_logo_url();
 $layoutWide = !empty($layoutWide);
 $appShell = !empty($appShell);
 $bodyClass = $appShell ? 'rpt-body' : '';
+if (!empty($loaderContentScoped)) {
+    $bodyClass = trim($bodyClass . ' is-poc-loader-scoped');
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">

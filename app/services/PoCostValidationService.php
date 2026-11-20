@@ -237,7 +237,15 @@ class PoCostValidationService
                 ];
             }
 
+            // SAP ZI_PO_CONDITION_HUB only (MOQ / Freight / Other / Screen / Bank) — no local TEMPFIN
+            $chargeTrigger = $this->fetchPoChargesTrigger($poDigits);
+            if (!empty($chargeTrigger['charges']) && is_array($chargeTrigger['charges'])) {
+                $this->stampChargeBucketsOntoRecords($records, $chargeTrigger['charges']);
+            }
             $summary = $this->summarize($records);
+            // PDF Total P.O Value = full PO net (ZI_PurchaseOrderAPI_HUB) + conditions + IGST
+            // — not the filtered costing-sheet line sum.
+            $summary = $this->applyPdfStylePoTotals($summary, $poDigits, $chargeTrigger);
             $header = $cds['header'];
             $header['cost_sheets'] = count($quotations);
             $header['quotations'] = $quotations;
@@ -2576,6 +2584,9 @@ class PoCostValidationService
         $primaryCurr = $records !== []
             ? (string) ($records[0]['po_currency'] ?? $records[0]['currency'] ?? 'INR')
             : 'INR';
+        $charges = $this->rollConditionCharges($records);
+        $subTotal = round($totalValue, 2);
+        $chargesTotal = (float) ($charges['total'] ?? 0);
         return [
             'po_items'          => count($seenValueItems) > 0 ? count($seenValueItems) : count($records),
             'unique_po_items'   => count($seenValueItems),
@@ -2588,7 +2599,11 @@ class PoCostValidationService
             'needs_review'      => $needsReview,
             'pending'           => 0,
             'zcost_matched'     => $matchedZcost,
-            'total_po_value'    => round($totalValue, 2),
+            'total_po_value'    => $subTotal,
+            'sub_total'         => $subTotal,
+            'charges'           => $charges,
+            'charges_total'     => $chargesTotal,
+            'grand_total'       => round($subTotal + $chargesTotal, 2),
             'total_expected'    => round($totalExpected, 2),
             'total_actual'      => round($totalActual, 2),
             'currency'          => $primaryCurr,
@@ -2597,37 +2612,486 @@ class PoCostValidationService
     }
 
     /**
-     * Read CondOTHR / CondFRB1|2 / CondZB00 / CondZSCI / CondZBCR from ZI_PurchaseOrderAPI_HUB.
+     * Stamp Cond* from ZI_PurchaseOrderAPI_HUB onto validation rows + ensure summary can roll MOQ etc.
      *
+     * @param list<array<string,mixed>> $records
+     */
+    private function applyConditionChargesToRecords(string $poDigits, array &$records): void
+    {
+        $byItem = $this->fetchPoConditionCharges($poDigits);
+        if ($byItem === []) {
+            return;
+        }
+
+        $hubAgg = [
+            'cond_othr' => 0.0,
+            'cond_frb1' => 0.0,
+            'cond_frb2' => 0.0,
+            'cond_zb00' => 0.0,
+            'cond_zsci' => 0.0,
+            'cond_zbcr' => 0.0,
+        ];
+        foreach ($byItem as $c) {
+            $hubAgg['cond_othr'] += (float) ($c['cond_othr'] ?? 0);
+            $hubAgg['cond_frb1'] += (float) ($c['cond_frb1'] ?? 0);
+            $hubAgg['cond_frb2'] += (float) ($c['cond_frb2'] ?? 0);
+            $hubAgg['cond_zb00'] += (float) ($c['cond_zb00'] ?? 0);
+            $hubAgg['cond_zsci'] += (float) ($c['cond_zsci'] ?? 0);
+            $hubAgg['cond_zbcr'] += (float) ($c['cond_zbcr'] ?? 0);
+        }
+
+        foreach ($records as &$r) {
+            $kind = (string) ($r['row_kind'] ?? 'detail');
+            if (in_array($kind, ['footer', 'charge', 'tax', 'total', 'subtotal'], true)) {
+                continue;
+            }
+            $raw = trim((string) ($r['poitem'] ?? $r['po_item'] ?? $r['item'] ?? ''));
+            $key = ltrim($raw, '0');
+            if ($key === '') {
+                $key = '0';
+            }
+            $c = $byItem[$key] ?? $byItem[$raw] ?? null;
+            if ($c === null) {
+                continue;
+            }
+            $r['cond_othr'] = (float) ($c['cond_othr'] ?? 0);
+            $r['cond_frb1'] = (float) ($c['cond_frb1'] ?? 0);
+            $r['cond_frb2'] = (float) ($c['cond_frb2'] ?? 0);
+            $r['cond_zb00'] = (float) ($c['cond_zb00'] ?? 0);
+            $r['cond_zsci'] = (float) ($c['cond_zsci'] ?? 0);
+            $r['cond_zbcr'] = (float) ($c['cond_zbcr'] ?? 0);
+        }
+        unset($r);
+
+        // Top up first detail row with any hub Cond* not present on ZCost CDS items
+        // (e.g. CondZB00 MOQ only on a pricing line that is not in the costing sheet).
+        $rowSum = [
+            'cond_othr' => 0.0,
+            'cond_frb1' => 0.0,
+            'cond_frb2' => 0.0,
+            'cond_zb00' => 0.0,
+            'cond_zsci' => 0.0,
+            'cond_zbcr' => 0.0,
+        ];
+        foreach ($records as $r) {
+            $kind = (string) ($r['row_kind'] ?? 'detail');
+            if (in_array($kind, ['footer', 'charge', 'tax', 'total', 'subtotal'], true)) {
+                continue;
+            }
+            foreach ($rowSum as $k => $_) {
+                $rowSum[$k] += (float) ($r[$k] ?? 0);
+            }
+        }
+        $topUp = [];
+        foreach ($hubAgg as $k => $hubVal) {
+            $gap = (float) $hubVal - (float) ($rowSum[$k] ?? 0);
+            if ($gap > 0.0001) {
+                $topUp[$k] = $gap;
+            }
+        }
+        if ($topUp === []) {
+            return;
+        }
+        foreach ($records as &$r) {
+            $kind = (string) ($r['row_kind'] ?? 'detail');
+            if (in_array($kind, ['footer', 'charge', 'tax', 'total', 'subtotal'], true)) {
+                continue;
+            }
+            foreach ($topUp as $k => $gap) {
+                $r[$k] = round((float) ($r[$k] ?? 0) + $gap, 4);
+            }
+            break;
+        }
+        unset($r);
+    }
+
+    /**
+     * SAP trigger API — ZI_PO_CONDITION_HUB + full PO net (PDF Total P.O Value inputs).
+     *
+     * @return array{
+     *   success:bool,
+     *   purchase_order:string,
+     *   charges:array<string,mixed>,
+     *   currency:string,
+     *   document_sub_total:float,
+     *   sub_total:float,
+     *   grand_total:float,
+     *   sources:array<string,mixed>,
+     *   triggered_at:string,
+     *   error:?string
+     * }
+     */
+    public function fetchPoChargesTrigger(string $purchaseOrder): array
+    {
+        $poDigits = preg_replace('/\D/', '', $purchaseOrder) ?? '';
+        $empty = $this->emptyChargeBuckets();
+        if ($poDigits === '') {
+            return [
+                'success'             => false,
+                'purchase_order'      => '',
+                'charges'             => $empty,
+                'currency'            => '',
+                'document_sub_total'  => 0.0,
+                'sub_total'           => 0.0,
+                'grand_total'         => 0.0,
+                'sources'             => [],
+                'triggered_at'        => date('c'),
+                'error'               => 'Purchase order is required.',
+            ];
+        }
+
+        $fetched = $this->fetchSapPoConditionHub($poDigits);
+        $charges = is_array($fetched['charges'] ?? null) ? $fetched['charges'] : $empty;
+        $currency = (string) ($fetched['currency'] ?? '');
+        $error = $fetched['error'] ?? null;
+        $doc = $this->fetchDocumentPoNetValue($poDigits);
+        if ($currency === '' && $doc['currency'] !== '') {
+            $currency = $doc['currency'];
+        }
+        $sub = (float) ($doc['sub_total'] ?? 0);
+        $charges = $this->applyDefaultIgstToCharges($charges, $sub, $currency);
+        $chargesTotal = (float) ($charges['total'] ?? 0);
+        $grand = round($sub + $chargesTotal, 2);
+
+        return [
+            'success'            => $error === null,
+            'purchase_order'     => $this->displayNumber($poDigits),
+            'charges'            => $charges,
+            'currency'           => $currency,
+            'document_sub_total' => $sub,
+            'sub_total'          => $sub,
+            'grand_total'        => $grand,
+            'document_items'     => (int) ($doc['items'] ?? 0),
+            'sources'            => [
+                'sap' => [
+                    'service' => 'ZI_PO_CONDITION_HUB',
+                    'path'    => (string) ($this->cfg['po_condition_service']
+                        ?? '/sap/opu/odata/sap/Z_QUOTATIONZCOSTCOM_CDS/ZI_PO_CONDITION_HUB'),
+                    'total'   => $chargesTotal,
+                    'moq'     => (float) ($charges['moq'] ?? 0),
+                    'currency'=> $currency,
+                ],
+                'document_net' => [
+                    'service' => 'ZI_PurchaseOrderAPI_HUB',
+                    'sub_total' => $sub,
+                    'items' => (int) ($doc['items'] ?? 0),
+                ],
+            ],
+            'triggered_at'       => date('c'),
+            'error'              => $error,
+        ];
+    }
+
+    /**
+     * Align summary with SAP PO PDF:
+     * Sub Total = full PO NetPriceAmount (all items)
+     * + Freight/MOQ/Other/Screen/Bank (ZI_PO_CONDITION_HUB)
+     * + IGST/SGST/CGST (default IGST 18% on sub when tax missing — same as PDF)
+     * = Total P.O Value
+     *
+     * @param array<string,mixed> $summary
+     * @param array<string,mixed> $chargeTrigger
+     * @return array<string,mixed>
+     */
+    private function applyPdfStylePoTotals(array $summary, string $poDigits, array $chargeTrigger): array
+    {
+        $workbenchSub = (float) ($summary['sub_total'] ?? $summary['total_po_value'] ?? 0);
+        $summary['workbench_sub_total'] = $workbenchSub;
+        // Keep total_po_value as costing-grid line net (KPI / workbench compare)
+        $summary['total_po_value'] = $workbenchSub;
+
+        $doc = $this->fetchDocumentPoNetValue($poDigits);
+        $docSub = (float) ($doc['sub_total'] ?? 0);
+        if ($docSub <= 0) {
+            $docSub = $workbenchSub;
+        }
+        $summary['document_sub_total'] = $docSub;
+        $summary['document_items'] = (int) ($doc['items'] ?? 0);
+        $summary['sub_total'] = $docSub;
+
+        $rowCharges = is_array($summary['charges'] ?? null) ? $summary['charges'] : $this->emptyChargeBuckets();
+        $apiCharges = is_array($chargeTrigger['charges'] ?? null) ? $chargeTrigger['charges'] : $this->emptyChargeBuckets();
+        $charges = $this->mergeChargeBuckets($rowCharges, $apiCharges);
+        $currency = (string) (
+            $chargeTrigger['currency']
+            ?? $doc['currency']
+            ?? $summary['currency']
+            ?? 'INR'
+        );
+        $charges = $this->applyDefaultIgstToCharges($charges, $docSub, $currency);
+        $summary['charges'] = $charges;
+        $summary['charges_total'] = (float) ($charges['total'] ?? 0);
+        $summary['grand_total'] = round($docSub + (float) $summary['charges_total'], 2);
+        if ($currency !== '') {
+            $summary['charges_currency'] = $currency;
+            if (($summary['currency'] ?? '') === '') {
+                $summary['currency'] = $currency;
+            }
+        }
+        $summary['charges_sources'] = $chargeTrigger['sources'] ?? [];
+        return $summary;
+    }
+
+    /**
+     * Full PO net (once per PurchaseOrderItem) from ZI_PurchaseOrderAPI_HUB — PDF Sub Total.
+     *
+     * @return array{sub_total:float,items:int,currency:string,error:?string}
+     */
+    private function fetchDocumentPoNetValue(string $poDigits): array
+    {
+        $out = ['sub_total' => 0.0, 'items' => 0, 'currency' => '', 'error' => null];
+        $service = (string) ($this->cfg['purchase_order_service']
+            ?? '/sap/opu/odata/sap/ZI_PURCHASEORDERAPI_HUB_CDS/ZI_PurchaseOrderAPI_HUB');
+        $padded = str_pad(substr($poDigits, -10), 10, '0', STR_PAD_LEFT);
+        try {
+            $result = $this->odata->fetchResults($service, [
+                '$filter' => "PurchaseOrder eq '{$padded}'",
+                '$select' => 'PurchaseOrder,PurchaseOrderItem,NetPriceAmount,DocumentCurrency',
+                '$format' => 'json',
+            ], (int) ($this->cfg['po_max_rows'] ?? 25000));
+        } catch (Throwable $e) {
+            $out['error'] = $e->getMessage();
+            return $out;
+        }
+        if (($result['error'] ?? null) !== null) {
+            $out['error'] = (string) $result['error'];
+            return $out;
+        }
+        $seen = [];
+        $sum = 0.0;
+        $currency = '';
+        foreach (($result['rows'] ?? []) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $item = trim((string) ($row['PurchaseOrderItem'] ?? ''));
+            $key = $item !== '' ? ltrim($item, '0') : '';
+            if ($key === '') {
+                $key = 'row' . count($seen);
+            }
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $sum += $this->sapNumber($row['NetPriceAmount'] ?? 0);
+            if ($currency === '') {
+                $currency = trim((string) ($row['DocumentCurrency'] ?? ''));
+            }
+        }
+        $out['sub_total'] = round($sum, 2);
+        $out['items'] = count($seen);
+        $out['currency'] = $currency;
+        return $out;
+    }
+
+    /**
+     * SAP PO PDF uses IGST 18% on Sub Total (excl. freight) when tax conditions are not
+     * exposed on ZI_PO_CONDITION_HUB — fill IGST so Total P.O Value matches the PDF.
+     *
+     * @param array<string,mixed> $charges
+     * @return array<string,mixed>
+     */
+    private function applyDefaultIgstToCharges(array $charges, float $subTotal, string $currency): array
+    {
+        $tax = (float) ($charges['igst'] ?? 0)
+            + (float) ($charges['sgst'] ?? 0)
+            + (float) ($charges['cgst'] ?? 0);
+        $curr = strtoupper(trim($currency) ?: 'INR');
+        $rate = (float) ($this->cfg['po_pdf_igst_rate'] ?? 0.18);
+        if ($rate <= 0) {
+            $rate = 0.18;
+        }
+        if ($tax <= 0.0001 && $subTotal > 0 && $curr === 'INR') {
+            $charges['igst'] = round($subTotal * $rate, 2);
+        }
+        $charges['total'] = round(
+            (float) ($charges['other'] ?? 0)
+            + (float) ($charges['freight'] ?? 0)
+            + (float) ($charges['moq'] ?? 0)
+            + (float) ($charges['screen'] ?? 0)
+            + (float) ($charges['bank'] ?? 0)
+            + (float) ($charges['sgst'] ?? 0)
+            + (float) ($charges['cgst'] ?? 0)
+            + (float) ($charges['igst'] ?? 0)
+            - (float) ($charges['discount'] ?? 0),
+            2
+        );
+        return $charges;
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function emptyChargeBuckets(): array
+    {
+        return [
+            'other' => 0.0, 'freight' => 0.0, 'moq' => 0.0, 'screen' => 0.0, 'bank' => 0.0,
+            'discount' => 0.0, 'sgst' => 0.0, 'cgst' => 0.0, 'igst' => 0.0, 'total' => 0.0,
+            'lines' => [],
+        ];
+    }
+
+    /**
+     * Put charge bucket amounts onto first detail row as Cond* so client summarizeCharges sees them.
+     *
+     * @param list<array<string,mixed>> $records
+     * @param array<string,mixed> $charges
+     */
+    private function stampChargeBucketsOntoRecords(array &$records, array $charges): void
+    {
+        $map = [
+            'other'   => 'cond_othr',
+            'moq'     => 'cond_zb00',
+            'screen'  => 'cond_zsci',
+            'bank'    => 'cond_zbcr',
+        ];
+        $need = [];
+        foreach ($map as $bucket => $field) {
+            $amt = (float) ($charges[$bucket] ?? 0);
+            if ($amt > 0.0001) {
+                $need[$field] = $amt;
+            }
+        }
+        $freight = (float) ($charges['freight'] ?? 0);
+        if ($freight > 0.0001) {
+            $need['cond_frb1'] = $freight;
+            $need['cond_frb2'] = 0.0;
+        }
+        if ($need === []) {
+            return;
+        }
+
+        // Current sum on detail rows
+        $have = [];
+        foreach (array_keys($need) as $field) {
+            $have[$field] = 0.0;
+        }
+        foreach ($records as $r) {
+            $kind = (string) ($r['row_kind'] ?? 'detail');
+            if (in_array($kind, ['footer', 'charge', 'tax', 'total', 'subtotal'], true)) {
+                continue;
+            }
+            foreach ($have as $field => $_) {
+                $have[$field] += (float) ($r[$field] ?? 0);
+            }
+        }
+
+        foreach ($records as &$r) {
+            $kind = (string) ($r['row_kind'] ?? 'detail');
+            if (in_array($kind, ['footer', 'charge', 'tax', 'total', 'subtotal'], true)) {
+                continue;
+            }
+            foreach ($need as $field => $want) {
+                $gap = $want - (float) ($have[$field] ?? 0);
+                if ($gap > 0.0001) {
+                    $r[$field] = round((float) ($r[$field] ?? 0) + $gap, 4);
+                }
+            }
+            break;
+        }
+        unset($r);
+    }
+
+    /**
+     * SAP ZI_PO_CONDITION_HUB — PO header conditions (Other / Freight / MOQ / Screen / Bank).
+     *
+     * @return array{charges:array<string,mixed>,currency:string,error:?string}
+     */
+    private function fetchSapPoConditionHub(string $poDigits): array
+    {
+        $empty = $this->emptyChargeBuckets();
+        $service = (string) ($this->cfg['po_condition_service']
+            ?? '/sap/opu/odata/sap/Z_QUOTATIONZCOSTCOM_CDS/ZI_PO_CONDITION_HUB');
+        $padded = str_pad(substr($poDigits, -10), 10, '0', STR_PAD_LEFT);
+
+        try {
+            $result = $this->odata->fetchResults($service, [
+                '$filter' => "PurchaseOrder eq '{$padded}'",
+                '$format' => 'json',
+            ], 5);
+        } catch (Throwable $e) {
+            return ['charges' => $empty, 'currency' => '', 'error' => $e->getMessage()];
+        }
+
+        if (($result['error'] ?? null) !== null) {
+            return [
+                'charges'  => $empty,
+                'currency' => '',
+                'error'    => (string) $result['error'],
+            ];
+        }
+
+        $rows = is_array($result['rows'] ?? null) ? $result['rows'] : [];
+        if ($rows === []) {
+            return [
+                'charges'  => $empty,
+                'currency' => '',
+                'error'    => null,
+            ];
+        }
+
+        $row = $rows[0];
+        $num = static function ($v): float {
+            if ($v === null || $v === '') {
+                return 0.0;
+            }
+            return (float) str_replace([',', ' '], '', (string) $v);
+        };
+
+        $other = $num($row['OtherCharges'] ?? $row['OTHERCHARGES'] ?? $row['CondOthr'] ?? 0);
+        $freight = $num($row['Freight1'] ?? $row['FREIGHT1'] ?? $row['CondFrb1'] ?? 0)
+            + $num($row['Freight2'] ?? $row['FREIGHT2'] ?? $row['CondFrb2'] ?? 0);
+        $moq = $num($row['MOQ'] ?? $row['CondZb00'] ?? $row['CONDZB00'] ?? 0);
+        $screen = $num($row['Screen'] ?? $row['SCREEN'] ?? $row['CondZsci'] ?? 0);
+        $bank = $num($row['Bank'] ?? $row['BANK'] ?? $row['CondZbcr'] ?? 0);
+        $currency = trim((string) ($row['Currency'] ?? $row['CURRENCY'] ?? ''));
+
+        $charges = $empty;
+        $charges['other'] = round($other, 2);
+        $charges['freight'] = round($freight, 2);
+        $charges['moq'] = round($moq, 2);
+        $charges['screen'] = round($screen, 2);
+        $charges['bank'] = round($bank, 2);
+        $charges['total'] = round(
+            $charges['other'] + $charges['freight'] + $charges['moq']
+            + $charges['screen'] + $charges['bank']
+            + $charges['sgst'] + $charges['cgst'] + $charges['igst']
+            - $charges['discount'],
+            2
+        );
+        $charges['lines'] = [
+            ['key' => 'other', 'label' => 'Other Charges', 'amount' => $charges['other'], 'sap' => 'OtherCharges'],
+            ['key' => 'freight', 'label' => 'Freight', 'amount' => $charges['freight'], 'sap' => 'Freight1 / Freight2'],
+            ['key' => 'moq', 'label' => 'MOQ Charges', 'amount' => $charges['moq'], 'sap' => 'MOQ'],
+            ['key' => 'screen', 'label' => 'Screen Charges', 'amount' => $charges['screen'], 'sap' => 'Screen'],
+            ['key' => 'bank', 'label' => 'Bank Charges', 'amount' => $charges['bank'], 'sap' => 'Bank'],
+        ];
+
+        return [
+            'charges'  => $charges,
+            'currency' => $currency,
+            'error'    => null,
+        ];
+    }
+
+    /**
+     * @deprecated Use fetchSapPoConditionHub — kept for applyConditionChargesToRecords item stamp shape.
      * @return array<string, array{cond_othr:float,cond_frb1:float,cond_frb2:float,cond_zb00:float,cond_zsci:float,cond_zbcr:float}>
      */
     private function fetchPoConditionCharges(string $poDigits): array
     {
-        try {
-            $detail = $this->poService->report($poDigits);
-            $rows = is_array($detail['records'] ?? null) ? $detail['records'] : [];
-        } catch (Throwable $e) {
-            return [];
-        }
-        $out = [];
-        foreach ($rows as $r) {
-            if (!is_array($r)) {
-                continue;
-            }
-            $item = ltrim((string) ($r['item'] ?? $r['poitem'] ?? ''), '0');
-            if ($item === '') {
-                $item = '0';
-            }
-            $out[$item] = [
-                'cond_othr' => (float) ($r['cond_othr'] ?? 0),
-                'cond_frb1' => (float) ($r['cond_frb1'] ?? 0),
-                'cond_frb2' => (float) ($r['cond_frb2'] ?? 0),
-                'cond_zb00' => (float) ($r['cond_zb00'] ?? 0),
-                'cond_zsci' => (float) ($r['cond_zsci'] ?? 0),
-                'cond_zbcr' => (float) ($r['cond_zbcr'] ?? 0),
-            ];
-        }
-        return $out;
+        $fetched = $this->fetchSapPoConditionHub($poDigits);
+        $c = is_array($fetched['charges'] ?? null) ? $fetched['charges'] : $this->emptyChargeBuckets();
+        return [
+            '0' => [
+                'cond_othr' => (float) ($c['other'] ?? 0),
+                'cond_frb1' => (float) ($c['freight'] ?? 0),
+                'cond_frb2' => 0.0,
+                'cond_zb00' => (float) ($c['moq'] ?? 0),
+                'cond_zsci' => (float) ($c['screen'] ?? 0),
+                'cond_zbcr' => (float) ($c['bank'] ?? 0),
+            ],
+        ];
     }
 
     /**
@@ -2659,11 +3123,15 @@ class PoCostValidationService
                 if ($item !== '') {
                     $seen[$item] = true;
                 }
-                $cond['other'] += (float) ($r['cond_othr'] ?? 0);
-                $cond['freight'] += (float) ($r['cond_frb1'] ?? 0) + (float) ($r['cond_frb2'] ?? 0);
-                $cond['moq'] += (float) ($r['cond_zb00'] ?? 0);
-                $cond['screen'] += (float) ($r['cond_zsci'] ?? 0);
-                $cond['bank'] += (float) ($r['cond_zbcr'] ?? 0);
+                // Header conditions (Freight/MOQ/…) may be stamped on every line — take MAX, never SUM
+                $cond['other'] = max($cond['other'], (float) ($r['cond_othr'] ?? 0));
+                $cond['freight'] = max(
+                    $cond['freight'],
+                    (float) ($r['cond_frb1'] ?? 0) + (float) ($r['cond_frb2'] ?? 0)
+                );
+                $cond['moq'] = max($cond['moq'], (float) ($r['cond_zb00'] ?? 0));
+                $cond['screen'] = max($cond['screen'], (float) ($r['cond_zsci'] ?? 0));
+                $cond['bank'] = max($cond['bank'], (float) ($r['cond_zbcr'] ?? 0));
                 continue;
             }
 
@@ -2697,10 +3165,9 @@ class PoCostValidationService
             }
         }
 
-        $condSum = array_sum($cond);
-        $src = $condSum > 0.0001 ? $cond : $footer;
+        // Per-bucket max: Cond* on one charge may be blank while PASSPO footer has MOQ (and vice versa)
         foreach (['other', 'freight', 'moq', 'screen', 'bank'] as $k) {
-            $out[$k] = round((float) ($src[$k] ?? 0), 2);
+            $out[$k] = round(max((float) ($cond[$k] ?? 0), (float) ($footer[$k] ?? 0)), 2);
         }
         foreach (['discount', 'sgst', 'cgst', 'igst'] as $k) {
             $out[$k] = round((float) ($footer[$k] ?? 0), 2);
@@ -2786,6 +3253,14 @@ class PoCostValidationService
             'pending'         => 0,
             'zcost_matched'   => 0,
             'total_po_value'  => 0,
+            'sub_total'       => 0,
+            'charges'         => [
+                'other' => 0.0, 'freight' => 0.0, 'moq' => 0.0, 'screen' => 0.0, 'bank' => 0.0,
+                'discount' => 0.0, 'sgst' => 0.0, 'cgst' => 0.0, 'igst' => 0.0, 'total' => 0.0,
+                'lines' => [],
+            ],
+            'charges_total'   => 0,
+            'grand_total'     => 0,
             'total_expected'  => 0,
             'total_actual'    => 0,
             'currency'        => 'INR',

@@ -923,7 +923,7 @@
             title = 'Total Net Value (Budget Total)';
             val = fmt(s.zcost_net_value);
             unit = curr;
-            formula = 'Costing Net Value = ∑ (SO_QTY × BUDGET_COST_PER_GMT) once per matched PO item';
+            formula = 'Costing Net Value = ∑ (TOT_POQTY × BUDGET_COST_PER_GARMENT) once per matched PO item';
             const matchedRows = detailRows.filter(isMatchedRow);
             const seenZVal = {};
             const valRows = matchedRows.filter(r => {
@@ -932,20 +932,23 @@
                 return !it;
             });
             const budgetQtyOf = (r) => {
-                const so = Number(r.so_qty ?? r.prwise_so_qty ?? 0) || 0;
                 const po = Number(r.tot_poqty || r.order_qty || 0) || 0;
-                return so > 0 ? so : (po > 0 ? po : 1);
+                const so = Number(r.so_qty ?? r.prwise_so_qty ?? 0) || 0;
+                return po > 0 ? po : (so > 0 ? so : 1);
             };
+            const budgetOf = (r) => budgetForCompare(r)
+                ?? nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost ?? r.budget_cost_per_piece)
+                ?? 0;
             stepsHtml = valRows.length
                 ? valRows.map(r => {
-                    const b = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost) || 0;
+                    const b = budgetOf(r);
                     const q = budgetQtyOf(r);
-                    return `<div class="pcw-cdm-step-item"><span>Item #${esc(r.poitem || r.po_item || r.item)} (${qty(q)} SO × ₹${fmtDec(b, 4)})</span><strong>₹${money(b * q)}</strong></div>`;
+                    return `<div class="pcw-cdm-step-item"><span>Item #${esc(r.poitem || r.po_item || r.item)} (${qty(q)} × ₹${fmtDec(b, 4)})</span><strong>₹${money(b * q)}</strong></div>`;
                 }).join('')
                 + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Expected Budget</span><strong>₹${fmt(s.zcost_net_value)} ${esc(curr)}</strong></div>`
                 : '<div class="pcw-cdm-step-item"><span>No matched value</span><strong>₹0</strong></div>';
             rowsHtml = valRows.map((r, i) => {
-                const b = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost) || 0;
+                const b = budgetOf(r);
                 const q = budgetQtyOf(r);
                 return `<tr>
                     <td>#${esc(r.poitem || r.po_item || r.item || (i + 1))}</td>
@@ -1604,6 +1607,58 @@
     let esignDeepLinkReturnUrl = '';
     let esignOpenedViaDeepLink = false;
 
+    /**
+     * Pass PO flow: only Approved button (hide Status Update + Save Signed PDF, clear Released/Done).
+     * Regular eSign: Status Update + Save. Sent: assign block + Send.
+     */
+    function applyEsignPassPoChrome(showApprove, fromSent) {
+        const approveBtn = $('pcwEsignApprove');
+        const approveHint = $('pcwEsignApproveHint');
+        const saveBtn = $('pcwEsignSave');
+        const releaseBlock = $('pcwEsignReleaseBlock');
+        if (approveBtn) {
+            approveBtn.hidden = !showApprove;
+            approveBtn.setAttribute('aria-hidden', showApprove ? 'false' : 'true');
+        }
+        if (approveHint) approveHint.hidden = !showApprove;
+        if (releaseBlock) {
+            releaseBlock.hidden = !!showApprove;
+            releaseBlock.setAttribute('aria-hidden', showApprove ? 'true' : 'false');
+        }
+        if (showApprove) {
+            resetEsignReleaseFields();
+            if (saveBtn) {
+                saveBtn.hidden = true;
+                saveBtn.setAttribute('aria-hidden', 'true');
+            }
+            const sub = $('pcwEsignSub');
+            if (sub) {
+                sub.textContent = 'Place signature, then click Approved — opens Approved PO page';
+            }
+        } else if (saveBtn && !fromSent) {
+            saveBtn.hidden = false;
+            saveBtn.setAttribute('aria-hidden', 'false');
+        }
+    }
+
+    function approvedPoListUrl() {
+        try {
+            let base = String(cfg.costingHomeUrl || '').trim();
+            if (!base) {
+                // purchase-order → po-costing (same /sap_reports prefix)
+                base = window.location.pathname.replace(/\/purchase-order(?:\/.*)?$/i, '/po-costing');
+                if (base === window.location.pathname) {
+                    base = `${window.location.origin}/sap_reports/po-costing`;
+                }
+            }
+            const u = new URL(base, window.location.origin);
+            u.searchParams.set('panel', 'approved');
+            return u.toString();
+        } catch (_) {
+            return `${window.location.origin}/sap_reports/po-costing?panel=approved`;
+        }
+    }
+
     function applyEsignSaveLabel(mode) {
         const label = $('pcwEsignSaveLabel');
         const saveBtn = $('pcwEsignSave');
@@ -1613,6 +1668,8 @@
         if (label) label.textContent = isSent ? 'Send PO' : 'Save Signed PDF';
         if (saveBtn) {
             saveBtn.classList.remove('is-signed');
+            saveBtn.hidden = mode === 'pass';
+            saveBtn.setAttribute('aria-hidden', mode === 'pass' ? 'true' : 'false');
             saveBtn.title = isSent
                 ? 'Sign PDF and send/forward to the selected user'
                 : 'Save the signed PDF to EVOL/uploads/po_esign/PO_New_Module (PO-{number}.pdf)';
@@ -1624,7 +1681,9 @@
         if ($('pcwEsignSub')) {
             $('pcwEsignSub').textContent = isSent
                 ? 'Sign and send this PO to the next user'
-                : 'Place signature, then click Save Signed PDF — unsigned views are never saved';
+                : (mode === 'pass'
+                    ? 'Place signature, then click Approved — opens Approved PO page'
+                    : 'Place signature, then click Save Signed PDF — unsigned views are never saved');
         }
         if ($('pcwEsignTitle')) {
             $('pcwEsignTitle').textContent = isSent ? 'Send PO' : 'PO E-Signature';
@@ -1815,19 +1874,16 @@
         resetEsignLogDetails();
         clearEsignSignedAlready();
         showEsignSapMessage('', '');
-        void loadEsignReleaseStatus(po);
+        // Pass PO / Approved: only Approved button — no Status Update values, no Save Signed PDF
+        // Regular eSign: Status Update + Save; Sent: assign flow
+        if (!showApprove) {
+            void loadEsignReleaseStatus(po);
+        }
         void loadEsignLogDetails(po);
-        // eSign toolbar → hide Approved; Pass PO → show Approved; Sent → send mode
         shell.classList.toggle('is-from-pass-po', showApprove);
         shell.classList.toggle('is-from-sent', fromSent);
         applyEsignSaveLabel(esignLaunchMode);
-        const approveBtn = $('pcwEsignApprove');
-        const approveHint = $('pcwEsignApproveHint');
-        if (approveBtn) {
-            approveBtn.hidden = !showApprove;
-            approveBtn.setAttribute('aria-hidden', showApprove ? 'false' : 'true');
-        }
-        if (approveHint) approveHint.hidden = !showApprove;
+        applyEsignPassPoChrome(showApprove, fromSent);
         setEsignSignatureData('');
         setEsignCreateMode(true);
         clearLiveEsignStamps();
@@ -1918,15 +1974,10 @@
         shell.classList.remove('is-from-sent');
         esignLaunchMode = 'esign';
         applyEsignSaveLabel('esign');
+        applyEsignPassPoChrome(false, false);
+        resetEsignReleaseFields();
         showEsignSapMessage('', '');
-        const approveBtn = $('pcwEsignApprove');
-        const approveHint = $('pcwEsignApproveHint');
         const sentHint = $('pcwEsignSentHint');
-        if (approveBtn) {
-            approveBtn.hidden = true;
-            approveBtn.setAttribute('aria-hidden', 'true');
-        }
-        if (approveHint) approveHint.hidden = true;
         if (sentHint) sentHint.hidden = true;
         esignPdfRenderToken += 1;
         esignPdfDoc = null;
@@ -3378,7 +3429,7 @@
                 return;
             }
 
-            // MessageType S = approved — show SAP Message
+            // MessageType S = approved — show SAP Message, then only Approved PO page
             applyApprovedStatus(po, 'Approved');
             syncPassRevertButtons(summarizeRows(rows));
             const okText = sapMsg || 'PO is approved in SAP';
@@ -3389,7 +3440,10 @@
             toast.textContent = `${okText} · ${mumbaiStamp}`;
             document.body.appendChild(toast);
             setTimeout(() => toast.remove(), 4500);
-            window.setTimeout(() => closeEsignModal(), 700);
+            window.setTimeout(() => {
+                closeEsignModal();
+                window.location.assign(approvedPoListUrl());
+            }, 700);
         } catch (err) {
             const errText = String(err.message || 'Save / Approve failed');
             showEsignSapMessage(errText, 'E');
@@ -4458,22 +4512,46 @@
 
     function isMatchedRow(r) {
         if (!r || isFooterRow(r)) return false;
-        if (r.family_mismatch && !r.manual_match) return false;
-        if (r.manual_match || r.matched_line_key || r.cost_item || r.maktx) {
-            if (!isZcostAlignedWithPo(r) && !r.manual_match) return false;
-            const budget = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost);
-            return budget !== null && budget > 0;
+        // Same budget source as Valid/Need-to-Review (RESULT columns), not GMT-only
+        const budget = budgetForCompare(r)
+            ?? nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost ?? r.budget_cost_per_piece);
+        if (budget === null || budget <= 0) return false;
+
+        const hasCostLink = !!(
+            r.manual_match
+            || r.matched_line_key
+            || r.cost_item
+            || r.zcost_item
+            || r.costing_item_no
+            || r.maktx
+            || r.costing_quotation_no
+            || r.matched_quotation
+        );
+
+        // Live Valid/compare already proves a usable costing amount — count for KPIs
+        // even when the coarse family/style alignment heuristic fails.
+        const actual = actualForCompare(r);
+        if (budget > 0 && actual !== null && actual > 0) {
+            if (r.family_mismatch && !r.manual_match && !hasCostLink) return false;
+            return true;
+        }
+
+        if ((r.family_mismatch || r.needs_manual_match || r._zcost_pending) && !r.manual_match && !r.matched_line_key) {
+            return false;
+        }
+        if (hasCostLink) {
+            if (r.manual_match || r.matched_line_key) return true;
+            // Prefer alignment when we only have a link + budget (no live actual yet)
+            if (isZcostAlignedWithPo(r)) return true;
+            return !!(r.costing_quotation_no || r.matched_quotation || r.maktx);
         }
         if (r.needs_manual_match === true) return false;
-        const budget = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost);
-        const actual = nVal(r.actual_cost ?? r.po_unit_cost);
-        if (budget === null || budget <= 0 || actual === null) return false;
         const st = String(r.status || '').toUpperCase();
         if (st === 'EXCEPTION' && /no matching|no linked|cannot load|no budget/i.test(String(r.validation_result || ''))) {
             return false;
         }
         // TEMPFIN budget/actual present but no explicit zCOST ITEM yet — still countable
-        return true;
+        return actual !== null && actual > 0;
     }
 
     function needsZcostItemPick(r) {
@@ -4555,10 +4633,14 @@
             const rowOrderQty = Number(r.tot_poqty ?? r.order_qty ?? r.po_qty ?? 0) || 0;
             // PO net = SAP TOTVALUE once per line (not PORATE×QTY — that drifts after rate round).
             const poRate = nVal(r.porate ?? r.po_unit_cost ?? r.net_price ?? r.actual_cost);
-            const budget = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost);
-            const actual = nVal(r.porate ?? r.actual_cost ?? r.po_unit_cost);
+            // Prefer garment budget (TOTALINR / BUDGET_COST_PER_PIECE) — same as Valid compare
+            const budget = budgetForCompare(r)
+                ?? nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost ?? r.budget_cost_per_piece);
+            const actual = actualForCompare(r)
+                ?? nVal(r.porate ?? r.actual_cost ?? r.po_unit_cost);
             const poQty = rowOrderQty > 0 ? rowOrderQty : (rowSoQty > 0 ? rowSoQty : 0);
-            const garmentQty = rowSoQty > 0 ? rowSoQty : (rowOrderQty > 0 ? rowOrderQty : 1);
+            // Full PO line qty for net value (comparable to TOTVALUE) — not SO-split qty
+            const lineQty = rowOrderQty > 0 ? rowOrderQty : (rowSoQty > 0 ? rowSoQty : 1);
             const poLineNet = poLineNetValue(r);
 
             // Once per PO line — TOTVALUE / TOT_POQTY repeat on every SO split
@@ -4568,11 +4650,11 @@
                 totalValue += poLineNet;
                 totalOrderQty += poQty;
                 poSoQty += poQty;
-                if (budget !== null) totalExpected += budget * garmentQty;
-                if (actual !== null) totalActual += actual * garmentQty;
+                if (budget !== null) totalExpected += budget * lineQty;
+                if (actual !== null) totalActual += actual * lineQty;
             }
 
-            // Strict match check: only count rows that have a confirmed zCOST match
+            // Count rows with usable costing budget (Valid / linked), not alignment-only
             const isMatched = isMatchedRow(r);
 
             if (isMatched) {
@@ -4583,11 +4665,11 @@
                 if (item && !seenZItem[item]) {
                     seenZItem[item] = true;
                     zcostSoQty += poQty;
-                    // BUDGET_COST_PER_GMT is per garment → × SO_QTY (fallback TOT_POQTY)
-                    zcostExpected += (budget || 0) * garmentQty;
+                    // Budget per garment × TOT_POQTY (same scale as PO TOTAL NET VALUE)
+                    zcostExpected += (budget || 0) * lineQty;
                 } else if (!item) {
                     zcostSoQty += poQty;
-                    zcostExpected += (budget || 0) * garmentQty;
+                    zcostExpected += (budget || 0) * lineQty;
                 }
             }
 
@@ -4615,7 +4697,7 @@
             zcost_items: zcostItemCount,
             zcost_materials: zcostMatCount,
             zcost_so_qty: zcostSoQty,
-            zcost_net_value: zcostExpected,
+            zcost_net_value: Math.round(zcostExpected * 100) / 100,
             total_expected: totalExpected,
             total_actual: totalActual,
             unit,
@@ -4651,11 +4733,15 @@
                     || ('__' + String(r.material || '') + '|' + String(r.salordno || r.sales_order || ''));
                 if (seenItem[item]) return;
                 seenItem[item] = true;
-                cond.other += nVal(r.cond_othr) || 0;
-                cond.freight += (nVal(r.cond_frb1) || 0) + (nVal(r.cond_frb2) || 0);
-                cond.moq += nVal(r.cond_zb00) || 0;
-                cond.screen += nVal(r.cond_zsci) || 0;
-                cond.bank += nVal(r.cond_zbcr) || 0;
+                // Header conditions may repeat on every SO/PO line — MAX, never SUM
+                cond.other = Math.max(cond.other, nVal(r.cond_othr) || 0);
+                cond.freight = Math.max(
+                    cond.freight,
+                    (nVal(r.cond_frb1) || 0) + (nVal(r.cond_frb2) || 0)
+                );
+                cond.moq = Math.max(cond.moq, nVal(r.cond_zb00) || 0);
+                cond.screen = Math.max(cond.screen, nVal(r.cond_zsci) || 0);
+                cond.bank = Math.max(cond.bank, nVal(r.cond_zbcr) || 0);
                 return;
             }
             const label = String(r.pono || r.matgroup || r.validation_result || '')
@@ -4675,14 +4761,13 @@
             else if (label.includes('IGST')) footer.igst += amt;
             else if (label.includes('DISCOUNT')) footer.discount += amt;
         });
-        const condSum = cond.other + cond.freight + cond.moq + cond.screen + cond.bank;
-        const src = condSum > 0.0001 ? cond : footer;
+        // Per-bucket max so CondOTHR alone does not wipe PASSPO/footer MOQ (ZB00)
         const out = {
-            other: round2(src.other || 0),
-            freight: round2(src.freight || 0),
-            moq: round2(src.moq || 0),
-            screen: round2(src.screen || 0),
-            bank: round2(src.bank || 0),
+            other: round2(Math.max(cond.other || 0, footer.other || 0)),
+            freight: round2(Math.max(cond.freight || 0, footer.freight || 0)),
+            moq: round2(Math.max(cond.moq || 0, footer.moq || 0)),
+            screen: round2(Math.max(cond.screen || 0, footer.screen || 0)),
+            bank: round2(Math.max(cond.bank || 0, footer.bank || 0)),
             discount: round2(footer.discount || 0),
             sgst: round2(footer.sgst || 0),
             cgst: round2(footer.cgst || 0),
@@ -4700,6 +4785,73 @@
         return Math.round((Number(n) || 0) * 100) / 100;
     }
 
+    /** Last charges summary used by PO Value Breakdown (kept for SAP trigger refresh). */
+    let lastChargesSummary = {};
+
+    /**
+     * Trigger SAP charges API (ZI_PO_CONDITION_HUB only) and refresh MOQ / Total P.O Value.
+     */
+    async function refreshChargesFromSap(po, baseSummary) {
+        const poDigits = String(po || '').replace(/\D/g, '');
+        if (!poDigits) return;
+        lastChargesSummary = { ...(baseSummary || lastChargesSummary || {}) };
+        const endpoint = cfg.chargesUrl || 'purchase-order/charges';
+        try {
+            const url = `${endpoint}${endpoint.includes('?') ? '&' : '?'}po=${encodeURIComponent(poDigits)}&_=${Date.now()}`;
+            const res = await fetch(url, {
+                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                credentials: 'same-origin',
+            });
+            const raw = await res.json().catch(() => ({}));
+            const data = raw?.data && typeof raw.data === 'object' ? raw.data : raw;
+            const apiCharges = (data && data.charges && typeof data.charges === 'object')
+                ? data.charges
+                : (raw.charges && typeof raw.charges === 'object' ? raw.charges : null);
+            if (!apiCharges) return;
+
+            // Stamp Cond* onto first detail row so row re-summaries keep MOQ
+            const detail = (rows || []).find((r) => r && !isFooterRow(r));
+            if (detail) {
+                const stamp = {
+                    cond_othr: Number(apiCharges.other) || 0,
+                    cond_frb1: Number(apiCharges.freight) || 0,
+                    cond_frb2: 0,
+                    cond_zb00: Number(apiCharges.moq) || 0,
+                    cond_zsci: Number(apiCharges.screen) || 0,
+                    cond_zbcr: Number(apiCharges.bank) || 0,
+                };
+                Object.keys(stamp).forEach((k) => {
+                    if (stamp[k] > 0 && !(Number(detail[k]) > 0)) detail[k] = stamp[k];
+                    else if (stamp[k] > (Number(detail[k]) || 0)) detail[k] = stamp[k];
+                });
+            }
+
+            const docSub = Number(data.document_sub_total ?? data.sub_total
+                ?? raw?.document_sub_total ?? raw?.sub_total
+                ?? lastChargesSummary.document_sub_total
+                ?? lastChargesSummary.sub_total) || 0;
+            const mergedSummary = {
+                ...lastChargesSummary,
+                charges: apiCharges,
+                charges_total: Number(apiCharges.total) || 0,
+                document_sub_total: docSub > 0
+                    ? docSub
+                    : (Number(lastChargesSummary.document_sub_total) || 0),
+                sub_total: docSub > 0
+                    ? docSub
+                    : (Number(lastChargesSummary.sub_total ?? lastChargesSummary.total_po_value) || 0),
+            };
+            const sub = Number(mergedSummary.sub_total) || 0;
+            mergedSummary.grand_total = Number(data.grand_total ?? raw?.grand_total) > 0
+                ? Number(data.grand_total ?? raw?.grand_total)
+                : round2(sub + (Number(apiCharges.total) || 0));
+            lastChargesSummary = mergedSummary;
+            fillKpis(mergedSummary);
+        } catch (_) {
+            /* keep existing breakdown if trigger fails */
+        }
+    }
+
     function fillChargesPanel(summary) {
         const panel = $('pcwChargesPanel');
         if (!panel) return;
@@ -4707,7 +4859,8 @@
         const charges = s.charges && typeof s.charges === 'object'
             ? s.charges
             : summarizeCharges(rows);
-        const sub = Number(s.sub_total ?? s.total_po_value) || 0;
+        // PDF Sub Total = full PO net (document_sub_total), not filtered costing rows
+        const sub = Number(s.document_sub_total ?? s.sub_total ?? s.total_po_value) || 0;
         const grand = Number(s.grand_total);
         const grandVal = Number.isFinite(grand) && grand > 0
             ? grand
@@ -4779,7 +4932,7 @@
                     && Number(fromRows.cost_mismatch || 0) === 0
                     && Number(fromRows.ambiguous_match || 0) === 0);
         }
-        // Always prefer row-derived qty/value cards (API summary used wrong fields)
+        // Row-derived qty / workbench line net; PDF Sub/Total come from API document fields
         if (rows.length) {
             const detailN = rows.filter((r) => !isFooterRow(r)).length;
             s.total_records = detailN;
@@ -4788,10 +4941,7 @@
             s.total_order_qty = fromRows.total_order_qty;
             s.total_so_qty = fromRows.total_so_qty;
             s.total_po_value = fromRows.total_po_value;
-            s.sub_total = fromRows.sub_total;
-            s.charges = fromRows.charges;
-            s.charges_total = fromRows.charges_total;
-            s.grand_total = fromRows.grand_total;
+            s.workbench_sub_total = fromRows.sub_total ?? fromRows.total_po_value;
             s.total_expected = fromRows.total_expected;
             s.total_actual = fromRows.total_actual;
             s.zcost_so_qty = fromRows.zcost_so_qty;
@@ -4800,35 +4950,49 @@
             s.zcost_materials = fromRows.zcost_materials;
             s.unit = fromRows.unit || s.unit;
             s.currency = fromRows.currency || s.currency;
+            // Do NOT overwrite sub_total / charges / grand_total from filtered rows —
+            // those must stay PDF-style (full PO net + freight + IGST) from the API.
+            if (!(Number(fromApi.document_sub_total) > 0) && !(Number(fromApi.sub_total) > 0)) {
+                s.sub_total = fromRows.sub_total;
+                s.charges = fromRows.charges;
+                s.charges_total = fromRows.charges_total;
+                s.grand_total = fromRows.grand_total;
+            }
         }
-        // Merge API charges (esp. IGST/SGST/CGST) when row scan missed PASSPO tax footers
+        // Prefer API document Sub Total (ZI_PurchaseOrderAPI_HUB) for PO Value Breakdown
+        if (Number(fromApi.document_sub_total) > 0) {
+            s.document_sub_total = Number(fromApi.document_sub_total);
+            s.sub_total = Number(fromApi.document_sub_total);
+        } else if (Number(fromApi.sub_total) > 0 && Number(fromApi.sub_total) >= Number(s.workbench_sub_total || 0)) {
+            s.sub_total = Number(fromApi.sub_total);
+            s.document_sub_total = Number(fromApi.sub_total);
+        }
+        // Always merge SAP trigger / API charges (Freight / MOQ / IGST) over row scan
         if (fromApi.charges && typeof fromApi.charges === 'object') {
-            const rowCh = s.charges && typeof s.charges === 'object' ? s.charges : summarizeCharges([]);
+            const rowCh = (s.charges && typeof s.charges === 'object')
+                ? s.charges
+                : (fromRows.charges || summarizeCharges([]));
             const apiCh = fromApi.charges;
             const keys = ['other', 'freight', 'moq', 'screen', 'bank', 'discount', 'sgst', 'cgst', 'igst'];
             const merged = { ...rowCh };
-            let changed = false;
             keys.forEach((k) => {
                 const a = Number(apiCh[k]) || 0;
                 const b = Number(rowCh[k]) || 0;
-                if (a > b + 0.0001) {
-                    merged[k] = round2(a);
-                    changed = true;
-                } else {
-                    merged[k] = round2(b);
-                }
+                merged[k] = round2(Math.max(a, b));
             });
-            if (changed || !(Number(rowCh.total) > 0)) {
-                merged.total = round2(
-                    merged.other + merged.freight + merged.moq + merged.screen + merged.bank
-                    + merged.sgst + merged.cgst + merged.igst - merged.discount
-                );
-                s.charges = merged;
-                s.charges_total = merged.total;
-                s.grand_total = round2((Number(s.sub_total ?? s.total_po_value) || 0) + merged.total);
-            }
-        } else if ((!s.charges || !(Number(s.charges.total) > 0)) && fromApi.grand_total) {
-            s.grand_total = fromApi.grand_total;
+            merged.total = round2(
+                merged.other + merged.freight + merged.moq + merged.screen + merged.bank
+                + merged.sgst + merged.cgst + merged.igst - merged.discount
+            );
+            s.charges = merged;
+            s.charges_total = merged.total;
+            s.grand_total = round2((Number(s.sub_total ?? s.document_sub_total ?? s.total_po_value) || 0) + merged.total);
+        } else if (Number(fromApi.charges_total) > 0) {
+            s.charges_total = Number(fromApi.charges_total);
+            s.grand_total = round2((Number(s.sub_total ?? s.document_sub_total ?? s.total_po_value) || 0) + s.charges_total);
+        }
+        if (Number(fromApi.grand_total) > 0) {
+            s.grand_total = Number(fromApi.grand_total);
         }
         const fmt = (n) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
         const total = (Number(s.passed) || 0) + (Number(s.exceptions) || 0) + (Number(s.needs_review) || 0) || rows.length || 0;
@@ -4852,7 +5016,10 @@
         const poItems = detailRowCount || Number(s.po_items) || 0;
         const poMaterials = Number(s.materials) > 0 ? s.materials : 0;
         const poSoQty = Number(s.total_order_qty) > 0 ? Number(s.total_order_qty) : (Number(s.total_so_qty) || 0);
-        const poNetVal = Number(s.total_po_value) >= 0 ? s.total_po_value : 0;
+        // Prefer full-PO document net (PDF Sub Total); fall back to workbench line net
+        const poNetVal = Number(s.document_sub_total) > 0
+            ? Number(s.document_sub_total)
+            : (Number(s.sub_total) > 0 ? Number(s.sub_total) : (Number(s.total_po_value) || 0));
         const curr = s.currency || 'INR';
         const unit = s.unit || '';
 
@@ -4893,8 +5060,13 @@
         if ($('pcwKpiZcostOrderQty')) $('pcwKpiZcostOrderQty').textContent = fmt(zSoQty);
         if ($('pcwKpiZcostOrderQtyUnit')) $('pcwKpiZcostOrderQtyUnit').textContent = unit;
 
-        if ($('pcwKpiZcostValue')) $('pcwKpiZcostValue').textContent = fmt(zNetVal);
-        if ($('pcwKpiExpected')) $('pcwKpiExpected').textContent = fmt(zNetVal);
+        // Money-style (2dp) so small but real totals never round to a bare "0"
+        const fmtMoney = (n) => Number(n || 0).toLocaleString('en-IN', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2,
+        });
+        if ($('pcwKpiZcostValue')) $('pcwKpiZcostValue').textContent = fmtMoney(zNetVal);
+        if ($('pcwKpiExpected')) $('pcwKpiExpected').textContent = fmtMoney(zNetVal);
         if ($('pcwKpiZcostValueUnit')) $('pcwKpiZcostValueUnit').textContent = curr;
         if ($('pcwKpiExpectedUnit')) $('pcwKpiExpectedUnit').textContent = curr;
 
@@ -6667,6 +6839,8 @@
             applyApprovedStatus(po, data.approved_status || 'NotApproved');
             fillKpis(data.summary || {});
             renderTable();
+            // Explicit SAP ZI_PO_CONDITION_HUB trigger so MOQ / charges update
+            refreshChargesFromSap(po, data.summary || {});
 
             // API-only: Postman-empty Z_QuotationZCostCom → empty workbench (no TEMPFIN)
             if (!rows.length || cdsEmpty) {

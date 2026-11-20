@@ -30,4 +30,11 @@ return [
     'url'       => $url,
     'env'       => $envName,
     'base_path' => '',
+    // Daily PO E-Signature report (23:00 IST) — HTTP trigger: ?key=<secret>
+    'daily_esign_report' => [
+        'enabled' => true,
+        'cron_key' => getenv('EVOLV_DAILY_REPORT_KEY') ?: 'evolv-daily-esign-2300',
+        'hour_ist' => 23,
+        'minute_ist' => 0,
+    ],
 ];

@@ -555,7 +555,7 @@ $wbLoginUser = trim((string) (
                 <span class="material-icons-round">payments</span>
                 <div>
                     <strong>PO Value Breakdown</strong>
-                    <small>SAP conditions · CondOTHR · CondFRB · CondZB00 · CondZSCI · CondZBCR</small>
+                    <small>Full PO net + Freight / MOQ / charges + IGST (same as Open PDF)</small>
                 </div>
             </div>
             <div class="pcw-po-value-hero">
@@ -575,29 +575,29 @@ $wbLoginUser = trim((string) (
                     <span class="pcw-po-tile-k">Discount</span>
                     <b id="pcwChargeDiscount">0.00</b>
                 </article>
-                <article class="pcw-po-tile" data-charge="freight" role="listitem" title="CondFRB1 + CondFRB2">
+                <article class="pcw-po-tile" data-charge="freight" role="listitem" title="ZI_PO_CONDITION_HUB Freight1 + Freight2">
                     <span class="pcw-po-tile-k">Freight</span>
-                    <span class="pcw-po-tile-sap">FRB1/2</span>
+                    <span class="pcw-po-tile-sap">Freight</span>
                     <b id="pcwChargeFreight">0.00</b>
                 </article>
-                <article class="pcw-po-tile" data-charge="moq" role="listitem" title="CondZB00">
+                <article class="pcw-po-tile" data-charge="moq" role="listitem" title="ZI_PO_CONDITION_HUB MOQ">
                     <span class="pcw-po-tile-k">MOQ</span>
-                    <span class="pcw-po-tile-sap">ZB00</span>
+                    <span class="pcw-po-tile-sap">MOQ</span>
                     <b id="pcwChargeMoq">0.00</b>
                 </article>
-                <article class="pcw-po-tile" data-charge="other" role="listitem" title="CondOTHR">
+                <article class="pcw-po-tile" data-charge="other" role="listitem" title="ZI_PO_CONDITION_HUB OtherCharges">
                     <span class="pcw-po-tile-k">Other</span>
-                    <span class="pcw-po-tile-sap">OTHR</span>
+                    <span class="pcw-po-tile-sap">Other</span>
                     <b id="pcwChargeOther">0.00</b>
                 </article>
-                <article class="pcw-po-tile" data-charge="screen" role="listitem" title="CondZSCI">
+                <article class="pcw-po-tile" data-charge="screen" role="listitem" title="ZI_PO_CONDITION_HUB Screen">
                     <span class="pcw-po-tile-k">Screen</span>
-                    <span class="pcw-po-tile-sap">ZSCI</span>
+                    <span class="pcw-po-tile-sap">Screen</span>
                     <b id="pcwChargeScreen">0.00</b>
                 </article>
-                <article class="pcw-po-tile" data-charge="bank" role="listitem" title="CondZBCR">
+                <article class="pcw-po-tile" data-charge="bank" role="listitem" title="ZI_PO_CONDITION_HUB Bank">
                     <span class="pcw-po-tile-k">Bank</span>
-                    <span class="pcw-po-tile-sap">ZBCR</span>
+                    <span class="pcw-po-tile-sap">Bank</span>
                     <b id="pcwChargeBank">0.00</b>
                 </article>
             </div>

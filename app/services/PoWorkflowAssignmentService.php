@@ -2,7 +2,7 @@
 /*
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 16/11/2026
- * DESCRIPTION : PO Costing Workflow Assignment — Viewers / Approvers (dbo.po_costing_workflow_assignment)
+ * DESCRIPTION : PO Costing Workflow Assignment — Approvers / Daily Report (dbo.po_costing_workflow_assignment)
  */
 require_once base_path('app/core/Database.php');
 
@@ -15,6 +15,7 @@ class PoWorkflowAssignmentService
 
     public const ROLE_VIEWER = 'viewer';
     public const ROLE_APPROVER = 'approver';
+    public const ROLE_DAILY_REPORT = 'daily_report';
 
     public const VIEWER_STATUSES = [
         'Assigned',
@@ -153,7 +154,10 @@ class PoWorkflowAssignmentService
     private function normalizeRole(string $role): ?string
     {
         $r = strtolower(trim($role));
-        if ($r === self::ROLE_VIEWER || $r === self::ROLE_APPROVER) {
+        if ($r === 'daily' || $r === 'dailyreport' || $r === 'daily-report') {
+            $r = self::ROLE_DAILY_REPORT;
+        }
+        if ($r === self::ROLE_VIEWER || $r === self::ROLE_APPROVER || $r === self::ROLE_DAILY_REPORT) {
             return $r;
         }
         return null;
@@ -168,9 +172,9 @@ class PoWorkflowAssignmentService
     }
 
     /**
-     * Load the common (global) Viewer / Approver configuration.
+     * Load the common (global) Approver / Daily Report configuration.
      *
-     * @return array{success:bool,viewers:list<array>,approvers:list<array>,summary:array,error:?string,is_global:bool}
+     * @return array{success:bool,viewers:list<array>,approvers:list<array>,daily_reporters:list<array>,summary:array,error:?string,is_global:bool}
      */
     public function getGlobalConfig(): array
     {
@@ -185,9 +189,10 @@ class PoWorkflowAssignmentService
      *
      * @param list<array{id?:int|string|null,username?:string,email?:string}> $viewers
      * @param list<array{id?:int|string|null,username?:string,email?:string}> $approvers
-     * @return array{success:bool,viewers:list,approvers:list,summary:array,error:?string,is_global:bool}
+     * @param list<array{id?:int|string|null,username?:string,email?:string}> $dailyReporters
+     * @return array{success:bool,viewers:list,approvers:list,daily_reporters:list,summary:array,error:?string,is_global:bool}
      */
-    public function saveGlobalConfig(array $viewers, array $approvers, string $assignedBy): array
+    public function saveGlobalConfig(array $viewers, array $approvers, string $assignedBy, array $dailyReporters = []): array
     {
         try {
             $this->ensureTable();
@@ -197,18 +202,22 @@ class PoWorkflowAssignmentService
                     'success' => false,
                     'viewers' => [],
                     'approvers' => [],
+                    'daily_reporters' => [],
                     'summary' => $this->emptySummary(),
                     'is_global' => true,
                     'error' => 'Workflow table dbo.' . self::TABLE . ' is missing. Ask a DBA to create it.',
                 ];
             }
 
+            // Viewers retired from UI — always clear global viewer rows
             $this->syncRole($pdo, self::GLOBAL_KEY, self::ROLE_VIEWER, $viewers, $assignedBy, true);
             $this->syncRole($pdo, self::GLOBAL_KEY, self::ROLE_APPROVER, $approvers, $assignedBy, true);
+            $this->syncRole($pdo, self::GLOBAL_KEY, self::ROLE_DAILY_REPORT, $dailyReporters, $assignedBy, true);
 
             $this->auditWorkflow(self::GLOBAL_KEY, 'config_save', [
                 'viewers' => $viewers,
                 'approvers' => $approvers,
+                'daily_reporters' => $dailyReporters,
                 'assigned_by' => $assignedBy,
             ], true);
 
@@ -217,6 +226,7 @@ class PoWorkflowAssignmentService
                 'success' => true,
                 'viewers' => $cfg['viewers'],
                 'approvers' => $cfg['approvers'],
+                'daily_reporters' => $cfg['daily_reporters'],
                 'summary' => $cfg['summary'],
                 'is_global' => true,
                 'error' => null,
@@ -226,6 +236,7 @@ class PoWorkflowAssignmentService
                 'success' => false,
                 'viewers' => [],
                 'approvers' => [],
+                'daily_reporters' => [],
                 'summary' => $this->emptySummary(),
                 'is_global' => true,
                 'error' => $e->getMessage(),
@@ -235,9 +246,9 @@ class PoWorkflowAssignmentService
 
     /**
      * When a PO enters the costing workflow: copy global config → per-PO rows (once),
-     * then email all configured Viewers / Approvers. Idempotent (skips already emailed).
+     * then email all configured Approvers. Idempotent (skips already emailed).
      *
-     * @return array{success:bool,applied:bool,notified:bool,sent:int,failed:int,skipped:int,viewers:list,approvers:list,summary:array,error:?string}
+     * @return array{success:bool,applied:bool,notified:bool,sent:int,failed:int,skipped:int,viewers:list,approvers:list,daily_reporters:list,summary:array,error:?string}
      */
     public function applyGlobalToPoAndNotify(string $po, string $fromUsername = 'system'): array
     {
@@ -629,6 +640,7 @@ HTML;
                     'success' => true,
                     'viewers' => [],
                     'approvers' => [],
+                    'daily_reporters' => [],
                     'summary' => $this->emptySummary(),
                     'current_user_approver' => null,
                     'error' => null,
@@ -647,12 +659,15 @@ HTML;
             $stmt->execute();
             $viewers = [];
             $approvers = [];
+            $dailyReporters = [];
             $currentApprover = null;
             $cur = strtolower(trim((string) $currentUsername));
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
                 $mapped = $this->mapRow($row);
                 if ($mapped['role'] === self::ROLE_VIEWER) {
                     $viewers[] = $mapped;
+                } elseif ($mapped['role'] === self::ROLE_DAILY_REPORT) {
+                    $dailyReporters[] = $mapped;
                 } else {
                     $approvers[] = $mapped;
                     if ($cur !== '' && strtolower((string) $mapped['username']) === $cur) {
@@ -665,7 +680,8 @@ HTML;
                 'success' => true,
                 'viewers' => $viewers,
                 'approvers' => $approvers,
-                'summary' => $this->buildSummary($viewers, $approvers),
+                'daily_reporters' => $dailyReporters,
+                'summary' => $this->buildSummary($viewers, $approvers, $dailyReporters),
                 'current_user_approver' => $currentApprover,
                 'error' => null,
             ];
@@ -674,6 +690,7 @@ HTML;
                 'success' => false,
                 'viewers' => [],
                 'approvers' => [],
+                'daily_reporters' => [],
                 'summary' => $this->emptySummary(),
                 'current_user_approver' => null,
                 'error' => $e->getMessage(),
@@ -1354,17 +1371,20 @@ HTML;
         return [
             'viewers_total' => 0,
             'approvers_total' => 0,
+            'daily_reporters_total' => 0,
             'viewers_by_status' => [],
             'approvers_by_status' => [],
+            'daily_reporters_by_status' => [],
         ];
     }
 
     /**
      * @param list<array> $viewers
      * @param list<array> $approvers
+     * @param list<array> $dailyReporters
      * @return array<string,mixed>
      */
-    private function buildSummary(array $viewers, array $approvers): array
+    private function buildSummary(array $viewers, array $approvers, array $dailyReporters = []): array
     {
         $countBy = static function (array $rows): array {
             $out = [];
@@ -1377,8 +1397,10 @@ HTML;
         return [
             'viewers_total' => count($viewers),
             'approvers_total' => count($approvers),
+            'daily_reporters_total' => count($dailyReporters),
             'viewers_by_status' => $countBy($viewers),
             'approvers_by_status' => $countBy($approvers),
+            'daily_reporters_by_status' => $countBy($dailyReporters),
         ];
     }
 

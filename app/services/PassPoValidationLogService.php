@@ -509,15 +509,9 @@ class PassPoValidationLogService
             ];
             $params = [];
             if ($approvedOnly) {
-                // Approved PO page: successful approve / pass / e-sign only (no failed / no workflow audit)
+                // Approved PO page: Pass_po_validtion.action = 'approve' only (not esign / pass / workflow)
                 $where[] = 'success = 1';
-                $where[] = "(
-                    LOWER(ISNULL(action, '')) IN ('approve', 'pass', 'esign')
-                    OR ISNULL(value_flag, '') = 'X'
-                    OR LOWER(ISNULL(status, '')) LIKE '%approved%'
-                    OR LOWER(ISNULL(status, '')) LIKE '%e-sign%'
-                    OR LOWER(ISNULL(status, '')) LIKE '%signed%'
-                )";
+                $where[] = "LOWER(ISNULL(action, '')) = 'approve'";
                 $where[] = "LOWER(ISNULL(status, '')) NOT LIKE '%fail%'";
                 $where[] = "LOWER(ISNULL(status, '')) NOT LIKE '%workflow%'";
             } elseif ($successFilter === '1' || $successFilter === 'true' || $successFilter === 'ok') {

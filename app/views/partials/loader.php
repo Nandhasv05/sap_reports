@@ -23,7 +23,7 @@ $loaderLogo = function_exists('sap_reports_logo_url')
     : (function_exists('asset') ? asset('css/zcost/logo.png') : '/sap_reports/public/css/zcost/logo.png');
 $loaderStepsJson = htmlspecialchars(json_encode($loaderSteps, JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8');
 ?>
-<div class="rpt-spinner is-boot is-colorful<?= $loaderVisible ? ' is-solid' : '' ?>" id="rptSpinner"<?= $loaderVisible ? '' : ' hidden' ?><?= $loaderAutoHide ? ' data-autohide="1"' : '' ?> role="status" aria-live="polite" aria-label="<?= e($loaderMessage) ?>">
+<div class="rpt-spinner is-boot is-colorful<?= $loaderVisible ? ' is-solid' : '' ?><?= !empty($loaderContentScoped) ? ' is-content-scoped' : '' ?>" id="rptSpinner"<?= $loaderVisible ? '' : ' hidden' ?><?= $loaderAutoHide ? ' data-autohide="1"' : '' ?><?= !empty($loaderContentScoped) ? ' data-scope="content"' : '' ?> role="status" aria-live="polite" aria-label="<?= e($loaderMessage) ?>">
     <div class="rpt-spinner-glow" aria-hidden="true">
         <span class="rpt-spinner-orb orb-a"></span>
         <span class="rpt-spinner-orb orb-b"></span>

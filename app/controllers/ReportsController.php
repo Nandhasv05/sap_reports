@@ -701,12 +701,66 @@ class ReportsController extends Controller
             'canSearchPoPage'       => function_exists('sap_reports_user_can')
                 ? sap_reports_user_can('po-costing', 'search_po')
                 : true,
+            'canValuationReportPage' => function_exists('sap_reports_user_can')
+                ? sap_reports_user_can('po-costing', 'valuation_report')
+                : true,
             'relatedPoDataUrl'      => url('po-costing/related-po'),
             'relatedPoStatusUrl'    => url('po-costing/related-po/status'),
             'relatedPoSentLogUrl'   => url('po-costing/related-po/sent-log'),
             'searchPoDataUrl'       => url('po-costing/search-po'),
+            'valuationReportUrl'    => url('po-costing/valuation-report'),
             'extraScripts'          => '',
         ]);
+    }
+
+    /*
+     * PO Valuation Report — KPIs + PO-wise log activity
+     * GET po-costing/valuation-report?from=&to=&po=&user=
+     */
+    public function poValuationReportData(): void
+    {
+        $canValuation = function_exists('sap_reports_user_can')
+            ? sap_reports_user_can('po-costing', 'valuation_report')
+            : (function_exists('sap_reports_user_can_access') ? sap_reports_user_can_access('po-costing') : true);
+        if (!$canValuation) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Access restricted.',
+                'error'   => 'Access restricted.',
+                'data'    => [],
+            ], 403);
+        }
+        if (!is_file(base_path('app/services/PoValuationReportService.php'))) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'PO Valuation Report is not deployed.',
+                'error'   => 'PO Valuation Report is not deployed.',
+                'data'    => [],
+            ], 503);
+        }
+        require_once base_path('app/services/PoValuationReportService.php');
+        try {
+            $payload = (new PoValuationReportService())->report([
+                'from'  => (string) ($_GET['from'] ?? ''),
+                'to'    => (string) ($_GET['to'] ?? ''),
+                'po'    => (string) ($_GET['po'] ?? ''),
+                'user'  => (string) ($_GET['user'] ?? ''),
+                'limit' => (int) ($_GET['limit'] ?? 500),
+            ]);
+        } catch (Throwable $e) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Valuation report failed: ' . $e->getMessage(),
+                'error'   => $e->getMessage(),
+                'data'    => [],
+            ], 502);
+        }
+        $this->jsonResponse([
+            'success' => !empty($payload['success']),
+            'message' => !empty($payload['success']) ? 'OK' : (string) ($payload['error'] ?? 'Failed'),
+            'error'   => $payload['error'] ?? null,
+            'data'    => $payload,
+        ], !empty($payload['success']) ? 200 : 502);
     }
 
     /*
@@ -1672,7 +1726,7 @@ class ReportsController extends Controller
             'from' => (string) ($_GET['from'] ?? ''),
             'to' => (string) ($_GET['to'] ?? ''),
             'success' => (string) ($_GET['success'] ?? 'all'),
-            // Approved PO page passes approved_only=1 → success only + status = Approved
+            // Approved PO page passes approved_only=1 → action = approve only
             'approved_only' => (string) ($_GET['approved_only'] ?? ''),
         ]);
         if (empty($res['success'])) {
@@ -1824,6 +1878,48 @@ class ReportsController extends Controller
         header('Content-Length: ' . (string) strlen($body));
         echo $body;
         exit;
+    }
+
+    /*
+     * SAP trigger — PO additional charges from ZI_PO_CONDITION_HUB only
+     * GET purchase-order/charges?po=40000…
+     * Fields: OtherCharges, Freight1/2, MOQ, Screen, Bank
+     */
+    public function purchaseOrderCharges(): void
+    {
+        if (!is_file(base_path('app/services/PoCostValidationService.php'))) {
+            $message = 'PO costing validation is not deployed on this server.';
+            $this->jsonResponse(['success' => false, 'message' => $message, 'error' => $message, 'data' => []], 503);
+        }
+        require_once base_path('app/services/PoCostValidationService.php');
+        $po = preg_replace('/\D/', '', (string) ($_GET['po'] ?? '')) ?? '';
+        if ($po === '' || !preg_match('/^\d{1,10}$/', $po)) {
+            $message = 'Purchase order must be a number of up to 10 digits.';
+            $this->jsonResponse(['success' => false, 'message' => $message, 'error' => $message, 'data' => []], 422);
+        }
+        try {
+            $payload = (new PoCostValidationService())->fetchPoChargesTrigger($po);
+        } catch (Throwable $e) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Charges trigger failed: ' . $e->getMessage(),
+                'error'   => $e->getMessage(),
+                'data'    => [],
+            ], 502);
+        }
+        $charges = is_array($payload['charges'] ?? null) ? $payload['charges'] : [];
+        $this->jsonResponse([
+            'success'        => !empty($payload['success']),
+            'message'        => !empty($payload['success'])
+                ? 'SAP charges loaded'
+                : (string) ($payload['error'] ?? 'Charges unavailable'),
+            'error'          => $payload['error'] ?? null,
+            'purchase_order' => $payload['purchase_order'] ?? $po,
+            'charges'        => $charges,
+            'sources'        => $payload['sources'] ?? [],
+            'triggered_at'   => $payload['triggered_at'] ?? date('c'),
+            'data'           => $payload,
+        ], !empty($payload['success']) ? 200 : 502);
     }
 
     /*
@@ -2303,6 +2399,7 @@ HTML;
                         'is_global' => true,
                         'viewers' => [],
                         'approvers' => [],
+                        'daily_reporters' => [],
                         'summary' => [],
                     ],
                 ], 500);
@@ -2314,6 +2411,7 @@ HTML;
                     'is_global' => true,
                     'viewers' => $res['viewers'],
                     'approvers' => $res['approvers'],
+                    'daily_reporters' => $res['daily_reporters'] ?? [],
                     'summary' => $res['summary'],
                     'current_user' => $username,
                 ],
@@ -2329,6 +2427,7 @@ HTML;
                 'data'    => [
                     'viewers' => [],
                     'approvers' => [],
+                    'daily_reporters' => [],
                     'summary' => [],
                 ],
             ], 500);
@@ -2341,6 +2440,7 @@ HTML;
                 'po' => PoWorkflowAssignmentService::displayPo($po),
                 'viewers' => $res['viewers'],
                 'approvers' => $res['approvers'],
+                'daily_reporters' => $res['daily_reporters'] ?? [],
                 'summary' => $res['summary'],
                 'current_user_approver' => $res['current_user_approver'],
                 'current_user' => $username,
@@ -2350,7 +2450,7 @@ HTML;
 
     /*
      * POST purchase-order/workflow/save
-     * Save global Viewer + Approver configuration (no emails).
+     * Save global Approver + Daily Report configuration (no emails).
      */
     public function purchaseOrderWorkflowSave(): void
     {
@@ -2362,8 +2462,9 @@ HTML;
         if (!is_array($input)) {
             $input = $_POST;
         }
-        $viewers = is_array($input['viewers'] ?? null) ? $input['viewers'] : [];
+        $viewers = []; // Viewer assignment removed from UI
         $approvers = is_array($input['approvers'] ?? null) ? $input['approvers'] : [];
+        $dailyReporters = is_array($input['daily_reporters'] ?? null) ? $input['daily_reporters'] : [];
         $current = function_exists('portal_user') ? portal_user() : null;
         $assignedBy = trim((string) ($current['username'] ?? ($_SESSION['username'] ?? 'system')));
 
@@ -2377,7 +2478,7 @@ HTML;
         }
 
         $svc = new PoWorkflowAssignmentService();
-        $res = $svc->saveGlobalConfig($viewers, $approvers, $assignedBy);
+        $res = $svc->saveGlobalConfig($viewers, $approvers, $assignedBy, $dailyReporters);
         if (empty($res['success'])) {
             $this->jsonResponse([
                 'success' => false,
@@ -2388,11 +2489,12 @@ HTML;
         }
         $this->jsonResponse([
             'success' => true,
-            'message' => 'Workflow configuration saved. Emails will send automatically when a PO enters the flow.',
+            'message' => 'Workflow configuration saved. Approver emails send when a PO enters the flow.',
             'data'    => [
                 'is_global' => true,
                 'viewers' => $res['viewers'],
                 'approvers' => $res['approvers'],
+                'daily_reporters' => $res['daily_reporters'] ?? [],
                 'summary' => $res['summary'],
             ],
         ]);
@@ -3202,6 +3304,54 @@ HTML;
                 ],
             ], 500);
         }
+    }
+
+    /*
+     * GET/POST cron/daily-esign-report?key=…
+     * Sends Daily PO E-Signature report to Workflow → Daily Report assignees.
+     * Intended for Windows Task Scheduler / cron at 23:00 IST.
+     */
+    public function cronDailyEsignReport(): void
+    {
+        $cfg = function_exists('config') ? (config('app')['daily_esign_report'] ?? []) : [];
+        if (empty($cfg['enabled'])) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Daily e-sign report is disabled.',
+                'error' => 'Disabled',
+                'data' => [],
+            ], 403);
+        }
+        $expected = trim((string) ($cfg['cron_key'] ?? ''));
+        $given = trim((string) ($_GET['key'] ?? $_POST['key'] ?? ''));
+        if ($expected === '' || !hash_equals($expected, $given)) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Invalid cron key.',
+                'error' => 'Forbidden',
+                'data' => [],
+            ], 403);
+        }
+
+        require_once base_path('app/services/PoDailyEsignReportService.php');
+        try {
+            $result = (new PoDailyEsignReportService())->runAndSend();
+        } catch (Throwable $e) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Daily report failed: ' . $e->getMessage(),
+                'error' => $e->getMessage(),
+                'data' => [],
+            ], 500);
+        }
+
+        $this->jsonResponse([
+            'success' => !empty($result['success']),
+            'message' => !empty($result['success'])
+                ? ('Daily report sent to ' . (int) ($result['sent'] ?? 0) . ' recipient(s)')
+                : (string) ($result['error'] ?? 'Send failed'),
+            'data' => $result,
+        ], !empty($result['success']) ? 200 : 422);
     }
 }
 

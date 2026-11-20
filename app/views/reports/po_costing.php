@@ -4,7 +4,9 @@
  * DATE : 04/11/2026 - Updated: 13/11/2026
  * DESCRIPTION : PO Costing Validation — Modern Unified UI
  *               Left icon sidenav · Unified Data Tables across Receive, Sent & Approved POs
- */
+*/
+// Keep boot/page loader over main content only — aside + header stay visible
+$loaderContentScoped = true;
 $home = (string) ($home ?? sap_reports_evol_url('portal_dashboard.php'));
 $catalogHome = (string) ($catalogHome ?? url('/'));
 $logoUrl = (string) ($logoUrl ?? sap_reports_logo_url());
@@ -104,6 +106,7 @@ $relatedPoDataUrl = (string) ($relatedPoDataUrl ?? url('po-costing/related-po'))
 $relatedPoStatusUrl = (string) ($relatedPoStatusUrl ?? url('po-costing/related-po/status'));
 $relatedPoSentLogUrl = (string) ($relatedPoSentLogUrl ?? url('po-costing/related-po/sent-log'));
 $searchPoDataUrl = (string) ($searchPoDataUrl ?? url('po-costing/search-po'));
+$valuationReportUrl = (string) ($valuationReportUrl ?? url('po-costing/valuation-report'));
 if (!isset($canSearchPoPage)) {
     $canSearchPoPage = function_exists('sap_reports_user_can')
         ? sap_reports_user_can('po-costing', 'search_po')
@@ -111,6 +114,12 @@ if (!isset($canSearchPoPage)) {
 }
 $canSearchPoPage = (bool) $canSearchPoPage;
 $canAsideSearchPo = $canSearchPoPage;
+if (!isset($canValuationReportPage)) {
+    $canValuationReportPage = function_exists('sap_reports_user_can')
+        ? sap_reports_user_can('po-costing', 'valuation_report')
+        : true;
+}
+$canAsideValuation = (bool) $canValuationReportPage;
 $costingHomeUrl = (string) ($costingHomeUrl ?? url('po-costing'));
 $panelHref = static function (string $panel) use ($costingHomeUrl): string {
     $panel = trim($panel);
@@ -138,6 +147,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
      data-related-po-status-url="<?= e($relatedPoStatusUrl) ?>"
      data-related-po-sent-log-url="<?= e($relatedPoSentLogUrl) ?>"
      data-search-po-url="<?= e($searchPoDataUrl) ?>"
+     data-valuation-report-url="<?= e($valuationReportUrl) ?>"
      data-can-view="<?= $canView ? '1' : '0' ?>"
      data-can-pass-po="<?= $canPassPo ? '1' : '0' ?>"
      data-can-esign="<?= $canEsign ? '1' : '0' ?>"
@@ -151,7 +161,8 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
      data-aside-workflow="<?= $canAsideWorkflow ? '1' : '0' ?>"
      data-aside-approved="<?= $canAsideApproved ? '1' : '0' ?>"
      data-aside-related="<?= $canAsideRelated ? '1' : '0' ?>"
-     data-aside-search="<?= $canAsideSearchPo ? '1' : '0' ?>">
+     data-aside-search="<?= $canAsideSearchPo ? '1' : '0' ?>"
+     data-aside-valuation="<?= !empty($canAsideValuation) ? '1' : '0' ?>">
 
     <?php
         // Soft panels (Related / Search PO): skip full-page boot spinner — nothing heavy to load
@@ -159,6 +170,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
         $skipBootLoader = (
             ($startPanelHint === 'related' && !empty($canAsideRelated))
             || ($startPanelHint === 'search' && !empty($canAsideSearchPo))
+            || ($startPanelHint === 'valuation' && !empty($canAsideValuation))
         );
         $loaderVisible = !$skipBootLoader;
         $loaderAutoHide = true;
@@ -294,6 +306,43 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
             </button>
         </form>
         <?php endif; ?>
+        <?php if (!empty($canAsideValuation)):
+            $pvrTodayMax = (new DateTimeImmutable('now', new DateTimeZone('Asia/Kolkata')))->format('Y-m-d');
+        ?>
+        <div class="rpt-search poc-valuation-header-filters" id="pocValuationHeaderFilters" hidden aria-label="poValaition Report filters">
+            <label class="rpt-field po-direct-search pvr-header-po" title="Filter by purchase order number">
+                <span class="material-icons-round">search</span>
+                <input type="search" id="pvrFilterPo" name="po" value=""
+                       placeholder="Search PO # (e.g. 40000…)"
+                       inputmode="numeric" maxlength="10" autocomplete="off"
+                       aria-label="Purchase order number">
+            </label>
+            <label class="rpt-field pvr-header-range" title="Filter by date range">
+                <span class="material-icons-round">date_range</span>
+                <select id="pvrFilterRange" aria-label="Date range">
+                    <option value="">All dates</option>
+                    <option value="today">Today</option>
+                    <option value="yesterday">Yesterday</option>
+                    <option value="this_week">This week</option>
+                    <option value="previous_week">Previous week</option>
+                    <option value="this_month" selected>This month</option>
+                    <option value="previous_month">Previous month</option>
+                    <option value="custom">Custom date</option>
+                </select>
+            </label>
+            <div class="pvr-custom-dates" id="pvrCustomDates" hidden>
+                <label class="rpt-field pvr-header-date">
+                    <span class="material-icons-round">event</span>
+                    <input type="date" id="pvrFilterFrom" max="<?= e($pvrTodayMax) ?>" aria-label="From date">
+                </label>
+                <span class="pvr-date-sep">to</span>
+                <label class="rpt-field pvr-header-date">
+                    <span class="material-icons-round">event</span>
+                    <input type="date" id="pvrFilterTo" max="<?= e($pvrTodayMax) ?>" aria-label="To date">
+                </label>
+            </div>
+        </div>
+        <?php endif; ?>
         <?php if (!empty($canAsideRelated)): ?>
         <form class="rpt-search poc-related-header-filters" id="pocRelatedHeaderFilters" autocomplete="off" hidden aria-label="Draft PO filters">
             <label class="rpt-field rpt-field-mat-cat" title="Filter by Fabric, Trims, or All materials">
@@ -415,6 +464,13 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
                     <span class="poc-sidenav-copy">Search PO</span>
                 </a>
                 <?php endif; ?>
+                <?php if (!empty($canAsideValuation)): ?>
+                <a href="<?= e($panelHref('valuation')) ?>" class="poc-sidenav-item" data-poc-panel="valuation" data-access="valuation_report" role="tab" aria-selected="false"
+                   title="poValaition Report — shown because Access Studio granted poValaition Report. Pending / Review / Released / Approved KPIs and Recent Activity.">
+                    <span class="poc-sidenav-ico" aria-hidden="true"><span class="material-icons-round">assessment</span></span>
+                    <span class="poc-sidenav-copy">poValaition Report</span>
+                </a>
+                <?php endif; ?>
             </nav>
         </aside>
 
@@ -475,33 +531,16 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
                                 <div>
                                     <p class="pcw-workflow-kicker">PO Costing</p>
                                     <h3>Workflow Assignment</h3>
-                                    <p class="pcw-workflow-sub">Common Viewer &amp; Approver configuration for all future POs. Emails send automatically when a PO enters the flow — not when you save.</p>
+                                    <p class="pcw-workflow-sub">Approver Assignment is for PO approval flow. Daily Report Assignment is separate — only those staff get the 11:00 PM daily e-sign report email.</p>
                                 </div>
                             </div>
                             <div class="pcw-workflow-summary" id="pocWorkflowSummary" aria-live="polite">
-                                <span class="pcw-wf-pill is-viewer"><span class="material-icons-round">visibility</span> <b id="pocWfViewerCount">0</b> viewers</span>
                                 <span class="pcw-wf-pill is-approver"><span class="material-icons-round">verified_user</span> <b id="pocWfApproverCount">0</b> approvers</span>
+                                <span class="pcw-wf-pill is-daily"><span class="material-icons-round">today</span> <b id="pocWfDailyCount">0</b> daily report</span>
                             </div>
                         </header>
 
                         <div class="pcw-workflow-grid">
-                            <div class="pcw-workflow-card" data-role="viewer">
-                                <header class="pcw-workflow-card-head">
-                                    <span class="material-icons-round">visibility</span>
-                                    <div>
-                                        <strong>Viewer Assignment</strong>
-                                        <p>Multi-select portal users. When a PO enters the flow they get a link to open the PO and complete E-Sign.</p>
-                                    </div>
-                                </header>
-                                <label class="pcw-workflow-search">
-                                    <span class="material-icons-round" aria-hidden="true">search</span>
-                                    <input type="search" id="pocWfViewerSearch" placeholder="Search users to add as Viewer…" autocomplete="off">
-                                </label>
-                                <div class="pcw-workflow-suggest" id="pocWfViewerSuggest" hidden role="listbox"></div>
-                                <div class="pcw-workflow-chips" id="pocWfViewerChips" aria-label="Selected viewers"></div>
-                                <ul class="pcw-workflow-status-list" id="pocWfViewerStatus" aria-label="Configured viewers"></ul>
-                            </div>
-
                             <div class="pcw-workflow-card" data-role="approver">
                                 <header class="pcw-workflow-card-head">
                                     <span class="material-icons-round">verified_user</span>
@@ -518,13 +557,30 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
                                 <div class="pcw-workflow-chips" id="pocWfApproverChips" aria-label="Selected approvers"></div>
                                 <ul class="pcw-workflow-status-list" id="pocWfApproverStatus" aria-label="Configured approvers"></ul>
                             </div>
+
+                            <div class="pcw-workflow-card" data-role="daily_report">
+                                <header class="pcw-workflow-card-head">
+                                    <span class="material-icons-round">today</span>
+                                    <div>
+                                        <strong>Daily Report Assignment</strong>
+                                        <p>Only these staff receive the PO E-Signature Daily Report at 11:00 PM IST. Approvers are not emailed this report.</p>
+                                    </div>
+                                </header>
+                                <label class="pcw-workflow-search">
+                                    <span class="material-icons-round" aria-hidden="true">search</span>
+                                    <input type="search" id="pocWfDailySearch" placeholder="Search users to add for Daily Report…" autocomplete="off">
+                                </label>
+                                <div class="pcw-workflow-suggest" id="pocWfDailySuggest" hidden role="listbox"></div>
+                                <div class="pcw-workflow-chips" id="pocWfDailyChips" aria-label="Selected daily report users"></div>
+                                <ul class="pcw-workflow-status-list" id="pocWfDailyStatus" aria-label="Configured daily report users"></ul>
+                            </div>
                         </div>
 
                         <footer class="pcw-workflow-foot">
                             <p class="pcw-workflow-msg" id="pocWorkflowMsg" role="status" hidden></p>
                             <div class="pcw-workflow-actions">
                                 <button type="button" class="rpt-tb-btn rpt-tb-btn-primary" id="pocWfSaveFlowBtn"
-                                        title="Save common Viewer and Approver configuration">
+                                        title="Save Approver and Daily Report configuration">
                                     <span class="pcw-wf-spin" aria-hidden="true"></span>
                                     <span class="material-icons-round pcw-wf-ico">save</span>
                                     <span class="pcw-wf-label">Save Workflow Configuration</span>
@@ -572,10 +628,32 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
             <?php if (!empty($canAsideSearchPo)): ?>
                 <?php require base_path('app/views/reports/partials/po_search.php'); ?>
             <?php endif; ?>
+
+            <!-- 7. PO Valuation Report — KPIs + PO-wise log activity -->
+            <?php if (!empty($canAsideValuation)): ?>
+                <?php require base_path('app/views/reports/partials/po_valuation_report.php'); ?>
+            <?php endif; ?>
         </main>
     </div>
 
     <?php require base_path('app/views/reports/partials/po_sent_modal.php'); ?>
+    <?php if (!empty($canAsideValuation)): ?>
+    <div class="pvr-modal" id="pvrActivityModal" hidden aria-hidden="true">
+        <div class="pvr-modal-backdrop" id="pvrModalBackdrop"></div>
+        <div class="pvr-modal-card" role="dialog" aria-modal="true" aria-labelledby="pvrModalTitle">
+            <div class="pvr-modal-head">
+                <div>
+                    <p class="pvr-modal-kicker">Recent Activity</p>
+                    <h3 id="pvrModalTitle">PO —</h3>
+                </div>
+                <button type="button" class="pvr-modal-close" id="pvrModalClose" title="Close" aria-label="Close">
+                    <span class="material-icons-round">close</span>
+                </button>
+            </div>
+            <div class="pvr-modal-body" id="pvrModalBody"></div>
+        </div>
+    </div>
+    <?php endif; ?>
     <?php require base_path('app/views/partials/footer.php'); ?>
 </div>
 
@@ -612,6 +690,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
         approved: page.getAttribute('data-aside-approved') !== '0',
         related: page.getAttribute('data-aside-related') !== '0',
         search: page.getAttribute('data-aside-search') !== '0',
+        valuation: page.getAttribute('data-aside-valuation') !== '0',
         mailbox: page.getAttribute('data-aside-received') !== '0' || page.getAttribute('data-aside-sent') !== '0'
     };
     function firstAllowedPanel() {
@@ -622,6 +701,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
         if (asideAccess.approved) return 'approved';
         if (asideAccess.related) return 'related';
         if (asideAccess.search) return 'search';
+        if (asideAccess.valuation) return 'valuation';
         return 'dashboard';
     }
     function canOpenPanel(name) {
@@ -1411,12 +1491,12 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
         }
     }
 
-    /* ========== PO Flow — Workflow Assignment (aside page) ========== */
-    var wfViewers = [];
+    /* ========== PO Flow — Approver + Daily Report Assignment ========== */
     var wfApprovers = [];
-    var wfSelectedViewers = [];
+    var wfDailyReporters = [];
     var wfSelectedApprovers = [];
-    var wfSearchTimers = { viewer: null, approver: null };
+    var wfSelectedDaily = [];
+    var wfSearchTimers = { approver: null, daily_report: null };
     var wfConfigLoaded = false;
 
     function wfEl(id) { return document.getElementById(id); }
@@ -1446,10 +1526,35 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
         return String((u && (u.username || u.id)) || '').trim().toLowerCase();
     }
 
+    function wfRoleMeta(role) {
+        if (role === 'daily_report') {
+            return {
+                chips: 'pocWfDailyChips',
+                status: 'pocWfDailyStatus',
+                count: 'pocWfDailyCount',
+                search: 'pocWfDailySearch',
+                suggest: 'pocWfDailySuggest',
+                selected: function () { return wfSelectedDaily; },
+                setSelected: function (list) { wfSelectedDaily = list; },
+                rows: function () { return wfDailyReporters; }
+            };
+        }
+        return {
+            chips: 'pocWfApproverChips',
+            status: 'pocWfApproverStatus',
+            count: 'pocWfApproverCount',
+            search: 'pocWfApproverSearch',
+            suggest: 'pocWfApproverSuggest',
+            selected: function () { return wfSelectedApprovers; },
+            setSelected: function (list) { wfSelectedApprovers = list; },
+            rows: function () { return wfApprovers; }
+        };
+    }
+
     function renderWfChips(role) {
-        var isViewer = role === 'viewer';
-        var wrap = wfEl(isViewer ? 'pocWfViewerChips' : 'pocWfApproverChips');
-        var list = isViewer ? wfSelectedViewers : wfSelectedApprovers;
+        var meta = wfRoleMeta(role);
+        var wrap = wfEl(meta.chips);
+        var list = meta.selected();
         if (!wrap) return;
         if (!list.length) {
             wrap.innerHTML = '<span style="font-size:11px;color:#94a3b8;font-weight:600;">No users selected</span>';
@@ -1465,43 +1570,47 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
     }
 
     function renderWfStatusLists() {
-        var paint = function (el, rows) {
+        var paint = function (role) {
+            var meta = wfRoleMeta(role);
+            var el = wfEl(meta.status);
+            var rows = meta.rows();
             if (!el) return;
             if (!rows.length) {
                 el.innerHTML = '<li><span class="pcw-wf-user" style="color:#94a3b8;font-weight:600;">No users configured</span></li>';
-                return;
+            } else {
+                el.innerHTML = rows.map(function (r) {
+                    var st = esc(r.status || 'Configured');
+                    return '<li><span class="pcw-wf-user">' + esc(r.username || '—') + '</span>'
+                        + '<span class="pcw-wf-st ' + wfStatusClass(st) + '">' + st + '</span></li>';
+                }).join('');
             }
-            el.innerHTML = rows.map(function (r) {
-                var st = esc(r.status || 'Configured');
-                return '<li><span class="pcw-wf-user">' + esc(r.username || '—') + '</span>'
-                    + '<span class="pcw-wf-st ' + wfStatusClass(st) + '">' + st + '</span></li>';
-            }).join('');
+            if (wfEl(meta.count)) {
+                wfEl(meta.count).textContent = String(meta.selected().length || rows.length);
+            }
         };
-        paint(wfEl('pocWfViewerStatus'), wfViewers);
-        paint(wfEl('pocWfApproverStatus'), wfApprovers);
-        if (wfEl('pocWfViewerCount')) wfEl('pocWfViewerCount').textContent = String(wfSelectedViewers.length || wfViewers.length);
-        if (wfEl('pocWfApproverCount')) wfEl('pocWfApproverCount').textContent = String(wfSelectedApprovers.length || wfApprovers.length);
+        paint('approver');
+        paint('daily_report');
     }
 
     function applyWorkflowData(data) {
         data = data || {};
-        wfViewers = Array.isArray(data.viewers) ? data.viewers : [];
         wfApprovers = Array.isArray(data.approvers) ? data.approvers : [];
-        wfSelectedViewers = wfViewers.map(function (r) {
-            return { id: r.user_id, username: r.username, email: r.email };
-        });
+        wfDailyReporters = Array.isArray(data.daily_reporters) ? data.daily_reporters : [];
         wfSelectedApprovers = wfApprovers.map(function (r) {
             return { id: r.user_id, username: r.username, email: r.email };
         });
-        renderWfChips('viewer');
+        wfSelectedDaily = wfDailyReporters.map(function (r) {
+            return { id: r.user_id, username: r.username, email: r.email };
+        });
         renderWfChips('approver');
+        renderWfChips('daily_report');
         renderWfStatusLists();
     }
 
     async function loadGlobalWorkflowConfig(force) {
         if (wfConfigLoaded && !force) {
-            renderWfChips('viewer');
             renderWfChips('approver');
+            renderWfChips('daily_report');
             renderWfStatusLists();
             return;
         }
@@ -1531,7 +1640,8 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
     }
 
     async function searchWfUsers(q, role) {
-        var suggest = wfEl(role === 'viewer' ? 'pocWfViewerSuggest' : 'pocWfApproverSuggest');
+        var meta = wfRoleMeta(role);
+        var suggest = wfEl(meta.suggest);
         if (!suggest || !usersUrl) return;
         try {
             var res = await fetch(usersUrl + '?q=' + encodeURIComponent(String(q || '').trim()) + '&limit=20', {
@@ -1540,9 +1650,8 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
             });
             var json = await res.json().catch(function () { return {}; });
             var users = Array.isArray(json && json.data && json.data.users) ? json.data.users : [];
-            var selected = role === 'viewer' ? wfSelectedViewers : wfSelectedApprovers;
             var selectedKeys = {};
-            selected.forEach(function (u) { selectedKeys[wfUserKey(u)] = true; });
+            meta.selected().forEach(function (u) { selectedKeys[wfUserKey(u)] = true; });
             var filtered = users.filter(function (u) { return !selectedKeys[wfUserKey(u)]; });
             if (!filtered.length) {
                 suggest.innerHTML = '<button type="button" disabled>No users found</button>';
@@ -1564,11 +1673,11 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
     }
 
     function addWfUser(role, user) {
-        var list = role === 'viewer' ? wfSelectedViewers : wfSelectedApprovers;
+        var meta = wfRoleMeta(role);
+        var list = meta.selected().slice();
         var key = wfUserKey(user);
         if (!key) return;
         if (list.some(function (u) { return wfUserKey(u) === key; })) return;
-        // Numeric portal id only — never send username into user_id (SQL bigint clash)
         var rawId = user.id != null ? user.id : (user.user_id != null ? user.user_id : null);
         var numId = (rawId != null && String(rawId).match(/^\d+$/)) ? parseInt(String(rawId), 10) : null;
         list.push({
@@ -1576,17 +1685,15 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
             username: String(user.username || '').trim(),
             email: String(user.email || '').trim()
         });
+        meta.setSelected(list);
         renderWfChips(role);
         renderWfStatusLists();
     }
 
     function removeWfUser(role, key) {
+        var meta = wfRoleMeta(role);
         var k = String(key || '').toLowerCase();
-        if (role === 'viewer') {
-            wfSelectedViewers = wfSelectedViewers.filter(function (u) { return wfUserKey(u) !== k; });
-        } else {
-            wfSelectedApprovers = wfSelectedApprovers.filter(function (u) { return wfUserKey(u) !== k; });
-        }
+        meta.setSelected(meta.selected().filter(function (u) { return wfUserKey(u) !== k; }));
         renderWfChips(role);
         renderWfStatusLists();
     }
@@ -1600,7 +1707,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
         if (label && !on && labelIdle) label.textContent = labelIdle;
     }
 
-    /** Save global config only — emails fire later when a PO enters the flow. */
+    /** Save Approver + Daily Report config — emails fire later when a PO enters the flow. */
     async function saveWorkflowConfiguration() {
         if (!canWorkflow) {
             wfMsg('You do not have Workflow page access for PO Costing.', true);
@@ -1615,8 +1722,9 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
                 headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
                 credentials: 'same-origin',
                 body: JSON.stringify({
-                    viewers: wfSelectedViewers,
-                    approvers: wfSelectedApprovers
+                    viewers: [],
+                    approvers: wfSelectedApprovers,
+                    daily_reporters: wfSelectedDaily
                 })
             });
             var saveJson = await saveRes.json().catch(function () { return {}; });
@@ -1637,8 +1745,9 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
         if (!wfEl('pocWorkflowPanel')) return;
 
         var bindSearch = function (role) {
-            var input = wfEl(role === 'viewer' ? 'pocWfViewerSearch' : 'pocWfApproverSearch');
-            var suggest = wfEl(role === 'viewer' ? 'pocWfViewerSuggest' : 'pocWfApproverSuggest');
+            var meta = wfRoleMeta(role);
+            var input = wfEl(meta.search);
+            var suggest = wfEl(meta.suggest);
             if (!input) return;
             input.addEventListener('input', function () {
                 clearTimeout(wfSearchTimers[role]);
@@ -1665,16 +1774,16 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
                 });
             }
         };
-        bindSearch('viewer');
         bindSearch('approver');
+        bindSearch('daily_report');
 
-        ['pocWfViewerChips', 'pocWfApproverChips'].forEach(function (id) {
+        ['pocWfApproverChips', 'pocWfDailyChips'].forEach(function (id) {
             var el = wfEl(id);
             if (!el) return;
             el.addEventListener('click', function (e) {
                 var btn = e.target.closest('[data-wf-remove]');
                 if (!btn) return;
-                removeWfUser(btn.getAttribute('data-wf-role') || 'viewer', btn.getAttribute('data-wf-remove'));
+                removeWfUser(btn.getAttribute('data-wf-role') || 'approver', btn.getAttribute('data-wf-remove'));
             });
         });
 
@@ -1682,21 +1791,21 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
         if (saveFlowBtn) saveFlowBtn.addEventListener('click', function () { void saveWorkflowConfiguration(); });
 
         if (!canWorkflow) {
-            ['pocWfViewerSearch', 'pocWfApproverSearch', 'pocWfSaveFlowBtn'].forEach(function (id) {
+            ['pocWfApproverSearch', 'pocWfDailySearch', 'pocWfSaveFlowBtn'].forEach(function (id) {
                 var el = wfEl(id);
                 if (el) el.disabled = true;
             });
         }
 
-        renderWfChips('viewer');
         renderWfChips('approver');
+        renderWfChips('daily_report');
         renderWfStatusLists();
     }
 
     function showPanel(name) {
         var key = String(name || 'dashboard');
         if (key === 'flow') key = 'workflow';
-        if (['dashboard', 'received', 'sent', 'mailbox', 'workflow', 'approved', 'related', 'search'].indexOf(key) < 0) key = 'dashboard';
+        if (['dashboard', 'received', 'sent', 'mailbox', 'workflow', 'approved', 'related', 'search', 'valuation'].indexOf(key) < 0) key = 'dashboard';
         if (!canOpenPanel(key)) {
             key = firstAllowedPanel();
         }
@@ -1721,12 +1830,15 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
         if (window.pocSearchPo && typeof window.pocSearchPo.close === 'function' && key !== 'search') {
             window.pocSearchPo.close();
         }
+        if (window.pocValuationReport && typeof window.pocValuationReport.close === 'function' && key !== 'valuation') {
+            window.pocValuationReport.close();
+        }
 
         if (key === 'related') {
             page.classList.toggle('is-lookup', false);
             page.classList.toggle('is-workflow', true);
             page.classList.add('is-related-po', 'is-related-results');
-            page.classList.remove('is-related-lookup', 'is-costing-bulk', 'is-released-po', 'is-search-po');
+            page.classList.remove('is-related-lookup', 'is-costing-bulk', 'is-released-po', 'is-search-po', 'is-valuation-report', 'is-approved-po');
             if (findHeaderFilters) findHeaderFilters.hidden = true;
             var relatedTitle = document.getElementById('pocPageTitle');
             if (relatedTitle) relatedTitle.innerHTML = '<strong>Draft PO</strong>';
@@ -1738,18 +1850,29 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
             if (window.pocRelatedPo && typeof window.pocRelatedPo.close === 'function') {
                 window.pocRelatedPo.close();
             }
-            page.classList.remove('is-related-po', 'is-related-results', 'is-related-lookup', 'is-costing-bulk', 'is-released-po', 'is-workflow');
+            page.classList.remove('is-related-po', 'is-related-results', 'is-related-lookup', 'is-costing-bulk', 'is-released-po', 'is-workflow', 'is-valuation-report', 'is-approved-po');
             page.classList.add('is-lookup', 'is-search-po');
             if (findHeaderFilters) findHeaderFilters.hidden = true;
             try { if (window.rptLoader) window.rptLoader.hide(true); } catch (_) {}
             if (window.pocSearchPo && typeof window.pocSearchPo.open === 'function') {
                 window.pocSearchPo.open();
             }
+        } else if (key === 'valuation') {
+            if (window.pocRelatedPo && typeof window.pocRelatedPo.close === 'function') {
+                window.pocRelatedPo.close();
+            }
+            page.classList.remove('is-related-po', 'is-related-results', 'is-related-lookup', 'is-costing-bulk', 'is-released-po', 'is-search-po', 'is-lookup', 'is-approved-po');
+            page.classList.add('is-workflow', 'is-valuation-report');
+            if (findHeaderFilters) findHeaderFilters.hidden = true;
+            try { if (window.rptLoader) window.rptLoader.hide(true); } catch (_) {}
+            if (window.pocValuationReport && typeof window.pocValuationReport.open === 'function') {
+                window.pocValuationReport.open();
+            }
         } else if (key === 'dashboard') {
             if (window.pocRelatedPo && typeof window.pocRelatedPo.close === 'function') {
                 window.pocRelatedPo.close();
             }
-            page.classList.remove('is-related-po', 'is-related-results', 'is-related-lookup', 'is-lookup', 'is-search-po');
+            page.classList.remove('is-related-po', 'is-related-results', 'is-related-lookup', 'is-lookup', 'is-search-po', 'is-valuation-report', 'is-approved-po');
             page.classList.add('is-workflow', 'is-costing-bulk', 'is-released-po');
             if (findHeaderFilters) findHeaderFilters.hidden = false;
             var titleEl = document.getElementById('pocPageTitle');
@@ -1760,13 +1883,26 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
                     window.pcbBulkList.ensureLoaded();
                 }
             } catch (_) {}
+        } else if (key === 'approved') {
+            if (window.pocRelatedPo && typeof window.pocRelatedPo.close === 'function') {
+                window.pocRelatedPo.close();
+            }
+            page.classList.remove('is-related-po', 'is-related-results', 'is-related-lookup', 'is-lookup', 'is-costing-bulk', 'is-released-po', 'is-search-po', 'is-valuation-report');
+            page.classList.add('is-workflow', 'is-approved-po');
+            if (findHeaderFilters) findHeaderFilters.hidden = true;
+            var approvedTitle = document.getElementById('pocPageTitle');
+            if (approvedTitle) approvedTitle.innerHTML = '<strong>Approved PO</strong>';
         } else {
             if (window.pocRelatedPo && typeof window.pocRelatedPo.close === 'function') {
                 window.pocRelatedPo.close();
             }
-            page.classList.remove('is-related-po', 'is-related-results', 'is-related-lookup', 'is-lookup', 'is-costing-bulk', 'is-released-po', 'is-search-po');
+            page.classList.remove('is-related-po', 'is-related-results', 'is-related-lookup', 'is-lookup', 'is-costing-bulk', 'is-released-po', 'is-search-po', 'is-valuation-report', 'is-approved-po');
             page.classList.toggle('is-workflow', true);
             if (findHeaderFilters) findHeaderFilters.hidden = true;
+            var otherTitle = document.getElementById('pocPageTitle');
+            if (otherTitle && key === 'workflow') otherTitle.innerHTML = '<strong>Workflow</strong>';
+            else if (otherTitle && (key === 'received' || key === 'mailbox')) otherTitle.innerHTML = '<strong>Receive PO</strong>';
+            else if (otherTitle && key === 'sent') otherTitle.innerHTML = '<strong>Sent PO</strong>';
         }
 
         if (panelKey === 'mailbox') {
@@ -1960,7 +2096,11 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
 
     var startPanel = firstAllowedPanel();
     try {
-        startPanel = new URL(window.location.href).searchParams.get('panel') || firstAllowedPanel();
+        var urlPanel = String(new URL(window.location.href).searchParams.get('panel') || '').trim();
+        if (urlPanel === 'flow') urlPanel = 'workflow';
+        if (urlPanel && canOpenPanel(urlPanel)) {
+            startPanel = urlPanel;
+        }
     } catch (_) {}
     bindWorkflowPageUi();
     showPanel(startPanel);
@@ -2005,6 +2145,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
     'presetDates'        => [],
     'dataUrl'            => url('purchase-order/data'),
     'validateUrl'        => url('purchase-order/validate'),
+    'chargesUrl'         => url('purchase-order/charges'),
     'manualMapUrl'       => url('purchase-order/manual-map'),
     'pdfUrl'             => url('purchase-order/pdf'),
     'passPoUrl'          => url('purchase-order/pass'),
@@ -2080,6 +2221,9 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
 <?php if (!empty($canAsideSearchPo)): ?>
 <script src="<?= e(asset('js/search-po.js')) ?>?v=<?= @filemtime(base_path('public/js/search-po.js')) ?: time() ?>"></script>
 <?php endif; ?>
+<?php if (!empty($canAsideValuation)): ?>
+<script src="<?= e(asset('js/po-valuation-report.js')) ?>?v=<?= @filemtime(base_path('public/js/po-valuation-report.js')) ?: time() ?>"></script>
+<?php endif; ?>
 <script>
 (function () {
     try {
@@ -2093,6 +2237,11 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
             window.pocSearchPo.open();
         } else if (window.pocSearchPo && typeof window.pocSearchPo.close === 'function' && panel !== 'search') {
             window.pocSearchPo.close();
+        }
+        if (panel === 'valuation' && window.pocValuationReport && typeof window.pocValuationReport.open === 'function') {
+            window.pocValuationReport.open();
+        } else if (window.pocValuationReport && typeof window.pocValuationReport.close === 'function' && panel !== 'valuation') {
+            window.pocValuationReport.close();
         }
     } catch (_) {}
 })();

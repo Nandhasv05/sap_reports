@@ -609,7 +609,7 @@
         }).join('');
     }
 
-    function fillStats(t, visibleCount) {
+    function fillStats(t, visibleCount, statusCounts) {
         const pos = visibleCount != null ? visibleCount : (t.pos_count || 0);
         if ($('pocRelStat-pos')) $('pocRelStat-pos').textContent = qty(pos);
         if ($('pocRelStat-items')) $('pocRelStat-items').textContent = qty(t.items_count || 0);
@@ -620,6 +620,22 @@
         if ($('pocRelatedCount')) {
             $('pocRelatedCount').textContent = `Showing ${qty(pos)} purchase order${pos === 1 ? '' : 's'}`;
         }
+        const sc = statusCounts || t.status_counts || { released: 0, draft: 0, review: 0 };
+        if ($('pocRelatedStatReleased')) $('pocRelatedStatReleased').textContent = qty(sc.released || 0);
+        if ($('pocRelatedStatDraft')) $('pocRelatedStatDraft').textContent = qty(sc.draft || 0);
+        if ($('pocRelatedStatReview')) $('pocRelatedStatReview').textContent = qty(sc.review || 0);
+    }
+
+    function countStatusTotals(list) {
+        const out = { released: 0, draft: 0, review: 0 };
+        (list || []).forEach((it) => {
+            const rec = it?.rec || it || {};
+            const st = normalizeStatus(rec.status_update) || 'Draft';
+            if (st === 'Released') out.released += 1;
+            else if (st === 'Review') out.review += 1;
+            else out.draft += 1;
+        });
+        return out;
     }
 
     function setFoot(key, html) {
@@ -763,7 +779,7 @@
             total_value: valueSum,
             suppliers_count: suppliers.size,
             currency,
-        }, visible.length);
+        }, visible.length, countStatusTotals(visible));
         updateFooter(visible);
         updateSortHeaders();
         // Reorder body/footer only — never touch the filter row while typing (keeps focus)

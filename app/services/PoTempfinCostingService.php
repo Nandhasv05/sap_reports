@@ -57,6 +57,40 @@ final class PoTempfinCostingService
     }
 
     /**
+     * SAP/PASSPO pricing charges only (MOQ CondZB00, Freight, etc.) — for PO Value Breakdown.
+     *
+     * @return array{success:bool,charges:array<string,mixed>,sub_total:float,grand_total:float,source:string,error:?string}
+     */
+    public function chargesForPurchaseOrder(string $purchaseOrder): array
+    {
+        $empty = [
+            'other' => 0.0, 'freight' => 0.0, 'moq' => 0.0, 'screen' => 0.0, 'bank' => 0.0,
+            'discount' => 0.0, 'sgst' => 0.0, 'cgst' => 0.0, 'igst' => 0.0, 'total' => 0.0, 'lines' => [],
+        ];
+        $res = $this->fetchForPurchaseOrder($purchaseOrder, 'all');
+        if (empty($res['success'])) {
+            return [
+                'success'     => false,
+                'charges'     => $empty,
+                'sub_total'   => 0.0,
+                'grand_total' => 0.0,
+                'source'      => 'TEMPFIN/PASSPO',
+                'error'       => (string) ($res['error'] ?? 'TEMPFIN/PASSPO charges unavailable'),
+            ];
+        }
+        $summary = is_array($res['summary'] ?? null) ? $res['summary'] : [];
+        $charges = is_array($summary['charges'] ?? null) ? $summary['charges'] : $empty;
+        return [
+            'success'     => true,
+            'charges'     => $charges,
+            'sub_total'   => (float) ($summary['sub_total'] ?? $summary['total_po_value'] ?? 0),
+            'grand_total' => (float) ($summary['grand_total'] ?? 0),
+            'source'      => 'TEMPFIN/PASSPO',
+            'error'       => null,
+        ];
+    }
+
+    /**
      * @return array{
      *   success: bool,
      *   records: list<array<string,mixed>>,
@@ -982,10 +1016,9 @@ final class PoTempfinCostingService
             }
         }
 
-        $condSum = array_sum($cond);
-        $src = $condSum > 0.0001 ? $cond : $footer;
+        // Per-bucket max: Cond* may miss MOQ while PASSPO footer has it (and vice versa)
         foreach (['other', 'freight', 'moq', 'screen', 'bank'] as $k) {
-            $out[$k] = (float) ($src[$k] ?? 0);
+            $out[$k] = max((float) ($cond[$k] ?? 0), (float) ($footer[$k] ?? 0));
         }
         // Tax / discount always from footer labels when present
         foreach (['discount', 'sgst', 'cgst', 'igst'] as $k) {

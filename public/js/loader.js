@@ -98,6 +98,34 @@
         clearStepCycle();
     }
 
+    function syncContentScope() {
+        const page = document.getElementById('poCostingPage');
+        const scoped = !!(page || overlay.getAttribute('data-scope') === 'content'
+            || document.body.classList.contains('is-poc-loader-scoped'));
+        overlay.classList.toggle('is-content-scoped', scoped);
+        if (!scoped || !page) return;
+        document.body.classList.add('is-poc-loader-scoped');
+        const bar = page.querySelector(':scope > .rpt-bar');
+        const nav = page.querySelector('.poc-sidenav');
+        const landing = page.querySelector('.poc-landing');
+        let top = 0;
+        let left = 0;
+        if (landing) {
+            const r = landing.getBoundingClientRect();
+            top = Math.max(0, Math.round(r.top));
+            left = Math.max(0, Math.round(r.left));
+        } else {
+            top = bar ? Math.round(bar.getBoundingClientRect().bottom) : 64;
+            left = nav ? Math.round(nav.getBoundingClientRect().right) : 72;
+            if (window.matchMedia && window.matchMedia('(max-width: 900px)').matches) {
+                left = 0;
+                if (nav) top = Math.round(nav.getBoundingClientRect().bottom);
+            }
+        }
+        document.documentElement.style.setProperty('--poc-loader-top', top + 'px');
+        document.documentElement.style.setProperty('--poc-loader-left', left + 'px');
+    }
+
     function show(options) {
         bootAutoHide = false;
         options = options || {};
@@ -115,6 +143,7 @@
         visible = true;
         overlay.hidden = false;
         document.body.classList.add('rpt-loading');
+        syncContentScope();
 
         if (typeof options.percent === 'number') {
             determinate = true;
@@ -197,6 +226,19 @@
             if (visible) hide(true);
         }, 45000);
     }
+
+    function onDomReadyScope() {
+        syncContentScope();
+        if (visible) syncContentScope();
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', onDomReadyScope);
+    } else {
+        onDomReadyScope();
+    }
+    window.addEventListener('resize', function () {
+        if (visible) syncContentScope();
+    });
 
     function autoHideBoot() {
         if (!bootAutoHide) return;

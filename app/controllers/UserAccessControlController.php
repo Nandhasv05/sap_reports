@@ -81,7 +81,7 @@ class UserAccessControlController extends Controller
                 'icon'        => 'fa-file-invoice-dollar',
                 'icon_color'  => '#10b981',
                 'icon_bg'     => '#ecfdf5',
-                'description' => 'Released PO + Workbench actions + aside pages (Receive / Sent / Workflow / Approved / Draft PO / Search PO)',
+                'description' => 'Released PO + Workbench actions + aside pages (Receive / Sent / Workflow / Approved / Draft PO / Search PO / poValaition Report)',
                 'actions'     => [
                     [
                         'key' => 'view',
@@ -160,6 +160,12 @@ class UserAccessControlController extends Controller
                         'label' => 'Search PO',
                         'column' => 'can_search_po',
                         'tooltip' => 'Search PO — why shown: shows the Search PO sidenav and lets the user open a PO in Costing Workbench by number (even without the Workbench right).',
+                    ],
+                    [
+                        'key' => 'valuation_report',
+                        'label' => 'poValaition Report',
+                        'column' => 'can_valuation_report',
+                        'tooltip' => 'poValaition Report — why shown: shows the poValaition Report sidenav (Pending / Review / Released / Approved KPIs and Recent Activity).',
                     ],
                 ],
             ],
@@ -374,7 +380,8 @@ class UserAccessControlController extends Controller
                        {$bitSelect('can_approved')},
                        {$bitSelect('can_related')},
                        {$bitSelect('can_find_po')},
-                       {$bitSelect('can_search_po')}
+                       {$bitSelect('can_search_po')},
+                       {$bitSelect('can_valuation_report')}
                 FROM [dbo].[{$table}]
             ";
             $stmt = $pdo->prepare($selectSql . ' WHERE user_id = ?');
@@ -404,7 +411,7 @@ class UserAccessControlController extends Controller
                         'copy' => 0, 'pass_po' => 0, 'update' => 0,
                         'assign' => 0, 'validate' => 0, 'esign' => 0, 'workbench' => 0,
                         'receive' => 0, 'sent' => 0, 'workflow' => 0, 'approved' => 0, 'related' => 0,
-                        'find_po' => 0, 'search_po' => 0,
+                        'find_po' => 0, 'search_po' => 0, 'valuation_report' => 0,
                     ];
                 }
                 $permissions[$pNo]['add'] = max($permissions[$pNo]['add'], (int) $row['can_add']);
@@ -425,6 +432,7 @@ class UserAccessControlController extends Controller
                 $permissions[$pNo]['related'] = max($permissions[$pNo]['related'], (int) ($row['can_related'] ?? 0));
                 $permissions[$pNo]['find_po'] = max($permissions[$pNo]['find_po'], (int) ($row['can_find_po'] ?? 0));
                 $permissions[$pNo]['search_po'] = max($permissions[$pNo]['search_po'], (int) ($row['can_search_po'] ?? 0));
+                $permissions[$pNo]['valuation_report'] = max($permissions[$pNo]['valuation_report'], (int) ($row['can_valuation_report'] ?? 0));
             }
 
             $this->jsonResponse([
@@ -574,6 +582,7 @@ class UserAccessControlController extends Controller
         $optionalBits = [
             'can_copy', 'can_assign', 'can_validate',
             'can_receive', 'can_sent', 'can_workflow', 'can_approved', 'can_related', 'can_find_po', 'can_search_po',
+            'can_valuation_report',
         ];
         $bitCols = [];
         foreach ($optionalBits as $c) {
@@ -611,6 +620,7 @@ class UserAccessControlController extends Controller
                         'can_copy' => 0, 'can_assign' => 0, 'can_validate' => 0,
                         'can_receive' => 0, 'can_sent' => 0, 'can_workflow' => 0, 'can_approved' => 0,
                         'can_related' => 0, 'can_find_po' => 0, 'can_search_po' => 0,
+                        'can_valuation_report' => 0,
                     ];
                 }
 
@@ -742,7 +752,7 @@ class UserAccessControlController extends Controller
     /**
      * @param array<string, mixed> $p
      * @param array<string, mixed> $meta
-     * @return array{can_add:int,can_view:int,can_edit:int,can_approve:int,can_copy:int,can_assign:int,can_validate:int,can_receive:int,can_sent:int,can_workflow:int,can_approved:int,can_related:int,can_find_po:int,can_search_po:int}
+     * @return array{can_add:int,can_view:int,can_edit:int,can_approve:int,can_copy:int,can_assign:int,can_validate:int,can_receive:int,can_sent:int,can_workflow:int,can_approved:int,can_related:int,can_find_po:int,can_search_po:int,can_valuation_report:int}
      */
     private function normalizePagePermissions(array $p, array $meta): array
     {
@@ -762,6 +772,7 @@ class UserAccessControlController extends Controller
             'can_related' => 0,
             'can_find_po' => 0,
             'can_search_po' => 0,
+            'can_valuation_report' => 0,
         ];
         $actions = is_array($meta['actions'] ?? null) ? $meta['actions'] : [];
         foreach ($actions as $act) {
@@ -796,6 +807,7 @@ class UserAccessControlController extends Controller
             $flags['can_related'] = 0;
             $flags['can_find_po'] = 0;
             $flags['can_search_po'] = 0;
+            $flags['can_valuation_report'] = 0;
         } elseif ($kind === 'po-costing') {
             $flags['can_edit'] = 0;
             // can_add stores Workbench; can_copy stores eSign; page bits gate aside nav
@@ -812,6 +824,7 @@ class UserAccessControlController extends Controller
                 || $flags['can_related'] === 1
                 || $flags['can_find_po'] === 1
                 || $flags['can_search_po'] === 1
+                || $flags['can_valuation_report'] === 1
             ) {
                 $flags['can_view'] = 1;
             }
@@ -825,6 +838,7 @@ class UserAccessControlController extends Controller
             $flags['can_related'] = 0;
             $flags['can_find_po'] = 0;
             $flags['can_search_po'] = 0;
+            $flags['can_valuation_report'] = 0;
             $flags['can_view'] = (
                 $flags['can_add'] === 1
                 || $flags['can_edit'] === 1
@@ -931,6 +945,7 @@ class UserAccessControlController extends Controller
         $needed = [
             'can_copy', 'can_assign', 'can_validate',
             'can_receive', 'can_sent', 'can_workflow', 'can_approved', 'can_related', 'can_find_po', 'can_search_po',
+            'can_valuation_report',
         ];
         $existing = $this->accessTableColumnMap($pdo);
         $addedFindPo = false;
@@ -989,7 +1004,7 @@ class UserAccessControlController extends Controller
                 error_log('ensureBitColumns backfill can_find_po: ' . $e->getMessage());
             }
         }
-        // Search PO (can_search_po) defaults to 0 — grant only via Access Studio checkbox
+        // Search PO / poValaition Report default to 0 — grant only via Access Studio checkbox
     }
 
     /** @deprecated use ensureBitColumns — kept so older call sites do not fatally error */
@@ -1032,6 +1047,7 @@ class UserAccessControlController extends Controller
                 [can_related] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_related] DEFAULT 0,
                 [can_find_po] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_find_po] DEFAULT 0,
                 [can_search_po] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_search_po] DEFAULT 0,
+                [can_valuation_report] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_valuation_report] DEFAULT 0,
                 [created_at] DATETIME NOT NULL CONSTRAINT [DF_uac_{$suffix}_created] DEFAULT GETDATE(),
                 [updated_at] DATETIME NOT NULL CONSTRAINT [DF_uac_{$suffix}_updated] DEFAULT GETDATE(),
                 CONSTRAINT [PK_uac_{$suffix}] PRIMARY KEY ([id]),
@@ -1047,6 +1063,7 @@ class UserAccessControlController extends Controller
                     (user_id, username, page_no, page_name, page_route,
                      can_add, can_view, can_edit, can_approve, can_copy, can_assign, can_validate,
                      can_receive, can_sent, can_workflow, can_approved, can_related, can_find_po, can_search_po,
+                     can_valuation_report,
                      created_at, updated_at)
                     SELECT
                         user_id,
@@ -1068,6 +1085,7 @@ class UserAccessControlController extends Controller
                         CAST(ISNULL(can_related,0) AS BIT),
                         CAST(ISNULL(can_find_po, CASE WHEN ISNULL(can_view,0) = 1 AND page_no = 2 THEN 1 ELSE 0 END) AS BIT),
                         CAST(ISNULL(can_search_po, 0) AS BIT),
+                        CAST(ISNULL(can_valuation_report, 0) AS BIT),
                         ISNULL(created_at, GETDATE()),
                         ISNULL(updated_at, GETDATE())
                     FROM [dbo].[{$table}]
@@ -1209,6 +1227,7 @@ class UserAccessControlController extends Controller
                         [can_related] BIT NOT NULL CONSTRAINT [DF_{$table}_related] DEFAULT 0,
                         [can_find_po] BIT NOT NULL CONSTRAINT [DF_{$table}_find_po] DEFAULT 0,
                         [can_search_po] BIT NOT NULL CONSTRAINT [DF_{$table}_search_po] DEFAULT 0,
+                        [can_valuation_report] BIT NOT NULL CONSTRAINT [DF_{$table}_valuation_report] DEFAULT 0,
                         [created_at] DATETIME NOT NULL CONSTRAINT [DF_{$table}_created] DEFAULT GETDATE(),
                         [updated_at] DATETIME NOT NULL CONSTRAINT [DF_{$table}_updated] DEFAULT GETDATE(),
                         CONSTRAINT [PK_{$table}] PRIMARY KEY ([id]),

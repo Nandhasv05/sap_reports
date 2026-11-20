@@ -129,7 +129,7 @@ $extraHead = '
                 </div>
                 <div class="uac-legend">
                     <span><i class="uac-dot is-view"></i> Reports · View</span>
-                    <span><i class="uac-dot is-pass"></i> PO Costing · View / Released PO / Workbench / Pass PO / Assign / Validate / eSign + Receive / Sent / Workflow / Approved / Draft PO / Search PO</span>
+                    <span><i class="uac-dot is-pass"></i> PO Costing · View / Released PO / Workbench / Pass PO / Assign / Validate / eSign + Receive / Sent / Workflow / Approved / Draft PO / Search PO / poValaition Report</span>
                     <span><i class="uac-dot is-zcost"></i> ZCOST · Add / Update / Copy / Approve</span>
                 </div>
             </header>

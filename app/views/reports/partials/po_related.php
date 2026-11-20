@@ -8,7 +8,7 @@ require_once base_path('app/services/PoCostValidationService.php');
 $relatedCols = PoCostValidationService::relatedPoColumns();
 $relatedColCount = count($relatedCols);
 $relatedCards = [
-    ['id' => 'pos',       'label' => 'Purchase Orders', 'icon' => 'receipt_long',         'tone' => 'violet'],
+    ['id' => 'pos',       'label' => 'Total POs',       'icon' => 'receipt_long',         'tone' => 'violet'],
     ['id' => 'items',     'label' => 'Total Items',     'icon' => 'format_list_numbered', 'tone' => 'teal'],
     ['id' => 'qty',       'label' => 'Total Order Qty', 'icon' => 'inventory_2',          'tone' => 'sky'],
     ['id' => 'value',     'label' => 'Total Net Value', 'icon' => 'payments',             'tone' => 'mint'],
@@ -19,8 +19,8 @@ $relatedCards = [
     <div class="poc-panel-frame is-native is-rpt-style is-related-po is-related-results" id="pocRelatedResults">
         <div class="rpt-stats po-stat-row poc-related-stats" id="pocRelatedStats">
             <?php foreach ($relatedCards as $card): ?>
-                <article class="rpt-stat tone-<?= e($card['tone']) ?>">
-                    <span class="material-icons-round"><?= e($card['icon']) ?></span>
+                <article class="rpt-stat tone-<?= e($card['tone']) ?>" title="<?= e($card['label']) ?>">
+                    <span class="material-icons-round" aria-hidden="true"><?= e($card['icon']) ?></span>
                     <div>
                         <div class="stat-value-wrap">
                             <b id="pocRelStat-<?= e($card['id']) ?>">0</b>
@@ -44,6 +44,23 @@ $relatedCards = [
             </div>
             <div class="rpt-tb-actions">
                 <span class="rpt-tb-count" id="pocRelatedCount">Showing 0 purchase orders</span>
+                <span class="poc-related-status-pills" id="pocRelatedStatusPills" aria-label="Status totals">
+                    <span class="poc-related-status-pill is-released" title="Total Released">
+                        <span class="material-icons-round" aria-hidden="true">verified</span>
+                        <em>Released</em>
+                        <b id="pocRelatedStatReleased">0</b>
+                    </span>
+                    <span class="poc-related-status-pill is-draft" title="Total Draft">
+                        <span class="material-icons-round" aria-hidden="true">edit_note</span>
+                        <em>Draft</em>
+                        <b id="pocRelatedStatDraft">0</b>
+                    </span>
+                    <span class="poc-related-status-pill is-review" title="Total Review">
+                        <span class="material-icons-round" aria-hidden="true">rate_review</span>
+                        <em>Review</em>
+                        <b id="pocRelatedStatReview">0</b>
+                    </span>
+                </span>
                 <span class="poc-related-filter-pill" id="pocRelatedActiveFilters" title="Active header filters">All Materials · All Brands</span>
 
                 <button type="button" class="rpt-tb-btn is-active" id="pocRelatedStickyScroll" title="Keep table header fixed and scroll body only">
