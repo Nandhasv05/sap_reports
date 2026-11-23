@@ -124,9 +124,9 @@
             </div>
             <div class="rpt-tb-actions">
                 <span class="rpt-tb-count" id="pcbCount">—</span>
-                <button type="button" class="rpt-tb-btn" id="pcbToggleStickyScroll" title="Toggle fixed header with scrollable body">
+                <button type="button" class="rpt-tb-btn is-active" id="pcbToggleStickyScroll" title="Toggle fixed header with scrollable body">
                     <i class="fas fa-arrows-up-down"></i>
-                    <span id="pcbStickyScrollLabel">Expand Table</span>
+                    <span id="pcbStickyScrollLabel">Scroll Body Only</span>
                 </button>
                 <button type="button" class="rpt-tb-btn rpt-tb-btn-excel" id="pcbExportBtn" title="Download Excel / CSV">
                     <i class="fas fa-file-excel"></i>
@@ -155,7 +155,7 @@
             ];
             $bulkNoFilter = ['pdf', 'sno'];
         ?>
-        <div class="pcb-table-wrap is-expanded" id="pcbTableWrap">
+        <div class="pcb-table-wrap is-scroll-body" id="pcbTableWrap">
             <div class="pcb-table-scrollx">
             <table class="pcb-table" id="pcbTable">
                 <thead>

@@ -1601,15 +1601,11 @@
         if (!wrap) return;
         wrap.classList.toggle('is-scroll-body', !!enabled);
         wrap.classList.toggle('is-expanded', !enabled);
-        if (enabled) {
-            wrap.style.maxHeight = '';
-            wrap.style.height = '';
-            wrap.style.overflow = '';
-        } else {
-            wrap.style.maxHeight = 'none';
-            wrap.style.height = 'auto';
-            wrap.style.overflow = 'visible';
-        }
+        // Let CSS flex + overflow handle scrolling (do not force overflow:visible —
+        // parents use overflow:hidden and that clipped the table with no scrollbar).
+        wrap.style.maxHeight = '';
+        wrap.style.height = '';
+        wrap.style.overflow = '';
         btn?.classList.toggle('is-active', !!enabled);
         if (label) label.textContent = enabled ? 'Scroll Body Only' : 'Expand Table';
     }
@@ -3956,7 +3952,7 @@
                 localStorage.setItem('pcb_sticky_scroll', wrap.classList.contains('is-scroll-body') ? '1' : '0');
             } catch (_) {}
         });
-        let pcbStickyOn = false;
+        let pcbStickyOn = true;
         try {
             const saved = localStorage.getItem('pcb_sticky_scroll');
             if (saved === '0' || saved === '1') pcbStickyOn = saved === '1';

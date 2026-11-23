@@ -12734,6 +12734,7 @@ body.pcw-pdf-open { overflow: hidden; }
     box-shadow: 0 8px 24px rgba(15,23,42,.05);
     overflow: hidden;
     min-width: 0;
+    min-height: 0;
 }
 .pcb-table-card .pcb-table-wrap {
     border-top: 0;
@@ -12903,23 +12904,33 @@ body.pcw-pdf-open { overflow: hidden; }
     border-radius: 0 0 16px 16px;
     background: #fff;
     min-width: 0;
-    max-height: none !important;
-    height: auto !important;
-    overflow: visible !important;
+    max-width: 100%;
+    max-height: none;
+    height: auto;
+    overflow: hidden;
     -webkit-overflow-scrolling: touch;
 }
 .pcb-table-wrap.is-scroll-body {
-    max-height: min(70vh, 780px) !important;
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none !important;
+    height: auto !important;
     overflow: hidden !important;
+    display: flex;
+    flex-direction: column;
 }
 .pcb-table-wrap.is-scroll-body .pcb-table-scrollx {
-    max-height: min(70vh, 780px);
-    overflow: auto;
+    flex: 1 1 auto;
+    max-height: none;
+    min-height: 0;
+    overflow: auto !important;
 }
 .pcb-table-wrap.is-expanded,
 .pcb-table-wrap:not(.is-scroll-body) {
+    flex: 1 1 auto;
+    min-height: 0;
     max-height: none !important;
-    overflow: visible !important;
+    overflow: auto !important;
 }
 .pcb-table-wrap.is-expanded .pcb-table-scrollx,
 .pcb-table-wrap:not(.is-scroll-body) .pcb-table-scrollx {
@@ -12929,8 +12940,42 @@ body.pcw-pdf-open { overflow: hidden; }
 }
 .pcb-table-scrollx {
     width: 100%;
+    max-width: 100%;
     min-width: 0;
     -webkit-overflow-scrolling: touch;
+}
+
+/* Released / bulk list: fill panel height so table body can scroll inside overflow:hidden ancestors */
+.rpt-app.is-po-costing.is-costing-bulk .poc-panel-frame.is-released-po-frame,
+.rpt-app.is-po-costing.is-released-po .poc-panel-frame.is-released-po-frame {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+.rpt-app.is-po-costing.is-costing-bulk .pcb,
+.rpt-app.is-po-costing.is-released-po .pcb {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.rpt-app.is-po-costing.is-costing-bulk .pcb-kpis,
+.rpt-app.is-po-costing.is-released-po .pcb-kpis {
+    flex-shrink: 0;
+}
+.rpt-app.is-po-costing.is-costing-bulk .pcb-table-card,
+.rpt-app.is-po-costing.is-released-po .pcb-table-card {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.rpt-app.is-po-costing.is-costing-bulk .pcb-table-card > .rpt-table-toolbar,
+.rpt-app.is-po-costing.is-released-po .pcb-table-card > .rpt-table-toolbar {
+    flex-shrink: 0;
 }
 .pcb-filter-row th {
     background: #f8fafc !important;
