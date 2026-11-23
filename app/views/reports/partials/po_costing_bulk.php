@@ -124,10 +124,6 @@
             </div>
             <div class="rpt-tb-actions">
                 <span class="rpt-tb-count" id="pcbCount">—</span>
-                <button type="button" class="rpt-tb-btn is-active" id="pcbToggleStickyScroll" title="Toggle fixed header with scrollable body">
-                    <i class="fas fa-arrows-up-down"></i>
-                    <span id="pcbStickyScrollLabel">Scroll Body Only</span>
-                </button>
                 <button type="button" class="rpt-tb-btn rpt-tb-btn-excel" id="pcbExportBtn" title="Download Excel / CSV">
                     <i class="fas fa-file-excel"></i>
                     <span>Excel</span>
@@ -212,9 +208,15 @@
         <div class="pcb-cards" id="pcbCards" aria-label="PO list cards"></div>
 
         <div class="pcb-pager" id="pcbPager" hidden>
-            <button type="button" id="pcbPrev" class="pcb-btn pcb-btn-ghost">Prev</button>
-            <span id="pcbPageInfo">Page 1</span>
-            <button type="button" id="pcbNext" class="pcb-btn pcb-btn-ghost">Next</button>
+            <span class="rpt-page-info" id="pcbPageInfo">Page 1 of 1</span>
+            <div class="rpt-page-controls" role="navigation" aria-label="Table pagination">
+                <button type="button" class="rpt-page-btn" id="pcbPrev" title="Previous page" aria-label="Previous page">
+                    <i class="fas fa-angle-left"></i>
+                </button>
+                <button type="button" class="rpt-page-btn" id="pcbNext" title="Next page" aria-label="Next page">
+                    <i class="fas fa-angle-right"></i>
+                </button>
+            </div>
         </div>
     </div>
 

@@ -900,11 +900,18 @@
                 return `<input type="checkbox" class="pcb-row-check" data-po="${esc(r.purchase_order)}" ${r._checked ? 'checked' : ''}>`;
             case 'sno':
                 return String(rowIndex);
-            case 'po':
+            case 'po': {
                 const canWb = canOpenWorkbenchFromList();
-                return `<button type="button" class="pcb-po-link${canWb ? '' : ' is-disabled'}" data-po="${esc(r.purchase_order)}"
-                    title="${canWb ? 'Open workbench in new tab' : 'Workbench / Search PO permission required'}"
-                    ${canWb ? '' : 'disabled'}>${esc(r.purchase_order)}</button>`;
+                if (!canWb) {
+                    return `<span class="pcb-po-link is-disabled" data-po="${esc(r.purchase_order)}"
+                        title="Workbench / Search PO permission required">${esc(r.purchase_order)}</span>`;
+                }
+                // Named target + opener: Back focuses Released Po tab and closes workbench (no reload)
+                return `<a class="pcb-po-link" href="${esc(workbenchUrl(r.purchase_order))}"
+                    data-po="${esc(r.purchase_order)}"
+                    target="sap_reports_po_workbench" rel="opener"
+                    title="Open workbench in new tab">${esc(r.purchase_order)}</a>`;
+            }
             case 'date':
                 return fmtDate(r.date);
             case 'material':
@@ -972,14 +979,21 @@
                     ? r.remarks_all.map((x) => String(x || '').trim()).filter(Boolean)
                     : [];
                 const note = all[0] || String(r.remarks || '').trim();
-                if (!note) return '—';
+                if (!note) {
+                    return `<span class="pcb-remarks-empty-cell" title="No remarks">—</span>`;
+                }
                 const count = Math.max(all.length, Number(r.remarks_count) || 0, 1);
-                const short = note.length > 40 ? `${note.slice(0, 37)}…` : note;
-                const more = count > 1
-                    ? `<span class="pcb-remarks-count">+${count - 1}</span>`
+                const tip = count > 1
+                    ? `${count} remarks · click to view`
+                    : (note.length > 120 ? `${note.slice(0, 117)}…` : note);
+                const badge = count > 1
+                    ? `<span class="pcb-remarks-count" aria-hidden="true">${count}</span>`
                     : '';
-                return `<button type="button" class="pcb-remarks pcb-remarks-btn" data-po="${esc(r.purchase_order)}" title="Click to view all remarks">
-                    <span class="pcb-remarks-text">${esc(short)}</span>${more}
+                return `<button type="button" class="pcb-remarks-btn is-chip" data-po="${esc(r.purchase_order)}"
+                    title="${esc(tip)}" aria-label="View remarks for PO ${esc(r.purchase_order)}">
+                    <span class="material-icons-round" aria-hidden="true">chat_bubble_outline</span>
+                    <span class="pcb-remarks-label">View</span>
+                    ${badge}
                 </button>`;
             }
             case 'mail_status': {
@@ -3347,23 +3361,38 @@
         return cfg.canWorkbench !== false || cfg.canSearchPo === true;
     }
 
-    function openDrill(po) {
-        if (!po) return;
-        if (!canOpenWorkbenchFromList()) {
-            alert('You do not have Workbench / Search PO access for PO Costing Validation.');
-            return;
+    // Stable name so workbench Back can focus this tab via window.open('', name)
+    try {
+        if (/\/po-costing(-validation)?$/i.test(String(window.location.pathname || ''))) {
+            window.name = 'sap_reports_po_costing';
         }
-        const href = workbenchUrl(po);
+    } catch (_) { /* ignore */ }
+
+    function openInNewTab(href) {
+        if (!href) return false;
         let abs = href;
         try {
             abs = new URL(href, window.location.origin).href;
         } catch (_) {
             abs = href;
         }
-        const win = window.open(abs, '_blank', 'noopener');
-        if (!win) {
-            // Popup blocked — fall back to same tab
-            window.location.href = abs;
+        // Keep opener + open as named workbench window (Back focuses Released Po, closes this)
+        try {
+            window.name = 'sap_reports_po_costing';
+        } catch (_) { /* ignore */ }
+        const win = window.open(abs, 'sap_reports_po_workbench');
+        return !!win;
+    }
+
+    function openDrill(po) {
+        if (!po) return;
+        if (!canOpenWorkbenchFromList()) {
+            alert('You do not have Workbench / Search PO access for PO Costing Validation.');
+            return;
+        }
+        // Never fall back to same-tab navigation — that resets Released Po list state
+        if (!openInNewTab(workbenchUrl(po))) {
+            toast('Pop-up blocked. Allow pop-ups to open the workbench in a new tab.', 'error');
         }
     }
 
@@ -3944,20 +3973,8 @@
             row.style.display = hidden ? 'table-row' : 'none';
             btn?.classList.toggle('is-active', hidden);
         });
-        $('pcbToggleStickyScroll')?.addEventListener('click', () => {
-            const wrap = $('pcbTableWrap');
-            if (!wrap) return;
-            applyListStickyMode(!wrap.classList.contains('is-scroll-body'));
-            try {
-                localStorage.setItem('pcb_sticky_scroll', wrap.classList.contains('is-scroll-body') ? '1' : '0');
-            } catch (_) {}
-        });
-        let pcbStickyOn = true;
-        try {
-            const saved = localStorage.getItem('pcb_sticky_scroll');
-            if (saved === '0' || saved === '1') pcbStickyOn = saved === '1';
-        } catch (_) {}
-        applyListStickyMode(pcbStickyOn);
+        // Always keep scrollable table body (toolbar toggle removed)
+        applyListStickyMode(true);
         $('pcbTable')?.querySelector('thead')?.addEventListener('click', (e) => {
             const th = e.target.closest('th.is-sortable');
             if (!th || e.target.closest('input,button,a,label')) return;
@@ -4038,12 +4055,17 @@
                 e.stopPropagation();
                 return;
             }
-            // Only PO Number opens the workbench (new tab)
-            const poLink = e.target.closest('button.pcb-po-link');
+            // PO Number → workbench in a new tab (do not reset this page)
+            const poLink = e.target.closest('a.pcb-po-link, button.pcb-po-link');
             if (!poLink) return;
-            e.preventDefault();
             e.stopPropagation();
-            if (poLink.disabled || !canOpenWorkbenchFromList()) {
+            if (poLink.matches('a[target]') && !poLink.classList.contains('is-disabled')) {
+                // Native named/blank target — leave Released Po list as-is
+                try { window.name = 'sap_reports_po_costing'; } catch (_) {}
+                return;
+            }
+            e.preventDefault();
+            if (poLink.disabled || poLink.classList.contains('is-disabled') || !canOpenWorkbenchFromList()) {
                 alert('You do not have Workbench / Search PO access for PO Costing Validation.');
                 return;
             }

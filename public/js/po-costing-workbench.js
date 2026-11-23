@@ -7777,11 +7777,61 @@
         bindToolbar();
 
         $('pcwBackBtn')?.addEventListener('click', (e) => {
-            const ref = String(document.referrer || '');
-            if (ref && ref.startsWith(window.location.origin) && /po-costing|purchase-order/i.test(ref)) {
-                e.preventDefault();
-                window.history.back();
-            }
+            e.preventDefault();
+            let home = String(cfg.costingHomeUrl || '').trim()
+                || String(($('pcwBackBtn') && $('pcwBackBtn').getAttribute('href')) || '').trim()
+                || 'po-costing';
+            try {
+                home = new URL(home, window.location.origin).href;
+            } catch (_) { /* keep relative */ }
+
+            // Ask any open Released Po tab to focus itself
+            try {
+                const bc = new BroadcastChannel('sap_reports_po_nav');
+                bc.postMessage({ type: 'focus-released-po' });
+                bc.close();
+            } catch (_) { /* ignore */ }
+
+            const goReleasedPoThenClose = () => {
+                let target = null;
+                // 1) Tab that opened this workbench
+                try {
+                    if (window.opener && !window.opener.closed) target = window.opener;
+                } catch (_) { /* ignore */ }
+
+                // 2) Named Released Po tab (set on /po-costing)
+                if (!target) {
+                    try {
+                        const existing = window.open('', 'sap_reports_po_costing');
+                        if (existing && !existing.closed) {
+                            let href = '';
+                            try { href = String(existing.location.href || ''); } catch (_) { href = 'opaque'; }
+                            if (href === 'about:blank' || href === '') {
+                                // No live Released Po tab — load it in this named window
+                                try { existing.location.href = home; } catch (_) { /* ignore */ }
+                            }
+                            target = existing;
+                        }
+                    } catch (_) { /* ignore */ }
+                }
+
+                // 3) Still nothing — open / navigate to Released Po
+                if (!target) {
+                    try { target = window.open(home, 'sap_reports_po_costing'); } catch (_) { /* ignore */ }
+                }
+
+                try { target?.focus(); } catch (_) { /* ignore */ }
+
+                // Close workbench after focus/open so browser switches to po-costing
+                window.setTimeout(() => {
+                    try { window.close(); } catch (_) { /* ignore */ }
+                    window.setTimeout(() => {
+                        if (!window.closed) window.location.assign(home);
+                    }, 120);
+                }, 80);
+            };
+
+            goReleasedPoThenClose();
         });
 
         const controlBar = $('pcwControlBar');

@@ -13177,6 +13177,9 @@ body.pcw-pdf-open { overflow: hidden; }
     letter-spacing: .01em;
     cursor: pointer;
 }
+a.pcb-po-link {
+    display: inline;
+}
 .pcb-po-link:hover:not(:disabled):not(.is-disabled) { color: #312e81; text-decoration: underline; }
 .pcb-po-link:disabled,
 .pcb-po-link.is-disabled {
@@ -13184,6 +13187,7 @@ body.pcw-pdf-open { overflow: hidden; }
     cursor: not-allowed;
     text-decoration: none;
     opacity: .75;
+    pointer-events: none;
 }
 .pcb-validate-btn,
 .pcb-pdf-btn {
@@ -14057,55 +14061,71 @@ button.pcb-mail-cell:focus-visible {
 button.pcb-mail-cell.is-receive .pcb-mail-email {
     color: #b45309;
 }
-.pcb-remarks,
-.pcb-remarks-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    max-width: 240px;
-    vertical-align: bottom;
-    color: #334155;
+.pcb-remarks-empty-cell {
+    color: #94a3b8;
     font-weight: 600;
 }
 button.pcb-remarks-btn {
     appearance: none;
-    border: 0;
-    background: transparent;
-    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 160px;
     margin: 0;
     cursor: pointer;
     text-align: left;
+    vertical-align: middle;
     font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    color: #4338ca;
+    background: #eef2ff;
+    border: 1px solid #c7d2fe;
+    border-radius: 999px;
+    padding: 5px 10px 5px 8px;
+    white-space: nowrap;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
-button.pcb-remarks-btn:hover .pcb-remarks-text {
-    color: #1d4ed8;
-    text-decoration: underline;
+button.pcb-remarks-btn.is-chip .material-icons-round {
+    font-size: 15px;
+    flex: 0 0 auto;
+    color: #6366f1;
+}
+button.pcb-remarks-btn .pcb-remarks-label {
+    flex: 0 0 auto;
+    letter-spacing: 0.01em;
+}
+button.pcb-remarks-btn:hover {
+    background: #e0e7ff;
+    border-color: #a5b4fc;
+    color: #3730a3;
+    transform: translateY(-1px);
+}
+button.pcb-remarks-btn:hover .material-icons-round {
+    color: #4f46e5;
 }
 button.pcb-remarks-btn:focus-visible {
     outline: 2px solid #93c5fd;
     outline-offset: 2px;
-    border-radius: 4px;
 }
-.pcb-remarks-text {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 180px;
+button.pcb-remarks-btn:active {
+    transform: scale(0.97);
 }
 .pcb-remarks-count {
     flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 22px;
+    min-width: 20px;
     height: 18px;
-    padding: 0 5px;
+    padding: 0 6px;
     border-radius: 999px;
-    background: #eef2ff;
-    color: #4338ca;
-    border: 1px solid #c7d2fe;
-    font-size: 11px;
-    font-weight: 700;
+    background: #4338ca;
+    color: #fff;
+    border: 0;
+    font-size: 10px;
+    font-weight: 800;
     line-height: 1;
 }
 .pcb-remarks-card {
@@ -14367,6 +14387,24 @@ button.pcb-remarks-btn:focus-visible {
     padding: 10px 14px;
     border-top: 1px solid #eef2f7;
     flex-wrap: wrap;
+    flex-shrink: 0;
+}
+.pcb-pager .rpt-page-info {
+    margin-right: 4px;
+}
+.pcb-pager .rpt-page-controls {
+    margin-left: 0;
+}
+.pcb-pager .rpt-page-btn {
+    min-width: 34px;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border-radius: 10px;
+}
+.pcb-pager .rpt-page-btn i {
+    font-size: 13px;
+    line-height: 1;
 }
 .pcb-cards { display: none; padding: 12px; gap: 10px; }
 .pcb-card {

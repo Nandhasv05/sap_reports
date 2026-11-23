@@ -376,8 +376,12 @@
         );
         const header = document.getElementById('pocValuationHeaderFilters');
         if (header) header.hidden = false;
+        // Clear leftover quick-search so cards are not filtered to empty
+        if (els.search) els.search.value = '';
+        if (els.searchClear) els.searchClear.hidden = true;
         syncCustomVisibility();
-        if (!loaded) load();
+        // Always refresh when opening — avoids stuck empty state after a failed load
+        load();
         setTimeout(() => { els.po?.focus(); }, 40);
     }
 

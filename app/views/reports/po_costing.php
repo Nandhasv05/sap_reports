@@ -320,12 +320,12 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
             <label class="rpt-field pvr-header-range" title="Filter by date range">
                 <span class="material-icons-round">date_range</span>
                 <select id="pvrFilterRange" aria-label="Date range">
-                    <option value="">All dates</option>
+                    <option value="" selected>All dates</option>
                     <option value="today">Today</option>
                     <option value="yesterday">Yesterday</option>
                     <option value="this_week">This week</option>
                     <option value="previous_week">Previous week</option>
-                    <option value="this_month" selected>This month</option>
+                    <option value="this_month">This month</option>
                     <option value="previous_month">Previous month</option>
                     <option value="custom">Custom date</option>
                 </select>
@@ -659,6 +659,23 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
 
 <script>
 (function () {
+    // Named window so workbench Back can focus this tab and close without reload
+    try { window.name = 'sap_reports_po_costing'; } catch (e) {}
+    // Workbench Back posts here → focus this already-open Released Po tab
+    try {
+        var poNavBc = new BroadcastChannel('sap_reports_po_nav');
+        poNavBc.onmessage = function (ev) {
+            var data = ev && ev.data;
+            if (!data || data.type !== 'focus-released-po') return;
+            try { window.focus(); } catch (err) {}
+            try {
+                if (document.hidden && typeof document.hasFocus === 'function') {
+                    window.focus();
+                }
+            } catch (err2) {}
+        };
+    } catch (bcErr) {}
+
     var page = document.getElementById('poCostingPage');
     if (!page) return;
 

@@ -181,190 +181,171 @@ class PoValuationReportService
     }
 
     /**
+     * Fetch activity per source table (never fail the whole feed if one source breaks).
+     *
      * @return list<array<string,mixed>>
      */
     private function buildActivity(PDO $pdo, string $from, string $to, string $po, string $user, int $limit): array
     {
-        $parts = [];
-        $params = [];
+        $raw = [];
+        $sources = [];
 
         if ($this->tableExists($pdo, 'po_release_log')) {
-            $w = ['1=1'];
-            if ($from !== '') {
-                $w[] = 'created_on >= ?';
-                $params[] = $from . ' 00:00:00';
-            }
-            if ($to !== '') {
-                $w[] = 'created_on <= ?';
-                $params[] = $to . ' 23:59:59';
-            }
-            if ($po !== '') {
-                $w[] = 'LTRIM(REPLACE(REPLACE(po_number, \' \', \'\'), \',\', \'\')) LIKE ?';
-                $params[] = '%' . $po . '%';
-            }
-            if ($user !== '') {
-                $w[] = 'LOWER(ISNULL(created_by, \'\')) LIKE ?';
-                $params[] = '%' . strtolower($user) . '%';
-            }
-            $parts[] = "
-                SELECT
-                    CAST(po_number AS NVARCHAR(50)) AS purchase_order,
-                    N'release' AS event_type,
-                    CAST(ISNULL(status, N'') AS NVARCHAR(80)) AS status_label,
-                    CAST(ISNULL(created_by, N'') AS NVARCHAR(120)) AS actor,
-                    CAST(ISNULL(remarks, N'') AS NVARCHAR(500)) AS remarks,
-                    created_on AS event_at
-                FROM [dbo].[po_release_log]
-                WHERE " . implode(' AND ', $w) . "
-            ";
+            $sources[] = [
+                'type' => 'release',
+                'sql'  => "
+                    SELECT TOP ({$limit})
+                        CAST(po_number AS NVARCHAR(50)) AS purchase_order,
+                        CAST(ISNULL(status, N'') AS NVARCHAR(80)) AS status_label,
+                        CAST(ISNULL(created_by, N'') AS NVARCHAR(120)) AS actor,
+                        CAST(ISNULL(remarks, N'') AS NVARCHAR(500)) AS remarks,
+                        created_on AS event_at
+                    FROM [dbo].[po_release_log]
+                    WHERE {where}
+                    ORDER BY created_on DESC
+                ",
+                'dateCol' => 'created_on',
+                'poCol'   => 'po_number',
+                'userSql' => 'LOWER(ISNULL(created_by, \'\')) LIKE ?',
+                'userN'   => 1,
+            ];
         }
 
         if ($this->tableExists($pdo, 'po_validation_log')) {
-            $w = ['1=1'];
-            if ($from !== '') {
-                $w[] = 'created_at >= ?';
-                $params[] = $from . ' 00:00:00';
-            }
-            if ($to !== '') {
-                $w[] = 'created_at <= ?';
-                $params[] = $to . ' 23:59:59';
-            }
-            if ($po !== '') {
-                $w[] = 'LTRIM(REPLACE(REPLACE(CAST(purchase_order AS VARCHAR(50)), \' \', \'\'), \',\', \'\')) LIKE ?';
-                $params[] = '%' . $po . '%';
-            }
-            if ($user !== '') {
-                $w[] = '(LOWER(ISNULL(created_by, \'\')) LIKE ? OR LOWER(ISNULL(assigned_username, \'\')) LIKE ?)';
-                $like = '%' . strtolower($user) . '%';
-                $params[] = $like;
-                $params[] = $like;
-            }
-            $parts[] = "
-                SELECT
-                    CAST(purchase_order AS NVARCHAR(50)) AS purchase_order,
-                    N'validation' AS event_type,
-                    CAST(ISNULL(validation_status, N'') AS NVARCHAR(80)) AS status_label,
-                    CAST(ISNULL(NULLIF(assigned_username, N''), created_by) AS NVARCHAR(120)) AS actor,
-                    CAST(ISNULL(description, N'') AS NVARCHAR(500)) AS remarks,
-                    created_at AS event_at
-                FROM [dbo].[po_validation_log]
-                WHERE " . implode(' AND ', $w) . "
-            ";
+            $sources[] = [
+                'type' => 'validation',
+                'sql'  => "
+                    SELECT TOP ({$limit})
+                        CAST(purchase_order AS NVARCHAR(50)) AS purchase_order,
+                        CAST(ISNULL(validation_status, N'') AS NVARCHAR(80)) AS status_label,
+                        CAST(ISNULL(NULLIF(assigned_username, N''), created_by) AS NVARCHAR(120)) AS actor,
+                        CAST(ISNULL(CAST(description AS NVARCHAR(500)), N'') AS NVARCHAR(500)) AS remarks,
+                        created_at AS event_at
+                    FROM [dbo].[po_validation_log]
+                    WHERE {where}
+                    ORDER BY created_at DESC
+                ",
+                'dateCol' => 'created_at',
+                'poCol'   => 'CAST(purchase_order AS VARCHAR(50))',
+                'userSql' => '(LOWER(ISNULL(created_by, \'\')) LIKE ? OR LOWER(ISNULL(assigned_username, \'\')) LIKE ?)',
+                'userN'   => 2,
+            ];
         }
 
         if ($this->tableExists($pdo, 'Pass_po_validtion')) {
-            $w = ['1=1'];
-            if ($from !== '') {
-                $w[] = 'created_at >= ?';
-                $params[] = $from . ' 00:00:00';
-            }
-            if ($to !== '') {
-                $w[] = 'created_at <= ?';
-                $params[] = $to . ' 23:59:59';
-            }
-            if ($po !== '') {
-                $w[] = 'LTRIM(REPLACE(REPLACE(CAST(purchase_order AS VARCHAR(50)), \' \', \'\'), \',\', \'\')) LIKE ?';
-                $params[] = '%' . $po . '%';
-            }
-            if ($user !== '') {
-                $w[] = '(LOWER(ISNULL(username, \'\')) LIKE ? OR LOWER(ISNULL(from_username, \'\')) LIKE ? OR LOWER(ISNULL(to_username, \'\')) LIKE ?)';
-                $like = '%' . strtolower($user) . '%';
-                $params[] = $like;
-                $params[] = $like;
-                $params[] = $like;
-            }
-            $parts[] = "
-                SELECT
-                    CAST(purchase_order AS NVARCHAR(50)) AS purchase_order,
-                    N'pass' AS event_type,
-                    CAST(ISNULL(NULLIF(status, N''), action) AS NVARCHAR(80)) AS status_label,
-                    CAST(ISNULL(NULLIF(username, N''), from_username) AS NVARCHAR(120)) AS actor,
-                    CAST(N'' AS NVARCHAR(500)) AS remarks,
-                    created_at AS event_at
-                FROM [dbo].[Pass_po_validtion]
-                WHERE " . implode(' AND ', $w) . "
-            ";
+            $sources[] = [
+                'type' => 'pass',
+                'sql'  => "
+                    SELECT TOP ({$limit})
+                        CAST(purchase_order AS NVARCHAR(50)) AS purchase_order,
+                        CAST(ISNULL(NULLIF(status, N''), action) AS NVARCHAR(80)) AS status_label,
+                        CAST(ISNULL(NULLIF(username, N''), from_username) AS NVARCHAR(120)) AS actor,
+                        CAST(ISNULL(remarks, N'') AS NVARCHAR(500)) AS remarks,
+                        created_at AS event_at
+                    FROM [dbo].[Pass_po_validtion]
+                    WHERE {where}
+                    ORDER BY created_at DESC
+                ",
+                'dateCol' => 'created_at',
+                'poCol'   => 'CAST(purchase_order AS VARCHAR(50))',
+                'userSql' => '(LOWER(ISNULL(username, \'\')) LIKE ? OR LOWER(ISNULL(from_username, \'\')) LIKE ? OR LOWER(ISNULL(to_username, \'\')) LIKE ?)',
+                'userN'   => 3,
+            ];
         }
 
         if ($this->tableExists($pdo, 'po_costing_sent_log')) {
-            $w = ['1=1'];
+            $sources[] = [
+                'type' => 'sent',
+                'sql'  => "
+                    SELECT TOP ({$limit})
+                        CAST(purchase_order AS NVARCHAR(50)) AS purchase_order,
+                        CAST(ISNULL(status, N'') AS NVARCHAR(80)) AS status_label,
+                        CAST(ISNULL(from_username, N'') AS NVARCHAR(120)) AS actor,
+                        CAST(ISNULL(remarks, N'') AS NVARCHAR(500)) AS remarks,
+                        created_at AS event_at
+                    FROM [dbo].[po_costing_sent_log]
+                    WHERE {where}
+                    ORDER BY created_at DESC
+                ",
+                'dateCol' => 'created_at',
+                'poCol'   => 'CAST(purchase_order AS VARCHAR(50))',
+                'userSql' => '(LOWER(ISNULL(from_username, \'\')) LIKE ? OR LOWER(ISNULL(to_username, \'\')) LIKE ?)',
+                'userN'   => 2,
+            ];
+        }
+
+        foreach ($sources as $src) {
+            $where = ['1=1'];
+            $params = [];
+            $dateCol = (string) $src['dateCol'];
+            $poCol = (string) $src['poCol'];
             if ($from !== '') {
-                $w[] = 'created_at >= ?';
+                $where[] = "{$dateCol} >= ?";
                 $params[] = $from . ' 00:00:00';
             }
             if ($to !== '') {
-                $w[] = 'created_at <= ?';
+                $where[] = "{$dateCol} <= ?";
                 $params[] = $to . ' 23:59:59';
             }
             if ($po !== '') {
-                $w[] = 'LTRIM(REPLACE(REPLACE(CAST(purchase_order AS VARCHAR(50)), \' \', \'\'), \',\', \'\')) LIKE ?';
+                $where[] = "LTRIM(REPLACE(REPLACE({$poCol}, ' ', ''), ',', '')) LIKE ?";
                 $params[] = '%' . $po . '%';
             }
             if ($user !== '') {
-                $w[] = '(LOWER(ISNULL(from_username, \'\')) LIKE ? OR LOWER(ISNULL(to_username, \'\')) LIKE ?)';
+                $where[] = (string) $src['userSql'];
                 $like = '%' . strtolower($user) . '%';
-                $params[] = $like;
-                $params[] = $like;
+                $n = max(1, (int) ($src['userN'] ?? 1));
+                for ($i = 0; $i < $n; $i++) {
+                    $params[] = $like;
+                }
             }
-            $parts[] = "
-                SELECT
-                    CAST(purchase_order AS NVARCHAR(50)) AS purchase_order,
-                    N'sent' AS event_type,
-                    CAST(ISNULL(status, N'') AS NVARCHAR(80)) AS status_label,
-                    CAST(ISNULL(from_username, N'') AS NVARCHAR(120)) AS actor,
-                    CAST(ISNULL(remarks, N'') AS NVARCHAR(500)) AS remarks,
-                    created_at AS event_at
-                FROM [dbo].[po_costing_sent_log]
-                WHERE " . implode(' AND ', $w) . "
-            ";
+            $sql = str_replace('{where}', implode(' AND ', $where), (string) $src['sql']);
+            try {
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute($params);
+                while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                    if (!is_array($row)) {
+                        continue;
+                    }
+                    $row['event_type'] = (string) $src['type'];
+                    $raw[] = $row;
+                }
+            } catch (Throwable $e) {
+                error_log('PoValuationReportService activity ' . $src['type'] . ': ' . $e->getMessage());
+            }
         }
 
-        if ($parts === []) {
-            return [];
+        usort($raw, static function ($a, $b) {
+            return strcmp((string) ($b['event_at'] ?? ''), (string) ($a['event_at'] ?? ''));
+        });
+        if (count($raw) > $limit) {
+            $raw = array_slice($raw, 0, $limit);
         }
-
-        $sql = "
-            SELECT TOP ({$limit}) *
-            FROM (
-                " . implode("\n UNION ALL \n", $parts) . "
-            ) x
-            ORDER BY event_at DESC
-        ";
 
         $out = [];
-        try {
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute($params);
-            $sno = 0;
-            while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-                if (!is_array($row)) {
-                    continue;
-                }
-                $sno++;
-                $poDigits = ltrim(preg_replace('/\D/', '', (string) ($row['purchase_order'] ?? '')) ?? '', '0');
-                $when = substr(str_replace('T', ' ', (string) ($row['event_at'] ?? '')), 0, 19);
-                $type = strtolower(trim((string) ($row['event_type'] ?? '')));
-                $typeLabel = match ($type) {
-                    'release' => 'Release Status',
-                    'validation' => 'Validation',
-                    'pass' => 'Pass / eSign',
-                    'sent' => 'Sent / Receive',
-                    default => ucfirst($type ?: 'Activity'),
-                };
-                $out[] = [
-                    'sno'            => $sno,
-                    'purchase_order' => $poDigits,
-                    'event_type'     => $type,
-                    'event_label'    => $typeLabel,
-                    'status'         => trim((string) ($row['status_label'] ?? '')),
-                    'user'           => trim((string) ($row['actor'] ?? '')),
-                    'remarks'        => trim((string) ($row['remarks'] ?? '')),
-                    'created_at'     => $when !== '' ? $when : null,
-                ];
-            }
-        } catch (Throwable $e) {
-            error_log('PoValuationReportService activity: ' . $e->getMessage());
-            return [];
+        $sno = 0;
+        foreach ($raw as $row) {
+            $sno++;
+            $poDigits = ltrim(preg_replace('/\D/', '', (string) ($row['purchase_order'] ?? '')) ?? '', '0');
+            $when = substr(str_replace('T', ' ', (string) ($row['event_at'] ?? '')), 0, 19);
+            $type = strtolower(trim((string) ($row['event_type'] ?? '')));
+            $typeLabel = match ($type) {
+                'release' => 'Release Status',
+                'validation' => 'Validation',
+                'pass' => 'Pass / eSign',
+                'sent' => 'Sent / Receive',
+                default => ucfirst($type ?: 'Activity'),
+            };
+            $out[] = [
+                'sno'            => $sno,
+                'purchase_order' => $poDigits,
+                'event_type'     => $type,
+                'event_label'    => $typeLabel,
+                'status'         => trim((string) ($row['status_label'] ?? '')),
+                'user'           => trim((string) ($row['actor'] ?? '')),
+                'remarks'        => trim((string) ($row['remarks'] ?? '')),
+                'created_at'     => $when !== '' ? $when : null,
+            ];
         }
 
         return $out;
