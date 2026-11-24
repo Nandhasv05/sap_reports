@@ -29,6 +29,17 @@
     display: none !important;
 }
 
+/* PO Costing: never show the full-page Connecting… spinner box */
+body.is-poc-loader-scoped #rptSpinner,
+body.is-poc-loader-scoped #rptSpinner.is-boot,
+body.is-poc-loader-scoped #rptSpinner.is-solid,
+body.is-poc-loader-scoped #rptSpinner.is-colorful,
+body.is-poc-loader-scoped #rptSpinner.is-content-scoped {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
 .rpt-spinner .rpt-spinner-glow,
 .rpt-spinner .rpt-spinner-orb {
     display: none !important;
@@ -182,9 +193,13 @@ body:has(#poCostingPage) #rptSpinner.is-content-scoped.is-colorful {
     box-shadow: inset 1px 0 0 rgba(148, 163, 184, 0.25);
 }
 body.is-poc-loader-scoped.rpt-loading,
+body:has(#poCostingPage).rpt-loading {
+    overflow: auto !important;
+    cursor: default !important;
+}
 body.is-poc-loader-scoped.rpt-loading .rpt-app.is-po-costing > .rpt-bar,
 body.is-poc-loader-scoped.rpt-loading .rpt-app.is-po-costing .poc-sidenav {
-    /* keep chrome interactive while content loads */
+    pointer-events: auto !important;
 }
 @media (max-width: 900px) {
     body.is-poc-loader-scoped #rptSpinner.is-content-scoped,
@@ -194,4 +209,13 @@ body.is-poc-loader-scoped.rpt-loading .rpt-app.is-po-costing .poc-sidenav {
     body:has(#poCostingPage) #rptSpinner.is-content-scoped {
         top: var(--poc-loader-top, 120px) !important;
     }
+}
+
+/* Final: PO Costing never shows the Connecting spinner box modal */
+body.is-poc-loader-scoped #rptSpinner,
+body:has(#poCostingPage) #rptSpinner {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    opacity: 0 !important;
 }

@@ -21846,9 +21846,18 @@ body:has(.rpt-app.is-po-costing) {
     margin: 0;
     color: #0f172a;
     background: #ffffff;
-    border: 1px solid #e2e8f0;
+    border: 0;
     border-radius: 16px;
     box-shadow: 0 16px 36px rgba(15, 23, 42, 0.10);
+}
+.rpt-app.is-po-costing .poc-related-loading-card.rpt-spinner-card,
+.rpt-app.is-po-costing .poc-related-loading-card.rpt-boot-card {
+    border: 0;
+    outline: none;
+}
+.rpt-app.is-po-costing .poc-related-loading-card.rpt-spinner-card::before,
+.rpt-app.is-po-costing .poc-related-loading-card.rpt-boot-card::before {
+    display: none;
 }
 .rpt-app.is-po-costing .poc-related-rpt-loader {
     width: 68px;
