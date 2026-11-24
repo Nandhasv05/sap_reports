@@ -55,18 +55,25 @@
     const NUM_COLS = new Set([
         'poitem', 'so_qty', 'prwise_so_qty', 'consumption', 'reqqty', 'tot_poqty',
         'so_wise_poqty', 'so_wise_po_val', 'porate', 'totvalue', 'budgeted_cons', 'budget_inr',
-        'budget_conv_rt', 'budget_cost_per_gmt', 'budget_cost_per_piece', 'conv', 'actual_cost', 'variance_pct',
+        'budget_conv_rt', 'budget_cost_per_gmt', 'budget_cost_per_piece', 'conv', 'actual_cost',
+        'sale_order_quantity', 'req_bom_quantity', 'po_quantity', 'variance_pct',
     ]);
     // Status tint on budget/actual result columns
     const HIGHLIGHT_COLS = new Set(['budget_cost_per_gmt', 'budget_cost_per_piece', 'actual_cost']);
+    /** SO Data group — sales order identity + SO qty columns */
+    const SO_COLS = new Set([
+        'salordno', 'style', 'so_qty', 'prwise_so_qty', 'consumption', 'reqqty',
+        'so_wise_poqty', 'so_wise_po_val',
+    ]);
     /** Costing Data group — quotation / zCOST line identity + supporting budget fields */
     const ZCOST_COLS = new Set([
         'costing_quotation_no', 'costing_item_no', 'zsection', 'maktx',
         'budgeted_cons', 'budget_inr', 'budget_currency', 'budget_conv_rt', 'conv',
     ]);
-    /** Result group — budget vs actual comparison + actions */
+    /** Result group — budget vs actual comparison + qty + actions */
     const RESULT_COLS = new Set([
-        'budget_cost_per_gmt', 'budget_cost_per_piece', 'buom', 'actual_cost', 'variance_pct', 'actions',
+        'budget_cost_per_gmt', 'budget_cost_per_piece', 'buom', 'actual_cost',
+        'sale_order_quantity', 'req_bom_quantity', 'po_quantity', 'variance_pct', 'actions',
     ]);
     /** Blank these when unmatched (costing + budget result). ACTUAL_COST stays — it comes from PO PORATE. */
     const COSTING_BLANK_COLS = new Set([
@@ -76,8 +83,9 @@
     // Click any cell: show TEMPFIN / SAP API source column + original value
     // (costing_quotation_no excluded — that opens sap_reports/zcost)
     const EXPLAIN_COLS = new Set([
-        'pono', 'poitem', 'prno', 'salordno', 'style', 'material', 'matgroup',
+        'pono', 'po_date', 'poitem', 'prno', 'salordno', 'style', 'material', 'matgroup',
         'so_qty', 'prwise_so_qty', 'consumption', 'reqqty', 'tot_poqty',
+        'sale_order_quantity', 'req_bom_quantity', 'po_quantity',
         'so_wise_poqty', 'so_wise_po_val', 'ouom', 'porate', 'totvalue', 'mat_desc',
         'po_currency', 'costing_item_no', 'zsection', 'maktx',
         'budgeted_cons', 'budget_inr', 'budget_currency',
@@ -88,6 +96,7 @@
     const API_COL_REF = {
         status: { api: 'derived', source: 'Z_QuotationZCostCom + ZCOST', desc: 'PASS when ActualCost ≤ RATE (budget per GMT).' },
         pono: { api: 'PurchaseOrder', source: 'Z_QuotationZCostCom', desc: 'Purchase order number.' },
+        po_date: { api: 'PurchaseOrderDate', source: 'Z_QuotationZCostCom', desc: 'Purchase order date.' },
         poitem: { api: 'PurchaseOrderItem', source: 'Z_QuotationZCostCom', desc: 'Purchase order item.' },
         prno: { api: 'PurchaseRequisition', source: 'Z_QuotationZCostCom', desc: 'Purchase requisition number.' },
         salordno: { api: 'SalesOrderReference', source: 'Z_QuotationZCostCom', desc: 'Sales order number.' },
@@ -95,15 +104,18 @@
         material: { api: 'Material', source: 'Z_QuotationZCostCom', desc: 'Material number.' },
         matgroup: { api: 'MaterialGroup', source: 'Z_QuotationZCostCom', desc: 'Material group.' },
         so_qty: { api: 'SaleOrderQuantity', source: 'Z_QuotationZCostCom', desc: 'Sales order quantity.' },
+        sale_order_quantity: { api: 'SaleOrderQuantity', source: 'Z_QuotationZCostCom', desc: 'Sales order quantity (Result).' },
         prwise_so_qty: { api: 'SaleOrderQuantity', source: 'Z_QuotationZCostCom', desc: 'Sales order quantity (PR-wise).' },
         consumption: { api: 'ReqBOMQuantity / SaleOrderQuantity', source: 'Z_QuotationZCostCom', desc: 'Consumption per garment (derived).' },
         reqqty: { api: 'ReqBOMQuantity', source: 'Z_QuotationZCostCom', desc: 'Required BOM quantity.' },
+        req_bom_quantity: { api: 'ReqBOMQuantity', source: 'Z_QuotationZCostCom', desc: 'Required BOM quantity (Result).' },
         tot_poqty: { api: 'OrderQuantity', source: 'Z_QuotationZCostCom', desc: 'PO order quantity.' },
+        po_quantity: { api: 'OrderQuantity', source: 'Z_QuotationZCostCom', desc: 'PO quantity (Result).' },
         so_wise_poqty: { api: 'OrderQuantity', source: 'Z_QuotationZCostCom', desc: 'SO-wise portion of OrderQuantity.' },
         so_wise_po_val: { api: 'NetPriceAmount', source: 'Z_QuotationZCostCom', desc: 'SO-wise portion of NetPriceAmount.' },
         ouom: { api: 'PurchaseOrderQuantityUnit', source: 'Z_QuotationZCostCom', desc: 'PO quantity unit.' },
-        porate: { api: 'NetPriceAmount / OrderQuantity', source: 'Z_QuotationZCostCom', desc: 'Unit rate (derived from net amount ÷ qty).' },
-        totvalue: { api: 'NetPriceAmount', source: 'Z_QuotationZCostCom', desc: 'PO line net price amount.' },
+        porate: { api: 'NetPriceAmount / OrderQuantity', source: 'Z_QuotationZCostCom', desc: 'Unit rate (Rate INR on PO PDF).' },
+        totvalue: { api: 'NetPriceAmount', source: 'Z_QuotationZCostCom', desc: 'Line amount (Amount INR on PO PDF).' },
         mat_desc: { api: 'MaterialDesc', source: 'Z_QuotationZCostCom', desc: 'Material description.' },
         po_currency: { api: 'DocumentCurrency', source: 'Z_QuotationZCostCom', desc: 'Document currency.' },
         costing_quotation_no: { api: 'CostingQuotationNo', source: 'Z_QuotationZCostCom', desc: 'zCOST quotation number.' },
@@ -124,6 +136,7 @@
     const colGroup = (key) => {
         if (RESULT_COLS.has(key)) return 'result';
         if (ZCOST_COLS.has(key)) return 'zcost';
+        if (SO_COLS.has(key)) return 'so';
         return 'po';
     };
 
@@ -4455,7 +4468,8 @@
     }
 
     const FOOTER_SUM_KEYS = [
-        'so_qty', 'prwise_so_qty', 'consumption', 'reqqty', 'tot_poqty',
+        'so_qty', 'sale_order_quantity', 'prwise_so_qty', 'consumption', 'reqqty', 'req_bom_quantity',
+        'tot_poqty', 'po_quantity',
         'so_wise_poqty', 'so_wise_po_val', 'totvalue', 'budgeted_cons', 'budget_inr',
         'budget_cost_per_gmt', 'conv', 'actual_cost',
     ];
@@ -4490,6 +4504,7 @@
         const row = {
             pono: label,
             purchase_order: label,
+            po_date: '',
             poitem: '',
             prno: '',
             salordno: '',
@@ -4543,11 +4558,11 @@
 
     /** Columns summed once per PO item (values repeat on SO split lines). */
     const FOOT_ONCE_PER_ITEM = new Set([
-        'tot_poqty', 'so_wise_poqty', 'totvalue', 'so_wise_po_val', 'budget_inr', 'porate',
+        'tot_poqty', 'po_quantity', 'so_wise_poqty', 'totvalue', 'so_wise_po_val', 'budget_inr', 'porate',
         'budget_cost_per_piece',
     ]);
     /** Columns summed across every visible detail row. */
-    const FOOT_SUM_ROWS = new Set(['reqqty', 'prwise_so_qty', 'so_qty']);
+    const FOOT_SUM_ROWS = new Set(['reqqty', 'req_bom_quantity', 'prwise_so_qty', 'so_qty', 'sale_order_quantity']);
     /** Money-style footer columns. */
     const FOOT_MONEY = new Set(['totvalue', 'so_wise_po_val', 'budget_inr', 'budget_cost_per_piece']);
     /** Unit-rate columns: average of non-empty values (once per PO item). */
@@ -5058,7 +5073,6 @@
                     else if (stamp[k] > (Number(detail[k]) || 0)) detail[k] = stamp[k];
                 });
             }
-
             const docSub = Number(data.document_sub_total ?? data.sub_total
                 ?? raw?.document_sub_total ?? raw?.sub_total
                 ?? lastChargesSummary.document_sub_total
@@ -6575,6 +6589,8 @@
                 return statusDisplay(r).label;
             case 'pono':
                 return r.pono || r.purchase_order || '';
+            case 'po_date':
+                return r.po_date || r.date || r.PurchaseOrderDate || '';
             case 'poitem':
                 return r.poitem || r.po_item || '';
             case 'prno':
@@ -6587,8 +6603,10 @@
                 return r.material || '';
             case 'matgroup':
                 return r.matgroup || r.material_group || '';
-            case 'so_qty': {
-                const so = nVal(r.so_qty) ?? nVal(r.prwise_so_qty) ?? nVal(r.SaleOrderQuantity);
+            case 'so_qty':
+            case 'sale_order_quantity': {
+                const so = nVal(r.so_qty) ?? nVal(r.prwise_so_qty) ?? nVal(r.SaleOrderQuantity)
+                    ?? nVal(r.sale_order_quantity);
                 return so;
             }
             case 'prwise_so_qty': {
@@ -6604,9 +6622,11 @@
                 return null;
             }
             case 'reqqty':
-                return r.reqqty ?? r.ReqBOMQuantity;
+            case 'req_bom_quantity':
+                return r.reqqty ?? r.ReqBOMQuantity ?? r.req_bom_quantity;
             case 'tot_poqty':
-                return r.tot_poqty ?? r.order_qty ?? r.po_qty;
+            case 'po_quantity':
+                return r.tot_poqty ?? r.order_qty ?? r.po_qty ?? r.po_quantity;
             case 'so_wise_poqty':
                 return r.so_wise_poqty ?? r.tot_poqty ?? r.order_qty ?? r.po_qty;
             case 'so_wise_po_val':
@@ -6704,7 +6724,11 @@
                 let label = 'PO Data';
                 let icon = 'receipt_long';
                 let cls = 'is-po';
-                if (run.group === 'zcost') {
+                if (run.group === 'so') {
+                    label = 'SO Data';
+                    icon = 'shopping_bag';
+                    cls = 'is-so';
+                } else if (run.group === 'zcost') {
                     label = 'Costing Data';
                     icon = 'calculate';
                     cls = 'is-zcost';
@@ -6820,6 +6844,11 @@
             case 'pono':
                 inner = wrapExplain(key, index, `<span class="pcw-mat">${dash(r.pono || r.purchase_order)}</span>`);
                 break;
+            case 'po_date': {
+                const rawDate = cellValue(key, r, index);
+                inner = wrapExplain(key, index, `<span class="pcw-po-date">${fmtDate(rawDate)}</span>`);
+                break;
+            }
             case 'material':
                 inner = wrapExplain(key, index, `<span class="pcw-mat">${dash(r.material)}</span>`);
                 break;
@@ -6876,9 +6905,12 @@
                 }
                 break;
             case 'so_qty':
+            case 'sale_order_quantity':
             case 'prwise_so_qty':
             case 'reqqty':
+            case 'req_bom_quantity':
             case 'tot_poqty':
+            case 'po_quantity':
             case 'so_wise_poqty':
                 inner = wrapExplain(key, index, qty(cellValue(key, r, index)));
                 break;
@@ -6909,7 +6941,9 @@
                 const rawVal = cellValue(key, r, index);
                 const hideZero = (key === 'actual_cost' || key === 'budget_cost_per_gmt' || key === 'budget_cost_per_piece' || key === 'porate')
                     && (rawVal === null || rawVal === '' || Number(rawVal) <= 0);
-                const shown = wrapExplain(key, index, hideZero ? '—' : num(rawVal, 4));
+                // Rate INR on PO PDF uses 2 decimals (e.g. 0.50)
+                const decimals = key === 'porate' ? 2 : 4;
+                const shown = wrapExplain(key, index, hideZero ? '—' : num(rawVal, decimals));
                 inner = mismatch ? `<span class="pcw-cost-mismatch">${shown}</span>` : shown;
                 break;
             }

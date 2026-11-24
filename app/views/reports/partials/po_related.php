@@ -6,6 +6,12 @@
  */
 require_once base_path('app/services/PoCostValidationService.php');
 $relatedCols = PoCostValidationService::relatedPoColumns();
+if (empty($canPortalRevert)) {
+    $relatedCols = array_values(array_filter(
+        $relatedCols,
+        static fn(array $col): bool => ($col['key'] ?? '') !== 'portal_revert'
+    ));
+}
 $relatedColCount = count($relatedCols);
 $relatedCards = [
     ['id' => 'pos',       'label' => 'Total POs',       'icon' => 'receipt_long',         'tone' => 'violet'],
@@ -44,29 +50,27 @@ $relatedCards = [
             </div>
             <div class="rpt-tb-actions">
                 <span class="rpt-tb-count" id="pocRelatedCount">Showing 0 purchase orders</span>
-                <span class="poc-related-status-pills" id="pocRelatedStatusPills" aria-label="Status totals">
-                    <span class="poc-related-status-pill is-released" title="Total Released">
+                <span class="poc-related-status-pills" id="pocRelatedStatusPills" aria-label="Filter by status">
+                    <button type="button" class="poc-related-status-pill is-released" data-status="Released"
+                            title="Show Released only (click again to clear)">
                         <span class="material-icons-round" aria-hidden="true">verified</span>
                         <em>Released</em>
                         <b id="pocRelatedStatReleased">0</b>
-                    </span>
-                    <span class="poc-related-status-pill is-draft" title="Total Draft">
+                    </button>
+                    <button type="button" class="poc-related-status-pill is-draft" data-status="Draft"
+                            title="Show Draft only (click again to clear)">
                         <span class="material-icons-round" aria-hidden="true">edit_note</span>
                         <em>Draft</em>
                         <b id="pocRelatedStatDraft">0</b>
-                    </span>
-                    <span class="poc-related-status-pill is-review" title="Total Review">
+                    </button>
+                    <button type="button" class="poc-related-status-pill is-review" data-status="Review"
+                            title="Show Review only (click again to clear)">
                         <span class="material-icons-round" aria-hidden="true">rate_review</span>
                         <em>Review</em>
                         <b id="pocRelatedStatReview">0</b>
-                    </span>
+                    </button>
                 </span>
                 <span class="poc-related-filter-pill" id="pocRelatedActiveFilters" title="Active header filters">All Materials · All Brands</span>
-
-                <button type="button" class="rpt-tb-btn is-active" id="pocRelatedStickyScroll" title="Keep table header fixed and scroll body only">
-                    <i class="fas fa-arrows-up-down"></i>
-                    <span id="pocRelatedStickyLabel">Scroll Body Only</span>
-                </button>
 
                 <button type="button" class="rpt-tb-btn rpt-tb-btn-excel" data-excel-export="pocRelatedTable"
                         data-excel-title="Related Purchase Orders"
@@ -95,11 +99,6 @@ $relatedCards = [
                     <span>Column Filters</span>
                     <span class="rpt-tb-badge" id="pocRelatedFilterBadge" hidden>0</span>
                 </button>
-
-                <button type="button" class="rpt-tb-btn" id="pocRelatedRefresh" title="Refresh from SAP">
-                    <span class="material-icons-round">refresh</span>
-                    <span>Refresh</span>
-                </button>
             </div>
         </div>
 
@@ -112,22 +111,15 @@ $relatedCards = [
             <div class="poc-related-loading-overlay" id="pocRelatedLoadingOverlay" hidden aria-live="polite" aria-busy="true">
                 <div class="poc-related-loading-card rpt-spinner-card">
                     <div class="rpt-loader poc-related-rpt-loader" aria-hidden="true">
-                        <span class="rpt-loader-ring ring-1"></span>
-                        <span class="rpt-loader-ring ring-2"></span>
-                        <span class="rpt-loader-ring ring-3"></span>
-                        <span class="rpt-loader-orbit">
-                            <i class="dot-1"></i>
-                            <i class="dot-2"></i>
-                            <i class="dot-3"></i>
-                            <i class="dot-4"></i>
-                        </span>
+                        <span class="rpt-loader-track"></span>
+                        <span class="rpt-loader-ring"></span>
                         <span class="rpt-loader-logo">
                             <img src="<?= e($relatedLoaderLogo) ?>" alt="evolv">
                         </span>
                     </div>
                     <p class="rpt-loader-title">Loading Related POs…</p>
                     <small class="poc-related-loading-sub">Fetching purchase orders from SAP</small>
-                    <span class="rpt-loader-dots" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                    <span class="rpt-loader-bar" aria-hidden="true"><i></i></span>
                 </div>
             </div>
             <table class="rpt-table prod-table po-page-table text-nowrap" id="pocRelatedTable">

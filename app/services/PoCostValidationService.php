@@ -656,6 +656,7 @@ class PoCostValidationService
             ['key' => 'sent_receive_log', 'label' => 'Sent / Receive Log', 'type' => 'text'],
             ['key' => 'esign', 'label' => 'E-Sign', 'type' => 'text'],
             ['key' => 'pdf', 'label' => 'View PDF', 'type' => 'text'],
+            ['key' => 'portal_revert', 'label' => 'Portal Revert', 'type' => 'text'],
         ];
     }
 

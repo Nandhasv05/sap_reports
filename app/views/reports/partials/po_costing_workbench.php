@@ -31,16 +31,23 @@ $wbColCount = max(1, count($wbColumns));
 $wbNumKeys = [
     'poitem', 'so_qty', 'prwise_so_qty', 'consumption', 'reqqty', 'tot_poqty',
     'so_wise_poqty', 'so_wise_po_val', 'porate', 'totvalue', 'budgeted_cons', 'budget_inr',
-    'budget_conv_rt', 'budget_cost_per_gmt', 'budget_cost_per_piece', 'conv', 'actual_cost', 'variance_pct',
+    'budget_conv_rt', 'budget_cost_per_gmt', 'budget_cost_per_piece', 'conv', 'actual_cost',
+    'sale_order_quantity', 'req_bom_quantity', 'po_quantity', 'variance_pct',
+];
+$wbSoKeys = [
+    'salordno', 'style', 'so_qty', 'prwise_so_qty', 'consumption', 'reqqty',
+    'so_wise_poqty', 'so_wise_po_val',
 ];
 $wbZcostKeys = [
     'costing_quotation_no', 'costing_item_no', 'zsection', 'maktx',
     'budgeted_cons', 'budget_inr', 'budget_currency', 'budget_conv_rt', 'conv',
 ];
 $wbResultKeys = [
-    'budget_cost_per_gmt', 'budget_cost_per_piece', 'buom', 'actual_cost', 'variance_pct', 'actions',
+    'budget_cost_per_gmt', 'budget_cost_per_piece', 'buom', 'actual_cost',
+    'sale_order_quantity', 'req_bom_quantity', 'po_quantity', 'variance_pct', 'actions',
 ];
 $wbPoColCount = 0;
+$wbSoColCount = 0;
 $wbZcostColCount = 0;
 $wbResultColCount = 0;
 foreach ($wbColumns as $col) {
@@ -49,16 +56,21 @@ foreach ($wbColumns as $col) {
         $wbResultColCount++;
     } elseif (in_array($id, $wbZcostKeys, true)) {
         $wbZcostColCount++;
+    } elseif (in_array($id, $wbSoKeys, true)) {
+        $wbSoColCount++;
     } else {
         $wbPoColCount++;
     }
 }
-$wbColGroupOf = static function (string $id) use ($wbZcostKeys, $wbResultKeys): string {
+$wbColGroupOf = static function (string $id) use ($wbSoKeys, $wbZcostKeys, $wbResultKeys): string {
     if (in_array($id, $wbResultKeys, true)) {
         return 'result';
     }
     if (in_array($id, $wbZcostKeys, true)) {
         return 'zcost';
+    }
+    if (in_array($id, $wbSoKeys, true)) {
+        return 'so';
     }
     return 'po';
 };
@@ -145,7 +157,7 @@ $wbLoginUser = trim((string) (
                 <span class="material-icons-round">grid_view</span>
                 <strong>Costing Data</strong>
             </header>
-            <div class="pcw-compare-grid">
+            <div class="pcw-compare-grid is-cols-3">
                 <div class="pcw-compare-card" data-card-key="zcost_items" title="Click to view details & calculation">
                     <span class="material-icons-round pcw-card-ico is-items">format_list_numbered</span>
                     <div class="pcw-card-content">
@@ -158,16 +170,6 @@ $wbLoginUser = trim((string) (
                     <div class="pcw-card-content">
                         <small>Total Material</small>
                         <div class="pcw-card-val"><b id="pcwKpiZcostMaterials">—</b></div>
-                    </div>
-                </div>
-                <div class="pcw-compare-card is-qty" data-card-key="zcost_so_qty" title="Click to view details & calculation">
-                    <span class="material-icons-round pcw-card-ico is-qty">inventory_2</span>
-                    <div class="pcw-card-content">
-                        <small>Total PO Qty</small>
-                        <div class="pcw-card-val">
-                            <b id="pcwKpiZcostOrderQty">—</b>
-                            <em id="pcwKpiZcostOrderQtyUnit"></em>
-                        </div>
                     </div>
                 </div>
                 <div class="pcw-compare-card is-value" data-card-key="zcost_value" title="Click to view details & calculation">
@@ -456,6 +458,14 @@ $wbLoginUser = trim((string) (
                             PO Data
                         </span>
                     </th>
+                    <?php if ($wbSoColCount > 0): ?>
+                    <th class="pcw-group-th is-so" data-group="so" colspan="<?= (int) $wbSoColCount ?>">
+                        <span class="pcw-group-label">
+                            <span class="material-icons-round">shopping_bag</span>
+                            SO Data
+                        </span>
+                    </th>
+                    <?php endif; ?>
                     <th class="pcw-group-th is-zcost" data-group="zcost" colspan="<?= (int) max(1, $wbZcostColCount) ?>">
                         <span class="pcw-group-label">
                             <span class="material-icons-round">calculate</span>

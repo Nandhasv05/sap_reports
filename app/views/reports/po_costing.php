@@ -53,6 +53,13 @@ if (!isset($canEsign)) {
         : true;
 }
 $canEsign = (bool) $canEsign;
+if (!isset($canPortalRevert)) {
+    $canPortalRevert = function_exists('sap_reports_user_can')
+        ? sap_reports_user_can('po-costing', 'portal_revert')
+        : false;
+}
+$canPortalRevert = (bool) $canPortalRevert;
+$portalRevertUrl = (string) ($portalRevertUrl ?? url('purchase-order/portal-revert'));
 if (!isset($canWorkbench)) {
     $canWorkbench = function_exists('sap_reports_user_can')
         ? sap_reports_user_can('po-costing', 'workbench')
@@ -156,6 +163,8 @@ $poCostingAppClass = 'rpt-app is-po-costing is-workflow is-costing-bulk is-relea
      data-can-view="<?= $canView ? '1' : '0' ?>"
      data-can-pass-po="<?= $canPassPo ? '1' : '0' ?>"
      data-can-esign="<?= $canEsign ? '1' : '0' ?>"
+     data-can-portal-revert="<?= $canPortalRevert ? '1' : '0' ?>"
+     data-portal-revert-url="<?= e($portalRevertUrl) ?>"
      data-can-sent="<?= $canSentPage ? '1' : '0' ?>"
      data-can-assign="<?= $canAssign ? '1' : '0' ?>"
      data-can-validate="<?= $canValidate ? '1' : '0' ?>"
@@ -2299,7 +2308,7 @@ $poCostingAppClass = 'rpt-app is-po-costing is-workflow is-costing-bulk is-relea
     'currentUserEmail'   => $pcbCurrentUserEmail,
     'canPassPo'          => !empty($canPassPo),
     'canSapRevert'       => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'sap_revert') : false,
-    'canPortalRevert'    => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'portal_revert') : false,
+    'canPortalRevert'    => !empty($canPortalRevert),
     'canAssign'          => !empty($canAssign),
     'canValidate'        => !empty($canValidate),
     'canEsign'           => !empty($canEsign),
@@ -2336,12 +2345,19 @@ $poCostingAppClass = 'rpt-app is-po-costing is-workflow is-costing-bulk is-relea
 <?php
     $relatedTableKey = 'purchase_order_related_po_table';
     $relatedTableDef = TableColumnRegistry::get($relatedTableKey) ?? ['columns' => [], 'defaultHidden' => []];
+    $relatedPrefCols = $relatedTableDef['columns'] ?? [];
+    if (empty($canPortalRevert) && is_array($relatedPrefCols)) {
+        $relatedPrefCols = array_values(array_filter(
+            $relatedPrefCols,
+            static fn($col): bool => (is_array($col) ? (string) ($col['id'] ?? '') : (string) $col) !== 'portal_revert'
+        ));
+    }
 ?>
 <script type="application/json" id="pocRelatedTablePrefs"><?= json_encode([
     'tableKey'      => $relatedTableKey,
     'apiUrl'        => url('api/user/table-preferences/' . $relatedTableKey),
     'userId'        => (string) ($_SESSION['user_id'] ?? ''),
-    'columns'       => $relatedTableDef['columns'] ?? [],
+    'columns'       => $relatedPrefCols,
     'defaultHidden' => $relatedTableDef['defaultHidden'] ?? [],
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
 <script src="<?= e(asset('js/related-po.js')) ?>?v=<?= @filemtime(base_path('public/js/related-po.js')) ?: time() ?>"></script>

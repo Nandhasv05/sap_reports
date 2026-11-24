@@ -113,6 +113,7 @@ final class TableColumnRegistry
                 'sent_receive_log'     => 'Sent / Receive Log',
                 'esign'                => 'E-Sign',
                 'pdf'                  => 'View PDF',
+                'portal_revert'        => 'Portal Revert',
             ], [
                 'mat_type_desc',
                 'material_group',
@@ -166,28 +167,33 @@ final class TableColumnRegistry
                 'conv',
                 'variance_pct',
             ], ['status']),
-            // PO Data (TEMPFIN) vs Costing Data comparison workbench
+            // Status + PO Data + SO Data + Costing Data + Result
+            // PO qty/rate headers match SAP PO PDF: Total Qty | UOM | Rate INR | GST% | Amount INR
             'purchase_order_costing_workbench_table' => self::define([
                 'status'              => 'Status',
+                // PO Data — identity + PDF line columns
                 'pono'                => 'PONO',
+                'po_date'             => 'PODATE',
                 'poitem'              => 'POITEM',
+                'material'            => 'Material No',
+                'mat_desc'            => 'Description',
+                'matgroup'            => 'MATGROUP',
+                'tot_poqty'           => 'Total Qty',
+                'ouom'                => 'UOM',
+                'porate'              => 'Rate INR',
+                'totvalue'            => 'Amount INR',
+                'po_currency'         => 'PO_CURRENCY',
                 'prno'                => 'PRNO',
+                // SO Data — sales order + SO qty columns
                 'salordno'            => 'SALORDNO',
                 'style'               => 'STYLE',
-                'material'            => 'MATERIAL',
-                'matgroup'            => 'MATGROUP',
                 'so_qty'              => 'SO_QTY',
                 'prwise_so_qty'       => 'PRWISE_SO_QTY',
                 'consumption'         => 'CONSUMPTION',
                 'reqqty'              => 'REQQTY',
-                'tot_poqty'           => 'TOT_POQTY',
                 'so_wise_poqty'       => 'SO_WISE_POQTY',
                 'so_wise_po_val'      => 'SO_WISE_PO_VAL',
-                'ouom'                => 'OUOM',
-                'porate'              => 'PORATE',
-                'totvalue'            => 'TOTVALUE',
-                'mat_desc'            => 'MAT_DESC',
-                'po_currency'         => 'PO_CURRENCY',
+                // Costing Data
                 'costing_quotation_no'=> 'Quotation No',
                 'costing_item_no'     => 'zCOST Item',
                 'zsection'            => 'ZSECTION',
@@ -197,19 +203,23 @@ final class TableColumnRegistry
                 'budget_currency'     => 'BUDGET_CURRENCY',
                 'budget_conv_rt'      => 'BUDGET_CONV_RT',
                 'conv'                => 'CONV',
-                // RESULT section (budget vs actual)
+                // Result
                 'budget_cost_per_gmt'   => 'BUDGET_COST_PER_PIECE',
                 'budget_cost_per_piece' => 'BUDGET_COST_PER_GARMENT',
                 'buom'                  => 'BUOM',
                 'actual_cost'           => 'ACTUAL_COST',
+                'sale_order_quantity'   => 'SaleOrderQuantity',
+                'req_bom_quantity'      => 'ReqBOMQuantity',
+                'po_quantity'           => 'PO Quantity',
                 'variance_pct'          => 'Variance %',
                 'actions'               => 'Actions',
             ], [
-                // Lean default for all users; users can show extras via Columns
+                // Lean default; PDF line cols (Total Qty…Amount INR) stay visible
                 'prno',
+                'matgroup',
+                'po_currency',
                 'prwise_so_qty',
                 'consumption',
-                'mat_desc',
                 'budgeted_cons',
                 'budget_inr',
                 'budget_currency',

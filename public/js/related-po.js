@@ -15,6 +15,8 @@
     const poBase = page.getAttribute('data-po-base') || '';
     const pdfBase = page.getAttribute('data-pdf-url') || '';
     const canEsign = page.getAttribute('data-can-esign') !== '0';
+    const canPortalRevert = page.getAttribute('data-can-portal-revert') === '1';
+    const portalRevertUrl = page.getAttribute('data-portal-revert-url') || 'purchase-order/portal-revert';
     const canSent = page.getAttribute('data-can-sent') !== '0';
     const $ = (id) => document.getElementById(id);
     const headerFilters = $('pocRelatedHeaderFilters');
@@ -23,7 +25,14 @@
         key: th.getAttribute('data-key') || '',
         type: th.getAttribute('data-type') || 'text',
         index: Number(th.getAttribute('data-col') || 0),
-    }));
+    })).filter((c) => canPortalRevert || c.key !== 'portal_revert');
+
+    // No Portal Revert access → never show the column (header/body/footer + column manager)
+    if (!canPortalRevert) {
+        panel.querySelectorAll('#pocRelatedTable [data-col-id="portal_revert"], #pocRelatedTable [data-key="portal_revert"]').forEach((el) => {
+            el.remove();
+        });
+    }
 
     const money = (n) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
     const qty = (n) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 3 });
@@ -43,6 +52,7 @@
     let filtersVisible = false;
     let activeMat = 'all';
     let activeBrand = '';
+    let activeStatusFilter = ''; // '' | Released | Draft | Review
     let columnPrefManager = null;
     let lastQueryKey = '';
 
@@ -456,6 +466,14 @@
                     <span class="material-icons-round">picture_as_pdf</span>
                     View PDF
                 </button></td>`;
+            case 'portal_revert':
+                return `<td data-col-id="portal_revert"><button type="button" class="pcb-portal-revert-btn"
+                    data-po="${esc(rec.purchase_order)}"
+                    title="${canPortalRevert ? 'Portal Revert — clear release log + delete PO PDF' : 'Portal Revert permission required'}"
+                    ${canPortalRevert ? '' : 'disabled'}>
+                    <span class="material-icons-round" aria-hidden="true">undo</span>
+                    <span>Portal Revert</span>
+                </button></td>`;
             default:
                 return `<td data-col-id="${esc(key)}">${dash(rec[key])}</td>`;
         }
@@ -657,7 +675,7 @@
         setFoot('total_value', money(valueSum));
         ['purchase_order', 'purchase_order_type', 'po_type_name', 'date', 'plant',
             'supplier', 'supplier_full_name', 'brand_name', 'material_type', 'mat_type_desc', 'material_group', 'unit', 'currency',
-            'status_update', 'status_remarks', 'sent', 'sent_receive_log', 'esign', 'pdf'
+            'status_update', 'status_remarks', 'sent', 'sent_receive_log', 'esign', 'pdf', 'portal_revert'
         ].forEach((k) => setFoot(k, ''));
     }
 
@@ -718,14 +736,38 @@
         });
     }
 
+    function syncStatusPillActive() {
+        $('pocRelatedStatusPills')?.querySelectorAll('.poc-related-status-pill').forEach((btn) => {
+            const on = String(btn.getAttribute('data-status') || '') === activeStatusFilter;
+            btn.classList.toggle('is-active', on);
+            btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+    }
+
+    function setStatusFilter(status) {
+        const next = String(status || '').trim();
+        activeStatusFilter = activeStatusFilter === next ? '' : next;
+        syncStatusPillActive();
+        applyFilter();
+    }
+
     function applyFilter() {
         const query = String($('pocRelatedSearch')?.value || '').trim().toLowerCase();
         const clearBtn = $('pocRelatedSearchClear');
         if (clearBtn) clearBtn.hidden = query === '';
         const filters = activeColFilters();
-        let visible = items.filter((it) => {
-            it.visible = matches(it, query, filters);
-            return it.visible;
+        // Status pill counts: search + column filters only (not the active status pill)
+        const forCounts = items.filter((it) => matches(it, query, filters));
+        let visible = forCounts.filter((it) => {
+            if (activeStatusFilter) {
+                const st = normalizeStatus(it.rec?.status_update) || 'Draft';
+                if (st !== activeStatusFilter) {
+                    it.visible = false;
+                    return false;
+                }
+            }
+            it.visible = true;
+            return true;
         });
 
         if (sortCol >= 0) {
@@ -779,9 +821,10 @@
             total_value: valueSum,
             suppliers_count: suppliers.size,
             currency,
-        }, visible.length, countStatusTotals(visible));
+        }, visible.length, countStatusTotals(forCounts));
         updateFooter(visible);
         updateSortHeaders();
+        syncStatusPillActive();
         // Reorder body/footer only — never touch the filter row while typing (keeps focus)
         if (columnPrefManager && typeof columnPrefManager.refresh === 'function') {
             columnPrefManager.refresh({ skipFilterRow: true });
@@ -801,13 +844,14 @@
         try { config = JSON.parse(scriptNode.textContent || 'null'); } catch (_) { return null; }
         if (!config || !Array.isArray(config.columns)) return null;
 
-        const columns = config.columns;
+        const columns = (config.columns || []).filter((c) => canPortalRevert || c.id !== 'portal_revert');
         const defaultOrder = columns.map((c) => c.id);
         const isLocked = (id) => columns.some((c) => c.id === id && c.locked);
         const labels = Object.fromEntries(columns.map((c) => [c.id, c.label]));
+        const scrubPortal = (list) => (list || []).filter((id) => canPortalRevert || id !== 'portal_revert');
         let currentState = {
             columnOrder: [...defaultOrder],
-            hiddenColumns: Array.isArray(config.defaultHidden) ? [...config.defaultHidden] : [],
+            hiddenColumns: scrubPortal(Array.isArray(config.defaultHidden) ? [...config.defaultHidden] : []),
         };
         let appliedOrder = [...defaultOrder];
 
@@ -975,7 +1019,9 @@
                 if (prefsStore) prefsStore.reset();
                 else {
                     currentState.columnOrder = [...defaultOrder];
-                    currentState.hiddenColumns = Array.isArray(config.defaultHidden) ? [...config.defaultHidden] : [];
+                    currentState.hiddenColumns = scrubPortal(
+                        Array.isArray(config.defaultHidden) ? [...config.defaultHidden] : []
+                    );
                     applyOrder(currentState.columnOrder);
                     applyHidden(currentState.hiddenColumns);
                     buildMenu();
@@ -1022,16 +1068,28 @@
 
         function onPreferenceChange(next) {
             const prev = currentState;
-            currentState = next;
-            if (next.columnOrder.join(',') !== prev?.columnOrder?.join(',')
-                || next.columnOrder.join(',') !== appliedOrder.join(',')) {
-                applyOrder(next.columnOrder);
+            const cleaned = {
+                ...next,
+                columnOrder: scrubPortal(next.columnOrder?.length ? next.columnOrder : defaultOrder),
+                hiddenColumns: scrubPortal(next.hiddenColumns),
+            };
+            // Drop unknown ids (e.g. portal_revert when no access) that aren't in the allowed set
+            const allowed = new Set(defaultOrder);
+            cleaned.columnOrder = cleaned.columnOrder.filter((id) => allowed.has(id));
+            defaultOrder.forEach((id) => {
+                if (!cleaned.columnOrder.includes(id)) cleaned.columnOrder.push(id);
+            });
+            cleaned.hiddenColumns = cleaned.hiddenColumns.filter((id) => allowed.has(id));
+            currentState = cleaned;
+            if (cleaned.columnOrder.join(',') !== prev?.columnOrder?.join(',')
+                || cleaned.columnOrder.join(',') !== appliedOrder.join(',')) {
+                applyOrder(cleaned.columnOrder);
             }
-            if (next.hiddenColumns.join(',') !== prev?.hiddenColumns?.join(',')) {
-                applyHidden(next.hiddenColumns);
+            if (cleaned.hiddenColumns.join(',') !== prev?.hiddenColumns?.join(',')) {
+                applyHidden(cleaned.hiddenColumns);
             }
             buildMenu();
-            renderStatus(next);
+            renderStatus(cleaned);
         }
 
         const prefsStore = (typeof window.rptCreateTablePreferences === 'function')
@@ -1083,6 +1141,7 @@
                 }
                 if (c.key === 'esign') return 'eSign';
                 if (c.key === 'pdf') return 'View PDF PDF';
+                if (c.key === 'portal_revert') return 'Portal Revert';
                 return (tr.children[i]?.textContent || '').replace(/\s+/g, ' ').trim();
             });
             return { rec, tr, origIndex: index, texts, searchText: texts.join(' ').toLowerCase(), visible: true };
@@ -1207,6 +1266,8 @@
         });
         sortCol = -1;
         sortDir = 1;
+        activeStatusFilter = '';
+        syncStatusPillActive();
         applyFilter();
     }
 
@@ -1242,7 +1303,11 @@
             if ($('pocRelatedSearch')) $('pocRelatedSearch').value = '';
             applyFilter();
         });
-        $('pocRelatedRefresh')?.addEventListener('click', () => { void loadRelated(true); });
+        $('pocRelatedStatusPills')?.addEventListener('click', (e) => {
+            const btn = e.target.closest('.poc-related-status-pill[data-status]');
+            if (!btn || !($('pocRelatedStatusPills')?.contains(btn))) return;
+            setStatusFilter(btn.getAttribute('data-status') || '');
+        });
         $('pocRelatedClearFilters')?.addEventListener('click', clearFilters);
         $('pocRelatedFilterReset')?.addEventListener('click', clearFilters);
 
@@ -1274,43 +1339,19 @@
             $('pocRelatedColFilters')?.classList.toggle('is-active', filtersVisible);
         });
 
-        const applyRelatedSticky = (enabled) => {
-            const wrap = $('pocRelatedTableWrap');
-            if (!wrap) return;
-            const on = !!enabled;
-            wrap.classList.toggle('is-scroll-body', on);
-            wrap.classList.toggle('is-expanded', !on);
-            if (on) {
-                wrap.style.maxHeight = '';
-                wrap.style.overflow = '';
-            } else {
-                wrap.style.maxHeight = 'none';
-                wrap.style.overflow = 'visible';
-            }
-            $('pocRelatedStickyScroll')?.classList.toggle('is-active', on);
-            if ($('pocRelatedStickyLabel')) {
-                $('pocRelatedStickyLabel').textContent = on ? 'Scroll Body Only' : 'Expand Table';
-            }
-            try {
-                localStorage.setItem('poc_related_sticky_scroll', on ? '1' : '0');
-            } catch (_) {}
-        };
-        let relatedStickyOn = true;
-        try {
-            const saved = localStorage.getItem('poc_related_sticky_scroll');
-            if (saved === '0' || saved === '1') relatedStickyOn = saved === '1';
-        } catch (_) {}
-        applyRelatedSticky(relatedStickyOn);
-        $('pocRelatedStickyScroll')?.addEventListener('click', () => {
-            const wrap = $('pocRelatedTableWrap');
-            if (!wrap) return;
-            applyRelatedSticky(!wrap.classList.contains('is-scroll-body'));
-        });
+        // Always keep sticky header + scroll body (Scroll Body Only toggle removed)
+        const wrapSticky = $('pocRelatedTableWrap');
+        if (wrapSticky) {
+            wrapSticky.classList.add('is-scroll-body');
+            wrapSticky.classList.remove('is-expanded');
+            wrapSticky.style.maxHeight = '';
+            wrapSticky.style.overflow = '';
+        }
 
         panel.querySelectorAll('#pocRelatedTable thead .rpt-header-row th.is-sortable').forEach((th) => {
             th.addEventListener('click', () => {
                 const key = th.getAttribute('data-key') || '';
-                if (key === 'esign' || key === 'pdf' || key === 'sent' || key === 'sent_receive_log') return;
+                if (key === 'esign' || key === 'pdf' || key === 'portal_revert' || key === 'sent' || key === 'sent_receive_log') return;
                 const col = parseInt(th.getAttribute('data-col'), 10);
                 if (sortCol === col) sortDir = -sortDir;
                 else {
@@ -1370,8 +1411,63 @@
                 e.preventDefault();
                 const po = pdfBtn.getAttribute('data-po');
                 if (po) window.open(pdfUrl(po), '_blank', 'noopener');
+                return;
+            }
+            const revertBtn = e.target.closest('button.pcb-portal-revert-btn');
+            if (revertBtn) {
+                e.preventDefault();
+                void portalRevertFromList(revertBtn);
             }
         });
+    }
+
+    async function portalRevertFromList(btn) {
+        if (!canPortalRevert || btn.disabled) {
+            alert('You do not have Portal Revert access for PO Costing.');
+            return;
+        }
+        const po = String(btn.getAttribute('data-po') || '').trim();
+        if (!po) return;
+        if (!confirm(
+            `Portal Revert PO ${po}?\n\n`
+            + '• Deletes rows from po_release_log\n'
+            + '• Deletes PO PDF / e-sign files\n\n'
+            + 'This does NOT call SAP.'
+        )) {
+            return;
+        }
+        const label = btn.querySelector('span:last-child');
+        const prev = label?.textContent || 'Portal Revert';
+        btn.disabled = true;
+        if (label) label.textContent = 'Reverting…';
+        try {
+            const res = await fetch(portalRevertUrl, {
+                method: 'POST',
+                headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ po, action: 'portal_revert' }),
+            });
+            const rawText = await res.text();
+            let json = {};
+            try {
+                json = rawText ? JSON.parse(rawText) : {};
+            } catch (_) {
+                throw new Error(
+                    rawText
+                        ? `Portal revert returned non-JSON (HTTP ${res.status}): ${rawText.slice(0, 180)}`
+                        : `Portal revert returned empty response (HTTP ${res.status}).`
+                );
+            }
+            if (!res.ok || json.success === false) {
+                throw new Error(json.message || json.error || `HTTP ${res.status}`);
+            }
+            alert(json.message || `PO ${po} portal reverted`);
+            void loadRelated(true);
+        } catch (err) {
+            alert(String(err?.message || err || 'Portal revert failed'));
+            btn.disabled = false;
+            if (label) label.textContent = prev;
+        }
     }
 
     window.pocRelatedPo = {
