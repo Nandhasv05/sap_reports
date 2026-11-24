@@ -6,7 +6,7 @@ declare(strict_types=1);
  * DATE : 03/11/2026
  * DESCRIPTION : SAP Reports User Access Control Controller
  *               Restricted to: admin, saravan, nandhakumar
- *               Reports: View · PO Costing: View/Find PO/Pass PO/Assign/Validate/eSign + Receive/Sent/Workflow/Approved/Related · ZCOST: Add/Update/Copy/Approve
+ *               Reports: View · PO Costing: View/Find PO/Pass PO/SAP Revert/Portal Revert/Assign/Validate/eSign + Receive/Sent/Workflow/Approved/Related · ZCOST: Add/Update/Copy/Approve
  *               Persisted to dbo.sap_report_userascesscontrol
 */
 
@@ -81,7 +81,7 @@ class UserAccessControlController extends Controller
                 'icon'        => 'fa-file-invoice-dollar',
                 'icon_color'  => '#10b981',
                 'icon_bg'     => '#ecfdf5',
-                'description' => 'Released PO + Workbench actions + aside pages (Receive / Sent / Workflow / Approved / Draft PO / Search PO / poValaition Report)',
+                'description' => 'Released PO + Workbench actions (Pass / SAP Revert / Portal Revert) + aside pages (Receive / Sent / Workflow / Approved / Draft PO / Search PO / poValaition Report)',
                 'actions'     => [
                     [
                         'key' => 'view',
@@ -106,6 +106,18 @@ class UserAccessControlController extends Controller
                         'label' => 'Pass PO',
                         'column' => 'can_approve',
                         'tooltip' => 'Pass PO — why shown: lets the user pass a validated PO (Value = X) from the workbench.',
+                    ],
+                    [
+                        'key' => 'sap_revert',
+                        'label' => 'SAP Revert',
+                        'column' => 'can_sap_revert',
+                        'tooltip' => 'SAP Revert — why shown: lets the user clear SAP POApprovalSet Value ("") from the workbench.',
+                    ],
+                    [
+                        'key' => 'portal_revert',
+                        'label' => 'Portal Revert',
+                        'column' => 'can_portal_revert',
+                        'tooltip' => 'Portal Revert — why shown: lets the user delete po_release_log rows and PO PDF / e-sign files (no SAP call).',
                     ],
                     [
                         'key' => 'assign',
@@ -381,7 +393,9 @@ class UserAccessControlController extends Controller
                        {$bitSelect('can_related')},
                        {$bitSelect('can_find_po')},
                        {$bitSelect('can_search_po')},
-                       {$bitSelect('can_valuation_report')}
+                       {$bitSelect('can_valuation_report')},
+                       {$bitSelect('can_sap_revert')},
+                       {$bitSelect('can_portal_revert')}
                 FROM [dbo].[{$table}]
             ";
             $stmt = $pdo->prepare($selectSql . ' WHERE user_id = ?');
@@ -412,6 +426,7 @@ class UserAccessControlController extends Controller
                         'assign' => 0, 'validate' => 0, 'esign' => 0, 'workbench' => 0,
                         'receive' => 0, 'sent' => 0, 'workflow' => 0, 'approved' => 0, 'related' => 0,
                         'find_po' => 0, 'search_po' => 0, 'valuation_report' => 0,
+                        'sap_revert' => 0, 'portal_revert' => 0,
                     ];
                 }
                 $permissions[$pNo]['add'] = max($permissions[$pNo]['add'], (int) $row['can_add']);
@@ -433,6 +448,8 @@ class UserAccessControlController extends Controller
                 $permissions[$pNo]['find_po'] = max($permissions[$pNo]['find_po'], (int) ($row['can_find_po'] ?? 0));
                 $permissions[$pNo]['search_po'] = max($permissions[$pNo]['search_po'], (int) ($row['can_search_po'] ?? 0));
                 $permissions[$pNo]['valuation_report'] = max($permissions[$pNo]['valuation_report'], (int) ($row['can_valuation_report'] ?? 0));
+                $permissions[$pNo]['sap_revert'] = max($permissions[$pNo]['sap_revert'], (int) ($row['can_sap_revert'] ?? 0));
+                $permissions[$pNo]['portal_revert'] = max($permissions[$pNo]['portal_revert'], (int) ($row['can_portal_revert'] ?? 0));
             }
 
             $this->jsonResponse([
@@ -582,7 +599,7 @@ class UserAccessControlController extends Controller
         $optionalBits = [
             'can_copy', 'can_assign', 'can_validate',
             'can_receive', 'can_sent', 'can_workflow', 'can_approved', 'can_related', 'can_find_po', 'can_search_po',
-            'can_valuation_report',
+            'can_valuation_report', 'can_sap_revert', 'can_portal_revert',
         ];
         $bitCols = [];
         foreach ($optionalBits as $c) {
@@ -620,7 +637,7 @@ class UserAccessControlController extends Controller
                         'can_copy' => 0, 'can_assign' => 0, 'can_validate' => 0,
                         'can_receive' => 0, 'can_sent' => 0, 'can_workflow' => 0, 'can_approved' => 0,
                         'can_related' => 0, 'can_find_po' => 0, 'can_search_po' => 0,
-                        'can_valuation_report' => 0,
+                        'can_valuation_report' => 0, 'can_sap_revert' => 0, 'can_portal_revert' => 0,
                     ];
                 }
 
@@ -752,7 +769,7 @@ class UserAccessControlController extends Controller
     /**
      * @param array<string, mixed> $p
      * @param array<string, mixed> $meta
-     * @return array{can_add:int,can_view:int,can_edit:int,can_approve:int,can_copy:int,can_assign:int,can_validate:int,can_receive:int,can_sent:int,can_workflow:int,can_approved:int,can_related:int,can_find_po:int,can_search_po:int,can_valuation_report:int}
+     * @return array{can_add:int,can_view:int,can_edit:int,can_approve:int,can_copy:int,can_assign:int,can_validate:int,can_receive:int,can_sent:int,can_workflow:int,can_approved:int,can_related:int,can_find_po:int,can_search_po:int,can_valuation_report:int,can_sap_revert:int,can_portal_revert:int}
      */
     private function normalizePagePermissions(array $p, array $meta): array
     {
@@ -773,6 +790,8 @@ class UserAccessControlController extends Controller
             'can_find_po' => 0,
             'can_search_po' => 0,
             'can_valuation_report' => 0,
+            'can_sap_revert' => 0,
+            'can_portal_revert' => 0,
         ];
         $actions = is_array($meta['actions'] ?? null) ? $meta['actions'] : [];
         foreach ($actions as $act) {
@@ -808,6 +827,8 @@ class UserAccessControlController extends Controller
             $flags['can_find_po'] = 0;
             $flags['can_search_po'] = 0;
             $flags['can_valuation_report'] = 0;
+            $flags['can_sap_revert'] = 0;
+            $flags['can_portal_revert'] = 0;
         } elseif ($kind === 'po-costing') {
             $flags['can_edit'] = 0;
             // can_add stores Workbench; can_copy stores eSign; page bits gate aside nav
@@ -825,6 +846,8 @@ class UserAccessControlController extends Controller
                 || $flags['can_find_po'] === 1
                 || $flags['can_search_po'] === 1
                 || $flags['can_valuation_report'] === 1
+                || $flags['can_sap_revert'] === 1
+                || $flags['can_portal_revert'] === 1
             ) {
                 $flags['can_view'] = 1;
             }
@@ -839,6 +862,8 @@ class UserAccessControlController extends Controller
             $flags['can_find_po'] = 0;
             $flags['can_search_po'] = 0;
             $flags['can_valuation_report'] = 0;
+            $flags['can_sap_revert'] = 0;
+            $flags['can_portal_revert'] = 0;
             $flags['can_view'] = (
                 $flags['can_add'] === 1
                 || $flags['can_edit'] === 1
@@ -945,7 +970,7 @@ class UserAccessControlController extends Controller
         $needed = [
             'can_copy', 'can_assign', 'can_validate',
             'can_receive', 'can_sent', 'can_workflow', 'can_approved', 'can_related', 'can_find_po', 'can_search_po',
-            'can_valuation_report',
+            'can_valuation_report', 'can_sap_revert', 'can_portal_revert',
         ];
         $existing = $this->accessTableColumnMap($pdo);
         $addedFindPo = false;
@@ -1048,6 +1073,8 @@ class UserAccessControlController extends Controller
                 [can_find_po] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_find_po] DEFAULT 0,
                 [can_search_po] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_search_po] DEFAULT 0,
                 [can_valuation_report] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_valuation_report] DEFAULT 0,
+                [can_sap_revert] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_sap_revert] DEFAULT 0,
+                [can_portal_revert] BIT NOT NULL CONSTRAINT [DF_uac_{$suffix}_portal_revert] DEFAULT 0,
                 [created_at] DATETIME NOT NULL CONSTRAINT [DF_uac_{$suffix}_created] DEFAULT GETDATE(),
                 [updated_at] DATETIME NOT NULL CONSTRAINT [DF_uac_{$suffix}_updated] DEFAULT GETDATE(),
                 CONSTRAINT [PK_uac_{$suffix}] PRIMARY KEY ([id]),
@@ -1063,7 +1090,7 @@ class UserAccessControlController extends Controller
                     (user_id, username, page_no, page_name, page_route,
                      can_add, can_view, can_edit, can_approve, can_copy, can_assign, can_validate,
                      can_receive, can_sent, can_workflow, can_approved, can_related, can_find_po, can_search_po,
-                     can_valuation_report,
+                     can_valuation_report, can_sap_revert, can_portal_revert,
                      created_at, updated_at)
                     SELECT
                         user_id,
@@ -1086,6 +1113,8 @@ class UserAccessControlController extends Controller
                         CAST(ISNULL(can_find_po, CASE WHEN ISNULL(can_view,0) = 1 AND page_no = 2 THEN 1 ELSE 0 END) AS BIT),
                         CAST(ISNULL(can_search_po, 0) AS BIT),
                         CAST(ISNULL(can_valuation_report, 0) AS BIT),
+                        CAST(ISNULL(can_sap_revert, 0) AS BIT),
+                        CAST(ISNULL(can_portal_revert, 0) AS BIT),
                         ISNULL(created_at, GETDATE()),
                         ISNULL(updated_at, GETDATE())
                     FROM [dbo].[{$table}]
@@ -1228,6 +1257,8 @@ class UserAccessControlController extends Controller
                         [can_find_po] BIT NOT NULL CONSTRAINT [DF_{$table}_find_po] DEFAULT 0,
                         [can_search_po] BIT NOT NULL CONSTRAINT [DF_{$table}_search_po] DEFAULT 0,
                         [can_valuation_report] BIT NOT NULL CONSTRAINT [DF_{$table}_valuation_report] DEFAULT 0,
+                        [can_sap_revert] BIT NOT NULL CONSTRAINT [DF_{$table}_sap_revert] DEFAULT 0,
+                        [can_portal_revert] BIT NOT NULL CONSTRAINT [DF_{$table}_portal_revert] DEFAULT 0,
                         [created_at] DATETIME NOT NULL CONSTRAINT [DF_{$table}_created] DEFAULT GETDATE(),
                         [updated_at] DATETIME NOT NULL CONSTRAINT [DF_{$table}_updated] DEFAULT GETDATE(),
                         CONSTRAINT [PK_{$table}] PRIMARY KEY ([id]),

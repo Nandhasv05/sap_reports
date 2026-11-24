@@ -103,6 +103,9 @@ if (method_exists(ReportsController::class, 'purchaseOrderPdf')) {
 if (method_exists(ReportsController::class, 'purchaseOrderPass')) {
     $router->post('purchase-order/pass', [ReportsController::class, 'purchaseOrderPass']);
 }
+if (method_exists(ReportsController::class, 'purchaseOrderPortalRevert')) {
+    $router->post('purchase-order/portal-revert', [ReportsController::class, 'purchaseOrderPortalRevert']);
+}
 if (method_exists(ReportsController::class, 'purchaseOrderEsignSignature')) {
     $router->get('purchase-order/esign-signature', [ReportsController::class, 'purchaseOrderEsignSignature']);
     $router->post('purchase-order/esign-signature', [ReportsController::class, 'purchaseOrderEsignSignature']);

@@ -555,7 +555,7 @@ $wbLoginUser = trim((string) (
                 <span class="material-icons-round">payments</span>
                 <div>
                     <strong>PO Value Breakdown</strong>
-                    <small>Full PO net + Freight / MOQ / charges + IGST (same as Open PDF)</small>
+                    <small>Full PO net + to_Cond charges + to_GST (same as Open PDF)</small>
                 </div>
             </div>
             <div class="pcw-po-value-hero">
@@ -575,27 +575,27 @@ $wbLoginUser = trim((string) (
                     <span class="pcw-po-tile-k">Discount</span>
                     <b id="pcwChargeDiscount">0.00</b>
                 </article>
-                <article class="pcw-po-tile" data-charge="freight" role="listitem" title="ZI_PO_CONDITION_HUB Freight1 + Freight2">
+                <article class="pcw-po-tile" data-charge="freight" role="listitem" title="to_Cond Freight1 + Freight2">
                     <span class="pcw-po-tile-k">Freight</span>
                     <span class="pcw-po-tile-sap">Freight</span>
                     <b id="pcwChargeFreight">0.00</b>
                 </article>
-                <article class="pcw-po-tile" data-charge="moq" role="listitem" title="ZI_PO_CONDITION_HUB MOQ">
+                <article class="pcw-po-tile" data-charge="moq" role="listitem" title="to_Cond MOQ">
                     <span class="pcw-po-tile-k">MOQ</span>
                     <span class="pcw-po-tile-sap">MOQ</span>
                     <b id="pcwChargeMoq">0.00</b>
                 </article>
-                <article class="pcw-po-tile" data-charge="other" role="listitem" title="ZI_PO_CONDITION_HUB OtherCharges">
+                <article class="pcw-po-tile" data-charge="other" role="listitem" title="to_Cond OtherCharges">
                     <span class="pcw-po-tile-k">Other</span>
                     <span class="pcw-po-tile-sap">Other</span>
                     <b id="pcwChargeOther">0.00</b>
                 </article>
-                <article class="pcw-po-tile" data-charge="screen" role="listitem" title="ZI_PO_CONDITION_HUB Screen">
+                <article class="pcw-po-tile" data-charge="screen" role="listitem" title="to_Cond Screen">
                     <span class="pcw-po-tile-k">Screen</span>
                     <span class="pcw-po-tile-sap">Screen</span>
                     <b id="pcwChargeScreen">0.00</b>
                 </article>
-                <article class="pcw-po-tile" data-charge="bank" role="listitem" title="ZI_PO_CONDITION_HUB Bank">
+                <article class="pcw-po-tile" data-charge="bank" role="listitem" title="to_Cond Bank">
                     <span class="pcw-po-tile-k">Bank</span>
                     <span class="pcw-po-tile-sap">Bank</span>
                     <b id="pcwChargeBank">0.00</b>
@@ -603,9 +603,9 @@ $wbLoginUser = trim((string) (
             </div>
 
             <div class="pcw-po-value-tax">
-                <div class="pcw-po-tax-item"><span>SGST</span><b id="pcwChargeSgst">0.00</b></div>
-                <div class="pcw-po-tax-item"><span>CGST</span><b id="pcwChargeCgst">0.00</b></div>
-                <div class="pcw-po-tax-item"><span>IGST</span><b id="pcwChargeIgst">0.00</b></div>
+                <div class="pcw-po-tax-item" title="to_GST.sgst"><span>SGST</span><b id="pcwChargeSgst">0.00</b></div>
+                <div class="pcw-po-tax-item" title="to_GST.cgst"><span>CGST</span><b id="pcwChargeCgst">0.00</b></div>
+                <div class="pcw-po-tax-item" title="to_GST.igst"><span>IGST</span><b id="pcwChargeIgst">0.00</b></div>
             </div>
         </div>
     </aside>

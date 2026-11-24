@@ -82,6 +82,7 @@
     let validateQueue = [];
     let autoValidatePage = true;
     let listFetching = false;
+    let bulkListLoadedOnce = false;
 
     const COL_DEFS = [
         { key: 'sno', label: 'S.No', locked: true },
@@ -151,9 +152,297 @@
         try {
             const panel = String(new URL(window.location.href).searchParams.get('panel') || '').trim().toLowerCase();
             // Default / empty = Released Po (dashboard)
-            return !panel || panel === 'dashboard';
+            if (!(!panel || panel === 'dashboard')) return false;
+            // Wait for first-screen filter modal (brand / fabric-trims / PO)
+            if (isReleasedLookupPending()) return false;
+            return true;
         } catch (_) {
             return true;
+        }
+    }
+
+    function isReleasedLookupPending() {
+        const page = document.getElementById('poCostingPage');
+        const lookup = $('pocReleasedLookup');
+        if (!lookup) return false;
+        if (page && page.classList.contains('is-released-lookup')) return true;
+        return !lookup.hidden && !bulkListLoadedOnce;
+    }
+
+    function showReleasedLookup() {
+        const page = document.getElementById('poCostingPage');
+        const lookup = $('pocReleasedLookup');
+        if (!lookup) return;
+        lookup.hidden = false;
+        page?.classList.add('is-released-lookup');
+        const headerFilters = $('pcbFilterForm');
+        if (headerFilters) headerFilters.hidden = true;
+        const back = $('pocLkBackBtn');
+        if (back) back.hidden = !bulkListLoadedOnce;
+        try { if (window.rptLoader) window.rptLoader.hide(true); } catch (_) {}
+        showSpinner(false);
+        setTimeout(() => $('pocLkPo')?.focus(), 80);
+    }
+
+    function hideReleasedLookup() {
+        const page = document.getElementById('poCostingPage');
+        const lookup = $('pocReleasedLookup');
+        if (lookup) lookup.hidden = true;
+        page?.classList.remove('is-released-lookup');
+        const headerFilters = $('pcbFilterForm');
+        if (headerFilters) headerFilters.hidden = false;
+    }
+
+    function syncLookupMatToHeader(mat) {
+        const val = String(mat || 'all').toLowerCase();
+        if ($('pocLkMat')) $('pocLkMat').value = val;
+        if ($('pcbMat')) $('pcbMat').value = val;
+        document.querySelectorAll('input[name="pcb_mat"]').forEach((el) => {
+            el.checked = el.value === val;
+        });
+        document.querySelectorAll('.poc-lk-mat').forEach((btn) => {
+            const on = btn.getAttribute('data-mat') === val;
+            btn.classList.toggle('on', on);
+            btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+    }
+
+    function syncLookupBrandToHeader(codes) {
+        // Lookup modal is single-select — keep only the first brand code
+        const raw = Array.isArray(codes)
+            ? codes.map((s) => String(s || '').trim()).filter(Boolean)
+            : String(codes || '').split(',').map((s) => s.trim()).filter(Boolean);
+        const code = raw[0] || '';
+        if ($('pocLkBrand')) $('pocLkBrand').value = code;
+        if ($('pcbBrand')) $('pcbBrand').value = code;
+        cfg.brand = code;
+
+        // Header multi-select: check only this one brand (or none = All Brands)
+        document.querySelectorAll('#pcbBrandDropdown .po-multi-checkbox').forEach((cb) => {
+            cb.checked = !!code && cb.value === code;
+        });
+
+        const nameOf = (c) => {
+            if (!c) return 'All Brands';
+            const opt = Array.from(document.querySelectorAll('#pocLkBrandList .poc-lk-dd-option'))
+                .find((el) => String(el.getAttribute('data-code') || '') === c);
+            if (opt) return opt.querySelector('.poc-lk-dd-name')?.textContent || c;
+            const cb = Array.from(document.querySelectorAll('#pcbBrandDropdown .po-multi-checkbox'))
+                .find((el) => el.value === c);
+            return cb?.closest('.po-multi-item')?.querySelector('.po-multi-item-name')?.textContent || c;
+        };
+        const label = nameOf(code);
+        if ($('pcbBrandLabel')) $('pcbBrandLabel').textContent = label;
+        if ($('pocLkBrandLabel')) $('pocLkBrandLabel').textContent = label;
+        const badge = $('pcbBrandBadge');
+        if (badge) {
+            if (code) {
+                badge.style.display = 'inline-flex';
+                badge.textContent = '1';
+            } else {
+                badge.style.display = 'none';
+                badge.textContent = '0';
+            }
+        }
+        document.querySelectorAll('#pocLkBrandList .poc-lk-dd-option').forEach((opt) => {
+            const on = String(opt.getAttribute('data-code') || '') === code;
+            opt.classList.toggle('is-checked', on);
+            opt.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+    }
+
+    function bindLookupBrandDropdown() {
+        const dd = $('pocLkBrandDropdown');
+        if (!dd) return;
+        const trigger = $('pocLkBrandTrigger');
+        const menu = $('pocLkBrandMenu');
+        const hiddenInput = $('pocLkBrand');
+        const labelEl = $('pocLkBrandLabel');
+        const searchInput = $('pocLkBrandSearch');
+        const searchClear = $('pocLkBrandSearchClear');
+        const options = () => Array.from(dd.querySelectorAll('.poc-lk-dd-option'));
+
+        function selectBrand(code, name, { close = true } = {}) {
+            const val = String(code || '').trim();
+            if (hiddenInput) hiddenInput.value = val;
+            if (labelEl) labelEl.textContent = val ? (name || val) : 'All Brands';
+            options().forEach((opt) => {
+                const on = String(opt.getAttribute('data-code') || '') === val;
+                opt.classList.toggle('is-checked', on);
+                opt.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+            if (close) openDropdown(false);
+        }
+
+        function filterList(q) {
+            const query = q.trim().toLowerCase();
+            if (searchClear) searchClear.hidden = !query;
+            options().forEach((item) => {
+                const code = (item.getAttribute('data-code') || '').toLowerCase();
+                const name = (item.getAttribute('data-name') || '').toLowerCase();
+                const isAll = code === '';
+                item.hidden = !(isAll || !query || code.includes(query) || name.includes(query));
+            });
+        }
+
+        function openDropdown(open) {
+            dd.classList.toggle('is-open', open);
+            trigger?.setAttribute('aria-expanded', open ? 'true' : 'false');
+            if (menu) menu.hidden = !open;
+            if (open && searchInput) {
+                searchInput.value = '';
+                filterList('');
+                setTimeout(() => searchInput.focus(), 60);
+            }
+        }
+
+        trigger?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openDropdown(!dd.classList.contains('is-open'));
+        });
+        menu?.addEventListener('click', (e) => e.stopPropagation());
+        searchInput?.addEventListener('input', () => filterList(searchInput.value));
+        searchClear?.addEventListener('click', () => {
+            if (searchInput) searchInput.value = '';
+            filterList('');
+            searchInput?.focus();
+        });
+        options().forEach((opt) => {
+            opt.addEventListener('click', (e) => {
+                e.preventDefault();
+                const code = String(opt.getAttribute('data-code') || '');
+                const name = opt.querySelector('.poc-lk-dd-name')?.textContent || code || 'All Brands';
+                selectBrand(code, name);
+            });
+        });
+        document.addEventListener('click', (e) => {
+            if (dd.classList.contains('is-open') && !dd.contains(e.target)) {
+                openDropdown(false);
+            }
+        });
+        selectBrand('', 'All Brands', { close: false });
+        openDropdown(false);
+    }
+    function bindReleasedLookup() {
+        const form = $('pocReleasedLookupForm');
+        if (!form) return;
+
+        bindLookupBrandDropdown();
+
+        document.querySelectorAll('.poc-lk-mat').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                syncLookupMatToHeader(btn.getAttribute('data-mat') || 'all');
+            });
+        });
+
+        $('pocLkPo')?.addEventListener('input', () => {
+            const el = $('pocLkPo');
+            if (!el) return;
+            el.value = String(el.value || '').replace(/\D/g, '').slice(0, 10);
+        });
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const err = $('pocLkFormError');
+            if (err) { err.hidden = true; err.textContent = ''; }
+
+            const mat = String($('pocLkMat')?.value || 'all').toLowerCase() || 'all';
+            // Single brand from lookup dropdown
+            const brands = String($('pocLkBrand')?.value || '').trim();
+            if ($('pocLkBrand')) $('pocLkBrand').value = brands;
+
+            const po = String($('pocLkPo')?.value || '').replace(/\D/g, '').slice(0, 10);
+            if (po && !/^\d{1,10}$/.test(po)) {
+                if (err) {
+                    err.hidden = false;
+                    err.textContent = 'Enter a valid PO number (up to 10 digits).';
+                }
+                $('pocLkPo')?.focus();
+                return;
+            }
+
+            // Push filters into header + cfg so fetchPos / workbench use them
+            syncLookupMatToHeader(mat);
+            syncLookupBrandToHeader(brands);
+            if ($('pcbMat')) $('pcbMat').value = mat;
+            if ($('pcbBrand')) $('pcbBrand').value = brands;
+            cfg.brand = brands;
+            if ($('pcbPoSearch')) $('pcbPoSearch').value = po;
+            if ($('pcbQuickSearch')) $('pcbQuickSearch').value = po;
+            lastServerPoSearch = po;
+            // Close brand panel if still open
+            $('pocLkBrandDropdown')?.classList.remove('is-open');
+            const brandMenu = $('pocLkBrandMenu');
+            if (brandMenu) brandMenu.hidden = true;
+            $('pocLkBrandTrigger')?.setAttribute('aria-expanded', 'false');
+
+            hideReleasedLookup();
+            bulkListLoadedOnce = false;
+
+            const btn = $('pocLkShowBtn');
+            if (btn) {
+                btn.disabled = true;
+                btn.setAttribute('aria-busy', 'true');
+            }
+            try {
+                await fetchPos(null, { page: 1, resetCache: true, po: po || '' });
+                bulkListLoadedOnce = true;
+
+                // Particular PO → open that report when found / workbench when not in list
+                if (po) {
+                    const exact = allRows.find((r) => {
+                        const rowPo = String(r.purchase_order || '');
+                        return rowPo === po || rowPo.replace(/^0+/, '') === po.replace(/^0+/, '');
+                    });
+                    if (exact) {
+                        applyFilter();
+                        void openDrill(exact.purchase_order);
+                        return;
+                    }
+                    const canOpenWb = cfg.canWorkbench !== false || cfg.canSearchPo === true;
+                    if (po.length >= 8 && canOpenWb) {
+                        toast(`PO ${po} not in list — opening workbench.`, 'info');
+                        openDrill(po);
+                        return;
+                    }
+                    toast(`No purchase order found for "${po}".`, 'info');
+                    return;
+                }
+
+                const matLabel = mat === 'all' ? 'All' : (mat === 'fabric' ? 'Fabric' : 'Trims');
+                const brandLabel = brands
+                    ? (String($('pocLkBrandLabel')?.textContent || brands).trim() || brands)
+                    : 'All Brands';
+                toast(`Showing ${matLabel} · ${brandLabel}`, 'ok');
+            } catch (fetchErr) {
+                toast(String(fetchErr.message || fetchErr || 'Could not load purchase orders'), 'error');
+                showReleasedLookup();
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.removeAttribute('aria-busy');
+                }
+            }
+        });
+
+        $('pcbOpenLookup')?.addEventListener('click', () => {
+            // Prefill modal from current header filters
+            syncLookupMatToHeader(selectedMat());
+            syncLookupBrandToHeader(selectedBrand());
+            if ($('pocLkPo') && $('pcbPoSearch')) {
+                $('pocLkPo').value = String($('pcbPoSearch').value || '').replace(/\D/g, '').slice(0, 10);
+            }
+            showReleasedLookup();
+        });
+        $('pocLkBackBtn')?.addEventListener('click', () => {
+            hideReleasedLookup();
+            showSpinner(false);
+        });
+
+        // First paint: keep modal up, no spinner
+        if (isReleasedLookupPending()) {
+            showReleasedLookup();
         }
     }
 
@@ -3870,6 +4159,7 @@
                 window.history.back();
             }
         });
+        bindReleasedLookup();
         $('pcbFilterForm')?.addEventListener('submit', (e) => {
             e.preventDefault();
             // Enter in PO search should open that PO, not refetch list
@@ -4329,22 +4619,29 @@
 
     bind();
 
-    let bulkListLoadedOnce = false;
     async function ensureBulkListLoaded(force) {
+        if (isReleasedLookupPending() && !force) return;
         if (!force && bulkListLoadedOnce) return;
         const urlPage = Number(new URLSearchParams(window.location.search).get('page') || 1);
         const startPage = Number.isFinite(urlPage) && urlPage > 1 ? Math.floor(urlPage) : 1;
         await fetchPos(null, startPage > 1 ? { page: startPage, resetCache: true } : {});
         bulkListLoadedOnce = true;
+        hideReleasedLookup();
     }
 
     window.pcbBulkList = {
         refresh: () => ensureBulkListLoaded(true),
         ensureLoaded: () => ensureBulkListLoaded(false),
+        isLookupPending: () => isReleasedLookupPending(),
+        showLookup: () => showReleasedLookup(),
+        hideLookup: () => hideReleasedLookup(),
     };
 
     // Do not fetch (or flash the page spinner) when landing on Search PO / other soft panels
+    // or while the Released Po filter modal is waiting for the user
     if (shouldAutoloadBulkList()) {
         void ensureBulkListLoaded(false);
+    } else if (isReleasedLookupPending()) {
+        showReleasedLookup();
     }
 })();

@@ -176,6 +176,8 @@
                     || (action === 'find_po' && (!!Number(row.find_po) || !!Number(row.can_find_po)))
                     || (action === 'search_po' && (!!Number(row.search_po) || !!Number(row.can_search_po)))
                     || (action === 'valuation_report' && (!!Number(row.valuation_report) || !!Number(row.can_valuation_report)))
+                    || (action === 'sap_revert' && (!!Number(row.sap_revert) || !!Number(row.can_sap_revert)))
+                    || (action === 'portal_revert' && (!!Number(row.portal_revert) || !!Number(row.can_portal_revert)))
                     || (action === 'related' && (!!Number(row.related) || !!Number(row.can_related)))
                     || (action === 'update' && !!Number(row.edit))
                     || (action === 'assign' && !!Number(row.assign))
@@ -295,6 +297,8 @@
                 can_find_po: 0,
                 can_search_po: 0,
                 can_valuation_report: 0,
+                can_sap_revert: 0,
+                can_portal_revert: 0,
             };
             // Ensure every catalog action column exists on the payload (Related / Find PO / etc.)
             (Array.isArray(p.actions) ? p.actions : []).forEach((act) => {

@@ -288,6 +288,64 @@ class PassPoValidationLogService
     }
 
     /**
+     * Latest SAP pass/approve/revert outcome for one PO → Approved | NotApproved | ''.
+     * Used when Z_QuotationZCostCom ApprovedStatus lags behind a successful Pass PO.
+     */
+    public function latestApprovalUiStatus(string $purchaseOrder): string
+    {
+        $po = ltrim(preg_replace('/\D/', '', $purchaseOrder) ?? '', '0');
+        if ($po === '' || !preg_match('/^\d{1,10}$/', $po)) {
+            return '';
+        }
+        try {
+            $this->ensureTable();
+            $pdo = Database::connection();
+            if (!$this->tableExists($pdo)) {
+                return '';
+            }
+            $variants = array_values(array_unique(array_filter([
+                $po,
+                str_pad($po, 10, '0', STR_PAD_LEFT),
+            ])));
+            $ph = implode(',', array_fill(0, count($variants), '?'));
+            $sql = "
+                SELECT TOP 1 action, status, value_flag, success
+                FROM [dbo].[" . self::TABLE . "]
+                WHERE (
+                    REPLACE(REPLACE(LTRIM(RTRIM(ISNULL(purchase_order, N''))), N'#', N''), N' ', N'') IN ({$ph})
+                    OR LTRIM(RTRIM(ISNULL(purchase_order, N''))) IN ({$ph})
+                )
+                  AND LOWER(ISNULL(action, '')) IN ('approve', 'pass', 'revert', 'unapprove')
+                  AND CAST(ISNULL(success, 0) AS INT) = 1
+                ORDER BY id DESC
+            ";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute(array_merge($variants, $variants));
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($row)) {
+                return '';
+            }
+            $act = strtolower(trim((string) ($row['action'] ?? '')));
+            $flag = strtoupper(trim((string) ($row['value_flag'] ?? '')));
+            $st = strtolower(preg_replace('/\s+/', '', (string) ($row['status'] ?? '')) ?? '');
+            if ($act === 'revert' || $act === 'unapprove' || ($flag === '' && str_contains($st, 'revert'))) {
+                return 'NotApproved';
+            }
+            if (
+                in_array($act, ['approve', 'pass'], true)
+                || $flag === 'X'
+                || str_starts_with($st, 'approv')
+            ) {
+                return 'Approved';
+            }
+            return '';
+        } catch (Throwable $e) {
+            error_log('PassPoValidationLogService latestApprovalUiStatus: ' . $e->getMessage());
+            return '';
+        }
+    }
+
+    /**
      * Latest workflow statuses (esign / approve / validate) keyed by purchase_order.
      *
      * @param list<string> $pos

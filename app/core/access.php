@@ -99,7 +99,9 @@ function sap_reports_user_can_access(string $module, ?array $user = null): bool
             || sap_reports_user_can($mod, 'approved', $user)
             || sap_reports_user_can($mod, 'related', $user)
             || sap_reports_user_can($mod, 'search_po', $user)
-            || sap_reports_user_can($mod, 'valuation_report', $user);
+            || sap_reports_user_can($mod, 'valuation_report', $user)
+            || sap_reports_user_can($mod, 'sap_revert', $user)
+            || sap_reports_user_can($mod, 'portal_revert', $user);
     }
     if ($mod === 'zcost') {
         return sap_reports_user_can($mod, 'view', $user)
@@ -197,7 +199,7 @@ function sap_reports_user_can(string $module, string $action = 'view', ?array $u
     if (!in_array($action, [
         'add', 'view', 'edit', 'approve', 'copy', 'assign', 'validate',
         'receive', 'sent', 'workflow', 'approved', 'related', 'find_po', 'search_po',
-        'valuation_report',
+        'valuation_report', 'sap_revert', 'portal_revert',
     ], true)) {
         $action = 'view';
     }
@@ -246,17 +248,22 @@ function sap_reports_user_can(string $module, string $action = 'view', ?array $u
         require_once base_path('app/core/Database.php');
         $pdo = Database::connection();
         $table = sap_reports_access_table();
-        if (in_array($action, ['copy', 'assign', 'validate', 'receive', 'sent', 'workflow', 'approved', 'related', 'find_po', 'search_po', 'valuation_report'], true)) {
+        if (in_array($action, [
+            'copy', 'assign', 'validate', 'receive', 'sent', 'workflow', 'approved', 'related',
+            'find_po', 'search_po', 'valuation_report', 'sap_revert', 'portal_revert',
+        ], true)) {
             $len = $pdo->query("SELECT COL_LENGTH('dbo.{$table}', '{$col}')")->fetchColumn();
             if ((int) $len <= 0) {
                 // Fallback: older table without new columns
-                if (in_array($action, ['copy', 'receive', 'sent', 'workflow', 'approved', 'related', 'find_po', 'search_po', 'valuation_report'], true)) {
+                if (in_array($action, [
+                    'copy', 'receive', 'sent', 'workflow', 'approved', 'related',
+                    'find_po', 'search_po', 'valuation_report', 'sap_revert', 'portal_revert',
+                ], true)) {
                     // Find PO used to be covered by View before can_find_po existed
                     if ($action === 'find_po') {
                         return sap_reports_user_can($module, 'view', $user);
                     }
-                    // Search PO / poValaition Report are dedicated aside rights — never inherit View
-                    // (missing column = denied until Access Studio creates/saves the bit)
+                    // Dedicated rights — never inherit View when column is missing
                     return false;
                 }
                 // assign/validate fall back to can_approve if column missing

@@ -1142,8 +1142,8 @@ class PoCostValidationService
         $quoteMeta = [];
 
         foreach ($rows as $row) {
-            if ($this->normalizeApprovedStatus($row['ApprovedStatus'] ?? $row['APPROVEDSTATUS'] ?? null) === 'APPROVED') {
-                $approvedStatus = 'APPROVED';
+            if ($this->normalizeApprovedStatus($row['ApprovedStatus'] ?? $row['APPROVEDSTATUS'] ?? null) === 'Approved') {
+                $approvedStatus = 'Approved';
             }
             if ($header === []) {
                 $header = [
@@ -1456,15 +1456,22 @@ class PoCostValidationService
     }
 
     /**
-     * Normalize SAP ApprovedStatus / APPROVEDSTATUS → APPROVED | NOTAPPROVED.
+     * Normalize SAP ApprovedStatus / APPROVEDSTATUS → Approved | NotApproved (UI values).
      */
     private function normalizeApprovedStatus(mixed $raw): string
     {
         $v = strtolower(preg_replace('/\s+/', '', (string) $raw) ?? '');
-        if ($v === 'A' || $v === 'x' || $v === 'true' || $v === '1') {
-            return 'APPROVED';
+        if (
+            $v === 'a'
+            || $v === 'x'
+            || $v === 'true'
+            || $v === '1'
+            || $v === 'approved'
+            || str_starts_with($v, 'approv')
+        ) {
+            return 'Approved';
         }
-        return 'NOTAPPROVED';
+        return 'NotApproved';
     }
 
     /**
@@ -1811,7 +1818,14 @@ class PoCostValidationService
         }
 
         $soWisePoQty = $totPoQty;
-        $soWisePoVal = round($poRate * $soWisePoQty * $convr, 2);
+        // SO_WISE_PO_VAL = PO line net in DocumentCurrency (NetPriceAmount).
+        // Do NOT multiply by zCOST CONVR — that FX rate is for budget/actual costing only.
+        // Bug: INR NetPriceAmount 9912 × CONVR 90 → 892080 inflated SO_WISE_PO_VAL.
+        if ($totValue > 0.0001) {
+            $soWisePoVal = round($totValue, 2);
+        } else {
+            $soWisePoVal = round($poRate * $soWisePoQty, 2);
+        }
 
         $budgetCostPerGmt = $expected;
         $budgetInr = (float) ($match['total_inr'] ?? ($match['rate'] ?? $expected));
@@ -1848,21 +1862,32 @@ class PoCostValidationService
         } elseif ($poCurrUpper === 'INR' && $unitConv > 20) {
             $unitConv = 1.0;
         }
-        // TEMPFIN/list PORATE is already INR. Only × Curr Rate when explicitly flagged.
-        $needsFx = !empty($item['porate_needs_fx']);
+        // Portal PORATE is already INR. Never auto × Curr Rate just because PO_CURRENCY is USD.
+        $needsFx = !empty($item['porate_needs_fx']) && empty($item['porate_already_inr']);
         $baseRate = ($needsFx && $poCurrUpper !== 'INR') ? ($poRate * $budgetConvRt) : $poRate;
         $midActual = $baseRate * $unitConv * $consForActual;
-        // Classic calc-columns: GRO÷144 only for button-like groups (not every GRO UOM)
-        $isButtonGro = ($ouom === 'GRO' || $buom === 'GRO') && (
+        // Buttons priced per gross (144). UoM may be GRO or EA with per-GRO PORATE
+        // (PO 4000008635: 90/26/19.5 on EA → ÷144).
+        $isButtonLike = (
             str_contains($matGroupUpper, 'BUTTON')
             || str_contains($matGroupUpper, 'SEMI DULL')
-            || str_contains($matGroupUpper, 'HOOK & EYE')
+            || str_contains($matGroupUpper, 'HOOK')
             || str_contains($matGroupUpper, 'PEARL BTN')
+            || str_contains($matGroupUpper, 'BADGE')
+            || str_contains($matGroupUpper, 'WASHER')
             || str_contains($matDescUpper, 'BTN')
             || str_contains($matDescUpper, 'BUTTON')
             || str_contains($matDescUpper, 'PLASTIC')
+            || str_contains($matDescUpper, 'WASHER')
+            || str_contains($matDescUpper, 'SNAP')
+            || str_contains($matDescUpper, 'SHANK')
+            || str_contains($matDescUpper, 'BADGE')
         );
-        if ($isButtonGro) {
+        $isGro = ($ouom === 'GRO' || $buom === 'GRO');
+        $isEa = ($ouom === 'EA' || $buom === 'EA' || $ouom === 'PCS' || $buom === 'PCS');
+        if ($isButtonLike && $isGro) {
+            $actualCost = round(round($midActual, 0) / 144.0, 4);
+        } elseif ($isButtonLike && $isEa && $midActual > 1.5) {
             $actualCost = round(round($midActual, 0) / 144.0, 4);
         } elseif ($ouom === 'KG' || $buom === 'KG') {
             $actualCost = round($midActual / 500.0, 4);
@@ -1920,9 +1945,11 @@ class PoCostValidationService
             'unit'                => $ouom,
             'porate'              => $poRate,
             'net_price'           => $poRate,
-            // ACTUAL_COST column = PORATE × Curr Rate (INR), with classic unit rules
+            // ACTUAL_COST = PORATE × Cons (classic unit rules). PORATE already INR.
             'po_unit_cost'        => $actualCost !== null ? $actualCost : $poRate,
             'actual_cost'         => $actualCost !== null ? $actualCost : $poRate,
+            'porate_already_inr'  => true,
+            'porate_needs_fx'     => false,
             'totvalue'            => $totValue,
             'net_value'           => $totValue,
             'po_currency'         => $poCurrency,
@@ -2740,7 +2767,25 @@ class PoCostValidationService
             ];
         }
 
-        $fetched = $this->fetchSapPoConditionHub($poDigits);
+        // Prefer Z_QuotationZCostCom?$expand=to_Cond,to_GST (same API format as workbench)
+        $fetched = $this->fetchSapPoChargesFromZCostCom($poDigits);
+        if (($fetched['error'] ?? null) !== null || !$this->chargesHaveAnyAmount($fetched['charges'] ?? [])) {
+            $hub = $this->fetchSapPoConditionHub($poDigits);
+            if (($fetched['error'] ?? null) !== null && ($hub['error'] ?? null) === null) {
+                $fetched = $hub;
+            } elseif (($hub['error'] ?? null) === null) {
+                // Merge hub conditions over empty expand conditions; keep GST from expand when present
+                $fetched['charges'] = $this->mergeChargeBuckets(
+                    is_array($fetched['charges'] ?? null) ? $fetched['charges'] : $empty,
+                    is_array($hub['charges'] ?? null) ? $hub['charges'] : $empty
+                );
+                if (($fetched['currency'] ?? '') === '' && ($hub['currency'] ?? '') !== '') {
+                    $fetched['currency'] = $hub['currency'];
+                }
+                $fetched['error'] = null;
+                $fetched['source'] = trim((string) (($fetched['source'] ?? '') . '+ZI_PO_CONDITION_HUB'), '+');
+            }
+        }
         $charges = is_array($fetched['charges'] ?? null) ? $fetched['charges'] : $empty;
         $currency = (string) ($fetched['currency'] ?? '');
         $error = $fetched['error'] ?? null;
@@ -2764,11 +2809,15 @@ class PoCostValidationService
             'document_items'     => (int) ($doc['items'] ?? 0),
             'sources'            => [
                 'sap' => [
-                    'service' => 'ZI_PO_CONDITION_HUB',
-                    'path'    => (string) ($this->cfg['po_condition_service']
-                        ?? '/sap/opu/odata/sap/Z_QUOTATIONZCOSTCOM_CDS/ZI_PO_CONDITION_HUB'),
+                    'service' => (string) ($fetched['source'] ?? 'Z_QuotationZCostCom'),
+                    'path'    => (string) ($this->cfg['quotation_costing_service']
+                        ?? '/sap/opu/odata/sap/Z_QUOTATIONZCOSTCOM_CDS/Z_QuotationZCostCom')
+                        . '?$expand=to_Cond,to_GST',
                     'total'   => $chargesTotal,
                     'moq'     => (float) ($charges['moq'] ?? 0),
+                    'sgst'    => (float) ($charges['sgst'] ?? 0),
+                    'cgst'    => (float) ($charges['cgst'] ?? 0),
+                    'igst'    => (float) ($charges['igst'] ?? 0),
                     'currency'=> $currency,
                 ],
                 'document_net' => [
@@ -2885,25 +2934,15 @@ class PoCostValidationService
     }
 
     /**
-     * SAP PO PDF uses IGST 18% on Sub Total (excl. freight) when tax conditions are not
-     * exposed on ZI_PO_CONDITION_HUB — fill IGST so Total P.O Value matches the PDF.
+     * Recalc charges total from API/stamped buckets only.
+     * ZI_PO_CONDITION_HUB has no IGST/SGST/CGST — do NOT invent tax when API returns 0.
      *
      * @param array<string,mixed> $charges
      * @return array<string,mixed>
      */
     private function applyDefaultIgstToCharges(array $charges, float $subTotal, string $currency): array
     {
-        $tax = (float) ($charges['igst'] ?? 0)
-            + (float) ($charges['sgst'] ?? 0)
-            + (float) ($charges['cgst'] ?? 0);
-        $curr = strtoupper(trim($currency) ?: 'INR');
-        $rate = (float) ($this->cfg['po_pdf_igst_rate'] ?? 0.18);
-        if ($rate <= 0) {
-            $rate = 0.18;
-        }
-        if ($tax <= 0.0001 && $subTotal > 0 && $curr === 'INR') {
-            $charges['igst'] = round($subTotal * $rate, 2);
-        }
+        unset($subTotal, $currency); // kept for call-site compatibility; tax is API-only now
         $charges['total'] = round(
             (float) ($charges['other'] ?? 0)
             + (float) ($charges['freight'] ?? 0)
@@ -2993,9 +3032,213 @@ class PoCostValidationService
     }
 
     /**
+     * Z_QuotationZCostCom?$expand=to_Cond,to_GST — additional charges + GST for PO Value Breakdown.
+     *
+     * to_Cond  → ZI_PO_CONDITION_HUB (OtherCharges, Freight1/2, MOQ, Screen, Bank)
+     * to_GST   → ZI_PO_GST_TOTAL (sgst, cgst, igst)
+     *
+     * @return array{charges:array<string,mixed>,currency:string,source:string,error:?string}
+     */
+    private function fetchSapPoChargesFromZCostCom(string $poDigits): array
+    {
+        $empty = $this->emptyChargeBuckets();
+        $service = (string) ($this->cfg['quotation_costing_service']
+            ?? '/sap/opu/odata/sap/Z_QUOTATIONZCOSTCOM_CDS/Z_QuotationZCostCom');
+        $variants = array_values(array_unique(array_filter([
+            $poDigits,
+            str_pad(substr($poDigits, -10), 10, '0', STR_PAD_LEFT),
+            ltrim($poDigits, '0'),
+        ])));
+
+        $row = null;
+        $lastError = null;
+        foreach ($variants as $poCandidate) {
+            try {
+                $result = $this->odata->fetchResults($service, [
+                    '$filter' => "PurchaseOrder eq '{$poCandidate}'",
+                    '$expand' => 'to_Cond,to_GST',
+                    '$format' => 'json',
+                    '$top'    => '1',
+                ], 3);
+            } catch (Throwable $e) {
+                $lastError = $e->getMessage();
+                continue;
+            }
+            if (($result['error'] ?? null) !== null) {
+                $lastError = (string) $result['error'];
+                continue;
+            }
+            $rows = is_array($result['rows'] ?? null) ? $result['rows'] : [];
+            if ($rows !== []) {
+                $row = $rows[0];
+                $lastError = null;
+                break;
+            }
+        }
+
+        if (!is_array($row)) {
+            return [
+                'charges'  => $empty,
+                'currency' => '',
+                'source'   => 'Z_QuotationZCostCom',
+                'error'    => $lastError ?? 'No Z_QuotationZCostCom row for charges.',
+            ];
+        }
+
+        $condRow = $this->firstNavRow($row['to_Cond'] ?? $row['to_cond'] ?? null);
+        $gstRow = $this->firstNavRow($row['to_GST'] ?? $row['to_Gst'] ?? $row['to_gst'] ?? null);
+        $charges = $this->chargesFromConditionRow(is_array($condRow) ? $condRow : []);
+        if (is_array($gstRow)) {
+            $charges = $this->applyGstRowToCharges($charges, $gstRow);
+        }
+        $currency = trim((string) (
+            ($condRow['Currency'] ?? $condRow['CURRENCY'] ?? '')
+            ?: ($gstRow['waers'] ?? $gstRow['WAERS'] ?? $gstRow['Currency'] ?? '')
+            ?: ($row['DocumentCurrency'] ?? '')
+        ));
+
+        return [
+            'charges'  => $charges,
+            'currency' => $currency,
+            'source'   => 'Z_QuotationZCostCom+to_Cond+to_GST',
+            'error'    => null,
+        ];
+    }
+
+    /**
+     * @param mixed $nav
+     * @return array<string,mixed>|null
+     */
+    private function firstNavRow($nav): ?array
+    {
+        if (!is_array($nav) || $nav === []) {
+            return null;
+        }
+        if (isset($nav['results']) && is_array($nav['results'])) {
+            $nav = $nav['results'];
+        }
+        // Single entity (to_GST is 1:1)
+        if ($this->isAssocChargeRow($nav)) {
+            return $nav;
+        }
+        foreach ($nav as $item) {
+            if (is_array($item) && $this->isAssocChargeRow($item)) {
+                return $item;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     */
+    private function isAssocChargeRow(array $row): bool
+    {
+        foreach (array_keys($row) as $key) {
+            if (is_string($key) && $key !== '__metadata') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @param array<string,mixed> $charges
+     */
+    private function chargesHaveAnyAmount(array $charges): bool
+    {
+        foreach (['other', 'freight', 'moq', 'screen', 'bank', 'discount', 'sgst', 'cgst', 'igst'] as $k) {
+            if (abs((float) ($charges[$k] ?? 0)) > 0.0001) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Map ZI_PO_CONDITION_HUB / to_Cond fields into charge buckets.
+     *
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function chargesFromConditionRow(array $row): array
+    {
+        $charges = $this->emptyChargeBuckets();
+        $num = static function ($v): float {
+            if ($v === null || $v === '') {
+                return 0.0;
+            }
+            return (float) str_replace([',', ' '], '', (string) $v);
+        };
+
+        $charges['other'] = round($num($row['OtherCharges'] ?? $row['OTHERCHARGES'] ?? $row['CondOthr'] ?? 0), 2);
+        $charges['freight'] = round(
+            $num($row['Freight1'] ?? $row['FREIGHT1'] ?? $row['CondFrb1'] ?? 0)
+            + $num($row['Freight2'] ?? $row['FREIGHT2'] ?? $row['CondFrb2'] ?? 0),
+            2
+        );
+        $charges['moq'] = round($num($row['MOQ'] ?? $row['CondZb00'] ?? $row['CONDZB00'] ?? 0), 2);
+        $charges['screen'] = round($num($row['Screen'] ?? $row['SCREEN'] ?? $row['CondZsci'] ?? 0), 2);
+        $charges['bank'] = round($num($row['Bank'] ?? $row['BANK'] ?? $row['CondZbcr'] ?? 0), 2);
+        $charges['total'] = round(
+            $charges['other'] + $charges['freight'] + $charges['moq']
+            + $charges['screen'] + $charges['bank']
+            + $charges['sgst'] + $charges['cgst'] + $charges['igst']
+            - $charges['discount'],
+            2
+        );
+        $charges['lines'] = [
+            ['key' => 'other', 'label' => 'Other Charges', 'amount' => $charges['other'], 'sap' => 'to_Cond.OtherCharges'],
+            ['key' => 'freight', 'label' => 'Freight', 'amount' => $charges['freight'], 'sap' => 'to_Cond.Freight1 / Freight2'],
+            ['key' => 'moq', 'label' => 'MOQ Charges', 'amount' => $charges['moq'], 'sap' => 'to_Cond.MOQ'],
+            ['key' => 'screen', 'label' => 'Screen Charges', 'amount' => $charges['screen'], 'sap' => 'to_Cond.Screen'],
+            ['key' => 'bank', 'label' => 'Bank Charges', 'amount' => $charges['bank'], 'sap' => 'to_Cond.Bank'],
+        ];
+        return $charges;
+    }
+
+    /**
+     * Map ZI_PO_GST_TOTAL / to_GST fields onto charge buckets.
+     *
+     * @param array<string,mixed> $charges
+     * @param array<string,mixed> $gstRow
+     * @return array<string,mixed>
+     */
+    private function applyGstRowToCharges(array $charges, array $gstRow): array
+    {
+        $num = static function ($v): float {
+            if ($v === null || $v === '') {
+                return 0.0;
+            }
+            return (float) str_replace([',', ' '], '', (string) $v);
+        };
+        $charges['sgst'] = round($num($gstRow['sgst'] ?? $gstRow['SGST'] ?? $gstRow['Sgst'] ?? 0), 2);
+        $charges['cgst'] = round($num($gstRow['cgst'] ?? $gstRow['CGST'] ?? $gstRow['Cgst'] ?? 0), 2);
+        $charges['igst'] = round($num($gstRow['igst'] ?? $gstRow['IGST'] ?? $gstRow['Igst'] ?? 0), 2);
+        $charges['total'] = round(
+            (float) ($charges['other'] ?? 0)
+            + (float) ($charges['freight'] ?? 0)
+            + (float) ($charges['moq'] ?? 0)
+            + (float) ($charges['screen'] ?? 0)
+            + (float) ($charges['bank'] ?? 0)
+            + (float) ($charges['sgst'] ?? 0)
+            + (float) ($charges['cgst'] ?? 0)
+            + (float) ($charges['igst'] ?? 0)
+            - (float) ($charges['discount'] ?? 0),
+            2
+        );
+        $lines = is_array($charges['lines'] ?? null) ? $charges['lines'] : [];
+        $lines[] = ['key' => 'sgst', 'label' => 'SGST', 'amount' => $charges['sgst'], 'sap' => 'to_GST.sgst'];
+        $lines[] = ['key' => 'cgst', 'label' => 'CGST', 'amount' => $charges['cgst'], 'sap' => 'to_GST.cgst'];
+        $lines[] = ['key' => 'igst', 'label' => 'IGST', 'amount' => $charges['igst'], 'sap' => 'to_GST.igst'];
+        $charges['lines'] = $lines;
+        return $charges;
+    }
+
+    /**
      * SAP ZI_PO_CONDITION_HUB — PO header conditions (Other / Freight / MOQ / Screen / Bank).
      *
-     * @return array{charges:array<string,mixed>,currency:string,error:?string}
+     * @return array{charges:array<string,mixed>,currency:string,source?:string,error:?string}
      */
     private function fetchSapPoConditionHub(string $poDigits): array
     {
@@ -3010,13 +3253,14 @@ class PoCostValidationService
                 '$format' => 'json',
             ], 5);
         } catch (Throwable $e) {
-            return ['charges' => $empty, 'currency' => '', 'error' => $e->getMessage()];
+            return ['charges' => $empty, 'currency' => '', 'source' => 'ZI_PO_CONDITION_HUB', 'error' => $e->getMessage()];
         }
 
         if (($result['error'] ?? null) !== null) {
             return [
                 'charges'  => $empty,
                 'currency' => '',
+                'source'   => 'ZI_PO_CONDITION_HUB',
                 'error'    => (string) $result['error'],
             ];
         }
@@ -3026,50 +3270,19 @@ class PoCostValidationService
             return [
                 'charges'  => $empty,
                 'currency' => '',
+                'source'   => 'ZI_PO_CONDITION_HUB',
                 'error'    => null,
             ];
         }
 
         $row = $rows[0];
-        $num = static function ($v): float {
-            if ($v === null || $v === '') {
-                return 0.0;
-            }
-            return (float) str_replace([',', ' '], '', (string) $v);
-        };
-
-        $other = $num($row['OtherCharges'] ?? $row['OTHERCHARGES'] ?? $row['CondOthr'] ?? 0);
-        $freight = $num($row['Freight1'] ?? $row['FREIGHT1'] ?? $row['CondFrb1'] ?? 0)
-            + $num($row['Freight2'] ?? $row['FREIGHT2'] ?? $row['CondFrb2'] ?? 0);
-        $moq = $num($row['MOQ'] ?? $row['CondZb00'] ?? $row['CONDZB00'] ?? 0);
-        $screen = $num($row['Screen'] ?? $row['SCREEN'] ?? $row['CondZsci'] ?? 0);
-        $bank = $num($row['Bank'] ?? $row['BANK'] ?? $row['CondZbcr'] ?? 0);
+        $charges = $this->chargesFromConditionRow(is_array($row) ? $row : []);
         $currency = trim((string) ($row['Currency'] ?? $row['CURRENCY'] ?? ''));
-
-        $charges = $empty;
-        $charges['other'] = round($other, 2);
-        $charges['freight'] = round($freight, 2);
-        $charges['moq'] = round($moq, 2);
-        $charges['screen'] = round($screen, 2);
-        $charges['bank'] = round($bank, 2);
-        $charges['total'] = round(
-            $charges['other'] + $charges['freight'] + $charges['moq']
-            + $charges['screen'] + $charges['bank']
-            + $charges['sgst'] + $charges['cgst'] + $charges['igst']
-            - $charges['discount'],
-            2
-        );
-        $charges['lines'] = [
-            ['key' => 'other', 'label' => 'Other Charges', 'amount' => $charges['other'], 'sap' => 'OtherCharges'],
-            ['key' => 'freight', 'label' => 'Freight', 'amount' => $charges['freight'], 'sap' => 'Freight1 / Freight2'],
-            ['key' => 'moq', 'label' => 'MOQ Charges', 'amount' => $charges['moq'], 'sap' => 'MOQ'],
-            ['key' => 'screen', 'label' => 'Screen Charges', 'amount' => $charges['screen'], 'sap' => 'Screen'],
-            ['key' => 'bank', 'label' => 'Bank Charges', 'amount' => $charges['bank'], 'sap' => 'Bank'],
-        ];
 
         return [
             'charges'  => $charges,
             'currency' => $currency,
+            'source'   => 'ZI_PO_CONDITION_HUB',
             'error'    => null,
         ];
     }

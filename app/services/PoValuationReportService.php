@@ -2,8 +2,8 @@
 /*
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 20/11/2026
- * DESCRIPTION : PO Valuation Report — KPIs (Pending / Review / Released / Approved / Total)
- *               + PO-wise activity log (release / validation / pass / sent)
+ * DESCRIPTION : PO Validation Report — KPIs match Draft PO (Draft/Review/Released)
+ *               + Approved PO counts; one row per PO with activity progress.
  */
 require_once base_path('app/core/Database.php');
 require_once base_path('app/services/PoReleaseLogService.php');
@@ -21,19 +21,15 @@ class PoValuationReportService
         $po = preg_replace('/\D/', '', (string) ($filters['po'] ?? '')) ?? '';
         $po = ltrim($po, '0');
         $user = trim((string) ($filters['user'] ?? ''));
-        $limit = max(50, min(2000, (int) ($filters['limit'] ?? 500)));
+        $limit = max(50, min(5000, (int) ($filters['limit'] ?? 2000)));
 
-        $empty = [
-            'success'  => true,
-            'summary'  => [
-                'pending'  => 0,
-                'review'   => 0,
-                'released' => 0,
-                'approved' => 0,
-                'total'    => 0,
-            ],
-            'records'  => [],
-            'error'    => null,
+        $emptySummary = [
+            'draft'    => 0,
+            'review'   => 0,
+            'released' => 0,
+            'approved' => 0,
+            'pending'  => 0, // alias of draft (legacy UI keys)
+            'total'    => 0,
         ];
 
         try {
@@ -41,14 +37,63 @@ class PoValuationReportService
         } catch (Throwable $e) {
             return [
                 'success' => false,
-                'summary' => $empty['summary'],
+                'summary' => $emptySummary,
                 'records' => [],
                 'error'   => 'Database unavailable: ' . $e->getMessage(),
             ];
         }
 
-        $summary = $this->buildSummary($pdo, $from, $to, $po, $user);
-        $records = $this->buildActivity($pdo, $from, $to, $po, $user, $limit);
+        $poRows = $this->buildPoRows($pdo, $from, $to, $po, $user);
+        $activityByPo = $this->activityByPo($pdo, $from, $to, $po, $user, $limit);
+
+        $records = [];
+        $summary = $emptySummary;
+        foreach ($poRows as $row) {
+            $poKey = (string) ($row['po_key'] ?? '');
+            if ($poKey === '') {
+                continue;
+            }
+            $events = $activityByPo[$poKey] ?? [];
+            if ($events === []) {
+                // Ensure progress trail has at least the current status event
+                $events[] = [
+                    'purchase_order' => $row['purchase_order'],
+                    'event_type'     => $row['event_type'],
+                    'event_label'    => $row['event_label'],
+                    'status'         => $row['status'],
+                    'user'           => $row['user'],
+                    'remarks'        => $row['remarks'],
+                    'created_at'     => $row['created_at'],
+                ];
+            }
+            $bucket = (string) ($row['bucket'] ?? 'draft');
+            if (isset($summary[$bucket])) {
+                $summary[$bucket]++;
+            } else {
+                $summary['draft']++;
+                $bucket = 'draft';
+            }
+            $summary['total']++;
+            if ($bucket === 'draft') {
+                $summary['pending']++;
+            }
+
+            $records[] = [
+                'purchase_order' => $row['purchase_order'],
+                'event_type'     => $row['event_type'],
+                'event_label'    => $row['event_label'],
+                'status'         => $row['status'],
+                'bucket'         => $bucket,
+                'user'           => $row['user'],
+                'remarks'        => $row['remarks'],
+                'created_at'     => $row['created_at'],
+                'events'         => $events,
+            ];
+        }
+
+        usort($records, static function ($a, $b) {
+            return strcmp((string) ($b['created_at'] ?? ''), (string) ($a['created_at'] ?? ''));
+        });
 
         return [
             'success' => true,
@@ -59,125 +104,178 @@ class PoValuationReportService
     }
 
     /**
-     * @return array{pending:int,review:int,released:int,approved:int,total:int}
+     * One row per PO from Draft PO (Related/NotApproved) + Approved PO.
+     *
+     * @return list<array<string,mixed>>
      */
-    private function buildSummary(PDO $pdo, string $from, string $to, string $po, string $user): array
+    private function buildPoRows(PDO $pdo, string $from, string $to, string $po, string $user): array
     {
-        $pending = 0;
-        $review = 0;
-        $released = 0;
-        $approved = 0;
-        $allPos = [];
+        $byPo = [];
 
-        // Latest status per PO from po_release_log (Draft→Pending, Review, Released)
-        if ($this->tableExists($pdo, 'po_release_log')) {
-            $where = ['1=1'];
-            $params = [];
-            if ($from !== '') {
-                $where[] = 'r.created_on >= ?';
-                $params[] = $from . ' 00:00:00';
-            }
-            if ($to !== '') {
-                $where[] = 'r.created_on <= ?';
-                $params[] = $to . ' 23:59:59';
-            }
-            if ($po !== '') {
-                $where[] = "(LTRIM(REPLACE(REPLACE(r.po_number, ' ', ''), ',', '')) LIKE ? OR LTRIM(REPLACE(REPLACE(r.po_number, ' ', ''), ',', '')) LIKE ?)";
-                $params[] = '%' . $po . '%';
-                $params[] = '%' . str_pad($po, 10, '0', STR_PAD_LEFT) . '%';
-            }
-            if ($user !== '') {
-                $where[] = 'LOWER(ISNULL(r.created_by, \'\')) LIKE ?';
-                $params[] = '%' . strtolower($user) . '%';
-            }
-            $sql = "
-                SELECT r.po_number, r.status
-                FROM [dbo].[po_release_log] r
-                INNER JOIN (
-                    SELECT po_number, MAX(id) AS max_id
-                    FROM [dbo].[po_release_log]
-                    GROUP BY po_number
-                ) t ON t.max_id = r.id
-                WHERE " . implode(' AND ', $where) . "
-            ";
+        // Draft / Review / Released — same source as Draft PO page
+        if (is_file(base_path('app/services/PoCostValidationService.php'))) {
+            require_once base_path('app/services/PoCostValidationService.php');
             try {
-                $stmt = $pdo->prepare($sql);
-                $stmt->execute($params);
-                while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                $payload = (new PoCostValidationService())->listRelatedPurchaseOrders(
+                    $po !== '' ? ['po' => $po] : []
+                );
+                $related = is_array($payload['records'] ?? null) ? $payload['records'] : [];
+                $poNumbers = [];
+                foreach ($related as $rec) {
+                    if (is_array($rec)) {
+                        $poNumbers[] = (string) ($rec['purchase_order'] ?? '');
+                    }
+                }
+                $latest = [];
+                if ($poNumbers !== [] && is_file(base_path('app/services/PoReleaseLogService.php'))) {
+                    $latest = (new PoReleaseLogService())->latestStatusesForPos($poNumbers);
+                }
+                foreach ($related as $rec) {
+                    if (!is_array($rec)) {
+                        continue;
+                    }
+                    $poDisp = ltrim(preg_replace('/\D/', '', (string) ($rec['purchase_order'] ?? '')) ?? '', '0');
+                    if ($poDisp === '') {
+                        continue;
+                    }
+                    if ($po !== '' && !str_contains($poDisp, $po) && $poDisp !== $po) {
+                        continue;
+                    }
+                    $info = $latest[$poDisp] ?? null;
+                    $rawStatus = is_array($info) ? (string) ($info['status'] ?? '') : '';
+                    $status = PoReleaseLogService::normalizeStatus($rawStatus);
+                    if ($status === '') {
+                        $status = PoReleaseLogService::STATUS_DRAFT;
+                    }
+                    $owner = is_array($info) ? trim((string) ($info['created_by'] ?? '')) : '';
+                    $when = is_array($info) ? substr(str_replace('T', ' ', (string) ($info['created_on'] ?? '')), 0, 19) : '';
+                    $remarks = is_array($info) ? trim((string) ($info['remarks'] ?? '')) : '';
+                    if ($user !== '' && $owner !== '' && stripos($owner, $user) === false) {
+                        continue;
+                    }
+                    if (!$this->inDateRange($when, $from, $to)) {
+                        continue;
+                    }
+                    $bucket = $this->bucketForStatus($status);
+                    $byPo[$poDisp] = [
+                        'po_key'         => $poDisp,
+                        'purchase_order' => $poDisp,
+                        'status'         => $status,
+                        'bucket'         => $bucket,
+                        'event_type'     => 'release',
+                        'event_label'    => 'Release Status',
+                        'user'           => $owner !== '' ? $owner : '—',
+                        'remarks'        => $remarks,
+                        'created_at'     => $when !== '' ? $when : null,
+                    ];
+                }
+            } catch (Throwable $e) {
+                error_log('PoValuationReportService related POs: ' . $e->getMessage());
+            }
+        }
+
+        // Approved — same source as Approved PO page (action = approve)
+        if (is_file(base_path('app/services/PassPoValidationLogService.php'))) {
+            require_once base_path('app/services/PassPoValidationLogService.php');
+            try {
+                $pass = (new PassPoValidationLogService())->listPassed([
+                    'approved_only' => '1',
+                    'success'       => '1',
+                    'po'            => $po,
+                    'username'      => $user,
+                    'from'          => $from,
+                    'to'            => $to,
+                    'limit'         => 500,
+                ]);
+                $rows = is_array($pass['rows'] ?? null) ? $pass['rows'] : [];
+                foreach ($rows as $row) {
                     if (!is_array($row)) {
                         continue;
                     }
-                    $poKey = ltrim(preg_replace('/\D/', '', (string) ($row['po_number'] ?? '')) ?? '', '0');
-                    if ($poKey === '') {
+                    $poDisp = ltrim(preg_replace('/\D/', '', (string) ($row['purchase_order'] ?? '')) ?? '', '0');
+                    if ($poDisp === '') {
                         continue;
                     }
-                    $allPos[$poKey] = true;
-                    $st = PoReleaseLogService::normalizeStatus((string) ($row['status'] ?? ''));
-                    if ($st === PoReleaseLogService::STATUS_REVIEW) {
-                        $review++;
-                    } elseif ($st === PoReleaseLogService::STATUS_RELEASED) {
-                        $released++;
-                    } else {
-                        // Draft or unknown → Pending
-                        $pending++;
-                    }
+                    $owner = trim((string) ($row['username'] ?? $row['user'] ?? ''));
+                    $when = substr(str_replace('T', ' ', (string) ($row['created_at'] ?? '')), 0, 19);
+                    // Approved overrides Draft/Review/Released for the same PO
+                    $byPo[$poDisp] = [
+                        'po_key'         => $poDisp,
+                        'purchase_order' => $poDisp,
+                        'status'         => 'Approved',
+                        'bucket'         => 'approved',
+                        'event_type'     => 'pass',
+                        'event_label'    => 'Pass / eSign',
+                        'user'           => $owner !== '' ? $owner : '—',
+                        'remarks'        => trim((string) ($row['remarks'] ?? 'Approved')),
+                        'created_at'     => $when !== '' ? $when : null,
+                    ];
                 }
             } catch (Throwable $e) {
-                error_log('PoValuationReportService release summary: ' . $e->getMessage());
+                error_log('PoValuationReportService approved POs: ' . $e->getMessage());
             }
         }
 
-        // Approved = distinct successful Pass_po_validtion rows
-        if ($this->tableExists($pdo, 'Pass_po_validtion')) {
-            $where = ['(l.success = 1 OR UPPER(ISNULL(l.status, \'\')) LIKE \'%APPROV%\' OR UPPER(ISNULL(l.action, \'\')) LIKE \'%APPROV%\')'];
-            $params = [];
-            if ($from !== '') {
-                $where[] = 'l.created_at >= ?';
-                $params[] = $from . ' 00:00:00';
-            }
-            if ($to !== '') {
-                $where[] = 'l.created_at <= ?';
-                $params[] = $to . ' 23:59:59';
-            }
-            if ($po !== '') {
-                $where[] = 'LTRIM(REPLACE(REPLACE(CAST(l.purchase_order AS VARCHAR(50)), \' \', \'\'), \',\', \'\')) LIKE ?';
-                $params[] = '%' . $po . '%';
-            }
-            if ($user !== '') {
-                $where[] = '(LOWER(ISNULL(l.username, \'\')) LIKE ? OR LOWER(ISNULL(l.from_username, \'\')) LIKE ? OR LOWER(ISNULL(l.to_username, \'\')) LIKE ?)';
-                $like = '%' . strtolower($user) . '%';
-                $params[] = $like;
-                $params[] = $like;
-                $params[] = $like;
-            }
-            $sql = "
-                SELECT DISTINCT LTRIM(REPLACE(REPLACE(CAST(l.purchase_order AS VARCHAR(50)), ' ', ''), ',', '')) AS po_number
-                FROM [dbo].[Pass_po_validtion] l
-                WHERE " . implode(' AND ', $where) . "
-            ";
-            try {
-                $stmt = $pdo->prepare($sql);
-                $stmt->execute($params);
-                while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-                    $poKey = ltrim(preg_replace('/\D/', '', (string) ($row['po_number'] ?? '')) ?? '', '0');
-                    if ($poKey === '') {
-                        continue;
-                    }
-                    $allPos[$poKey] = true;
-                    $approved++;
-                }
-            } catch (Throwable $e) {
-                error_log('PoValuationReportService approved summary: ' . $e->getMessage());
-            }
-        }
+        return array_values($byPo);
+    }
 
-        return [
-            'pending'  => $pending,
-            'review'   => $review,
-            'released' => $released,
-            'approved' => $approved,
-            'total'    => count($allPos),
-        ];
+    private function bucketForStatus(string $status): string
+    {
+        if ($status === PoReleaseLogService::STATUS_REVIEW) {
+            return 'review';
+        }
+        if ($status === PoReleaseLogService::STATUS_RELEASED) {
+            return 'released';
+        }
+        if (strcasecmp($status, 'Approved') === 0) {
+            return 'approved';
+        }
+        return 'draft';
+    }
+
+    private function inDateRange(?string $when, string $from, string $to): bool
+    {
+        if ($from === '' && $to === '') {
+            return true;
+        }
+        // POs with no status date still count when filtering (same as Draft default)
+        if ($when === null || $when === '') {
+            return $from === '' && $to === '';
+        }
+        $day = substr($when, 0, 10);
+        if ($from !== '' && $day < $from) {
+            return false;
+        }
+        if ($to !== '' && $day > $to) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * @return array<string, list<array<string,mixed>>>
+     */
+    private function activityByPo(PDO $pdo, string $from, string $to, string $po, string $user, int $limit): array
+    {
+        $flat = $this->buildActivity($pdo, $from, $to, $po, $user, $limit);
+        $map = [];
+        foreach ($flat as $row) {
+            $poKey = ltrim(preg_replace('/\D/', '', (string) ($row['purchase_order'] ?? '')) ?? '', '0');
+            if ($poKey === '') {
+                continue;
+            }
+            if (!isset($map[$poKey])) {
+                $map[$poKey] = [];
+            }
+            $map[$poKey][] = $row;
+        }
+        foreach ($map as $k => $list) {
+            usort($list, static function ($a, $b) {
+                return strcmp((string) ($a['created_at'] ?? ''), (string) ($b['created_at'] ?? ''));
+            });
+            $map[$k] = $list;
+        }
+        return $map;
     }
 
     /**
@@ -323,9 +421,7 @@ class PoValuationReportService
         }
 
         $out = [];
-        $sno = 0;
         foreach ($raw as $row) {
-            $sno++;
             $poDigits = ltrim(preg_replace('/\D/', '', (string) ($row['purchase_order'] ?? '')) ?? '', '0');
             $when = substr(str_replace('T', ' ', (string) ($row['event_at'] ?? '')), 0, 19);
             $type = strtolower(trim((string) ($row['event_type'] ?? '')));
@@ -337,7 +433,6 @@ class PoValuationReportService
                 default => ucfirst($type ?: 'Activity'),
             };
             $out[] = [
-                'sno'            => $sno,
                 'purchase_order' => $poDigits,
                 'event_type'     => $type,
                 'event_label'    => $typeLabel,
@@ -354,10 +449,6 @@ class PoValuationReportService
     private function tableExists(PDO $pdo, string $table): bool
     {
         try {
-            $stmt = $pdo->prepare(
-                "SELECT CASE WHEN OBJECT_ID(N'[dbo].[' + ? + N']', N'U') IS NULL THEN 0 ELSE 1 END"
-            );
-            // OBJECT_ID with concat param can fail — use literal-safe whitelist
             $safe = preg_replace('/[^A-Za-z0-9_]/', '', $table) ?? '';
             if ($safe === '') {
                 return false;

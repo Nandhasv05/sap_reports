@@ -129,8 +129,13 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
     $sep = (strpos($costingHomeUrl, '?') !== false) ? '&' : '?';
     return $costingHomeUrl . $sep . 'panel=' . rawurlencode($panel);
 };
+$startPanelHintEarly = strtolower(trim((string) ($_GET['panel'] ?? '')));
+$releasedLookupFirst = !empty($canAsideDashboard)
+    && ($startPanelHintEarly === '' || $startPanelHintEarly === 'dashboard');
+$poCostingAppClass = 'rpt-app is-po-costing is-workflow is-costing-bulk is-released-po is-poc-v2'
+    . ($releasedLookupFirst ? ' is-released-lookup' : '');
 ?>
-<div class="rpt-app is-po-costing is-workflow is-costing-bulk is-released-po is-poc-v2" id="poCostingPage"
+<div class="<?= e($poCostingAppClass) ?>" id="poCostingPage"
      data-po-base="<?= e($poBaseUrl) ?>"
      data-pass-log="<?= e($passLogUrl) ?>"
      data-pass-log-page="<?= e($passLogPageUrl) ?>"
@@ -165,12 +170,13 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
      data-aside-valuation="<?= !empty($canAsideValuation) ? '1' : '0' ?>">
 
     <?php
-        // Soft panels (Related / Search PO): skip full-page boot spinner — nothing heavy to load
-        $startPanelHint = strtolower(trim((string) ($_GET['panel'] ?? '')));
+        // Soft panels (Related / Search PO / Released lookup): skip full-page boot spinner
+        $startPanelHint = $startPanelHintEarly;
         $skipBootLoader = (
             ($startPanelHint === 'related' && !empty($canAsideRelated))
             || ($startPanelHint === 'search' && !empty($canAsideSearchPo))
             || ($startPanelHint === 'valuation' && !empty($canAsideValuation))
+            || !empty($releasedLookupFirst)
         );
         $loaderVisible = !$skipBootLoader;
         $loaderAutoHide = true;
@@ -205,7 +211,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
             $bulkBrandCount = 0;
             $bulkBrandLabel = 'All Brands';
         ?>
-        <form class="rpt-search prod-filters po-filters pcb-header-filters poc-released-header-filters" id="pcbFilterForm" autocomplete="off" novalidate aria-label="Released Po filters">
+        <form class="rpt-search prod-filters po-filters pcb-header-filters poc-released-header-filters" id="pcbFilterForm" autocomplete="off" novalidate aria-label="Released Po filters"<?= !empty($releasedLookupFirst) ? ' hidden' : '' ?>>
             <input type="hidden" name="view" value="costing">
             <div class="pcb-mat-seg" role="radiogroup" aria-label="Material type">
                 <label class="pcb-mat-opt">
@@ -286,6 +292,11 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
                 <span class="material-icons-round">search</span>
                 <span>Search</span>
             </button>
+            <button type="button" class="pcb-back-lookup" id="pcbOpenLookup"
+                    title="Back to filters" aria-label="Back to Released Po filters">
+                <span class="material-icons-round" aria-hidden="true">arrow_back</span>
+                <span>Back</span>
+            </button>
         </form>
         <?php endif; ?>
         <?php if (!empty($canAsideSearchPo)): ?>
@@ -309,7 +320,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
         <?php if (!empty($canAsideValuation)):
             $pvrTodayMax = (new DateTimeImmutable('now', new DateTimeZone('Asia/Kolkata')))->format('Y-m-d');
         ?>
-        <div class="rpt-search poc-valuation-header-filters" id="pocValuationHeaderFilters" hidden aria-label="poValaition Report filters">
+        <div class="rpt-search poc-valuation-header-filters" id="pocValuationHeaderFilters" hidden aria-label="PO Validation Report filters">
             <label class="rpt-field po-direct-search pvr-header-po" title="Filter by purchase order number">
                 <span class="material-icons-round">search</span>
                 <input type="search" id="pvrFilterPo" name="po" value=""
@@ -466,9 +477,9 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
                 <?php endif; ?>
                 <?php if (!empty($canAsideValuation)): ?>
                 <a href="<?= e($panelHref('valuation')) ?>" class="poc-sidenav-item" data-poc-panel="valuation" data-access="valuation_report" role="tab" aria-selected="false"
-                   title="poValaition Report — shown because Access Studio granted poValaition Report. Pending / Review / Released / Approved KPIs and Recent Activity.">
-                    <span class="poc-sidenav-ico" aria-hidden="true"><span class="material-icons-round">assessment</span></span>
-                    <span class="poc-sidenav-copy">poValaition Report</span>
+                   title="PO Validation Report — Pending / Review / Released / Approved KPIs and validation activity.">
+                    <span class="poc-sidenav-ico" aria-hidden="true"><span class="material-icons-round">fact_check</span></span>
+                    <span class="poc-sidenav-copy">PO Validation Report</span>
                 </a>
                 <?php endif; ?>
             </nav>
@@ -477,6 +488,94 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
         <main class="poc-landing" id="poCostingLanding">
             <!-- 1. Released Po — same UI as PO Validation bulk list -->
             <div class="poc-panel is-active" id="pocPanelDashboard" data-panel="dashboard">
+                <?php if (!empty($canAsideDashboard)):
+                    $releasedLookupBrands = is_array($brands ?? null) ? $brands : [];
+                ?>
+                <!-- First-screen filter modal (Fabric Utilization style) -->
+                <main class="lookup poc-released-lookup" id="pocReleasedLookup" aria-label="Released Po filters"
+                      <?= empty($releasedLookupFirst) ? 'hidden' : '' ?>>
+                    <div class="lookup-orbs" aria-hidden="true"><span></span><span></span><span></span></div>
+                    <div class="lookup-card poc-lk-card">
+                        <p class="lookup-kicker">Released Po</p>
+                        <h1>Find purchase orders</h1>
+                        <p class="lookup-lede">Choose material type and brand, or enter a PO number from SAP.</p>
+
+                        <form id="pocReleasedLookupForm" class="lookup-filters poc-lk-form" autocomplete="off" novalidate>
+                            <div class="lookup-switch poc-released-mat-switch" role="radiogroup" aria-label="Material type">
+                                <button type="button" class="poc-lk-mat on" data-mat="all" aria-pressed="true">All</button>
+                                <button type="button" class="poc-lk-mat" data-mat="fabric" aria-pressed="false">Fabric</button>
+                                <button type="button" class="poc-lk-mat" data-mat="trims" aria-pressed="false">Trims</button>
+                            </div>
+                            <input type="hidden" id="pocLkMat" name="mat_cat" value="all">
+
+                            <div class="poc-lk-fields">
+                                <div class="poc-lk-field-block">
+                                    <span class="poc-lk-field-label">Brand</span>
+                                    <div class="poc-lk-brand" id="pocLkBrandDropdown" title="Filter by brand name">
+                                        <input type="hidden" name="brand" id="pocLkBrand" value="">
+                                        <button type="button" class="lookup-so poc-lk-field poc-lk-brand-trigger" id="pocLkBrandTrigger"
+                                                aria-haspopup="listbox" aria-expanded="false" aria-label="Brand name">
+                                            <span class="material-icons-round" aria-hidden="true">sell</span>
+                                            <span class="poc-lk-field-text" id="pocLkBrandLabel">All Brands</span>
+                                            <span class="material-icons-round poc-lk-chevron" aria-hidden="true">expand_more</span>
+                                        </button>
+                                        <div class="poc-lk-dd" id="pocLkBrandMenu" role="listbox" aria-label="Brand" hidden>
+                                            <div class="poc-lk-dd-search">
+                                                <span class="material-icons-round" aria-hidden="true">search</span>
+                                                <input type="text" id="pocLkBrandSearch" placeholder="Type to filter…" autocomplete="off">
+                                                <button type="button" id="pocLkBrandSearchClear" class="poc-lk-dd-search-clear" hidden title="Clear search">
+                                                    <span class="material-icons-round">close</span>
+                                                </button>
+                                            </div>
+                                            <div class="poc-lk-dd-list" id="pocLkBrandList">
+                                                <button type="button" class="poc-lk-dd-option is-checked" data-code="" data-name="all brands" role="option" aria-selected="true">
+                                                    <span class="poc-lk-dd-name">All Brands</span>
+                                                    <span class="material-icons-round poc-lk-dd-tick" aria-hidden="true">check</span>
+                                                </button>
+                                                <?php foreach ($releasedLookupBrands as $b): ?>
+                                                    <?php
+                                                    $bCode = (string) ($b['code'] ?? '');
+                                                    $bName = (string) ($b['name'] ?? $bCode);
+                                                    if ($bCode === '') {
+                                                        continue;
+                                                    }
+                                                    ?>
+                                                    <button type="button" class="poc-lk-dd-option" data-code="<?= e($bCode) ?>" data-name="<?= e(strtolower($bName)) ?>" role="option" aria-selected="false">
+                                                        <span class="poc-lk-dd-name"><?= e($bName) ?></span>
+                                                        <span class="poc-lk-dd-code"><?= e($bCode) ?></span>
+                                                    </button>
+                                                <?php endforeach; ?>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="poc-lk-field-block">
+                                    <span class="poc-lk-field-label">Purchase order <em>optional</em></span>
+                                    <label class="lookup-so poc-lk-field" title="Purchase order number">
+                                        <span class="material-icons-round" aria-hidden="true">receipt_long</span>
+                                        <input type="search" id="pocLkPo" name="po" value=""
+                                               placeholder="e.g. 4000008635"
+                                               inputmode="numeric" maxlength="10" autocomplete="off"
+                                               aria-label="Purchase order number">
+                                    </label>
+                                </div>
+                            </div>
+
+                            <p class="date-error" role="alert" id="pocLkFormError" hidden></p>
+
+                            <button class="rpt-btn lookup-submit poc-lk-submit" type="submit" id="pocLkShowBtn">
+                                <span class="material-icons-round" aria-hidden="true">sync</span>
+                                Show report
+                            </button>
+                            <button type="button" class="poc-lk-back" id="pocLkBackBtn" hidden>
+                                Back to list
+                            </button>
+                        </form>
+                    </div>
+                </main>
+                <?php endif; ?>
+
                 <div class="poc-panel-frame is-native is-rpt-style is-released-po-frame" id="pocReleasedFrame">
                     <div class="rpt-alert" id="poAlert" hidden></div>
                     <?php if (!empty($canAsideDashboard)): ?>
@@ -643,7 +742,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
         <div class="pvr-modal-card" role="dialog" aria-modal="true" aria-labelledby="pvrModalTitle">
             <div class="pvr-modal-head">
                 <div>
-                    <p class="pvr-modal-kicker">Recent Activity</p>
+                    <p class="pvr-modal-kicker">Validation timeline</p>
                     <h3 id="pvrModalTitle">PO —</h3>
                 </div>
                 <button type="button" class="pvr-modal-close" id="pvrModalClose" title="Close" aria-label="Close">
@@ -1855,7 +1954,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
             page.classList.toggle('is-lookup', false);
             page.classList.toggle('is-workflow', true);
             page.classList.add('is-related-po', 'is-related-results');
-            page.classList.remove('is-related-lookup', 'is-costing-bulk', 'is-released-po', 'is-search-po', 'is-valuation-report', 'is-approved-po');
+            page.classList.remove('is-related-lookup', 'is-costing-bulk', 'is-released-po', 'is-released-lookup', 'is-search-po', 'is-valuation-report', 'is-approved-po');
             if (findHeaderFilters) findHeaderFilters.hidden = true;
             var relatedTitle = document.getElementById('pocPageTitle');
             if (relatedTitle) relatedTitle.innerHTML = '<strong>Draft PO</strong>';
@@ -1867,7 +1966,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
             if (window.pocRelatedPo && typeof window.pocRelatedPo.close === 'function') {
                 window.pocRelatedPo.close();
             }
-            page.classList.remove('is-related-po', 'is-related-results', 'is-related-lookup', 'is-costing-bulk', 'is-released-po', 'is-workflow', 'is-valuation-report', 'is-approved-po');
+            page.classList.remove('is-related-po', 'is-related-results', 'is-related-lookup', 'is-costing-bulk', 'is-released-po', 'is-released-lookup', 'is-workflow', 'is-valuation-report', 'is-approved-po');
             page.classList.add('is-lookup', 'is-search-po');
             if (findHeaderFilters) findHeaderFilters.hidden = true;
             try { if (window.rptLoader) window.rptLoader.hide(true); } catch (_) {}
@@ -1878,7 +1977,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
             if (window.pocRelatedPo && typeof window.pocRelatedPo.close === 'function') {
                 window.pocRelatedPo.close();
             }
-            page.classList.remove('is-related-po', 'is-related-results', 'is-related-lookup', 'is-costing-bulk', 'is-released-po', 'is-search-po', 'is-lookup', 'is-approved-po');
+            page.classList.remove('is-related-po', 'is-related-results', 'is-related-lookup', 'is-costing-bulk', 'is-released-po', 'is-released-lookup', 'is-search-po', 'is-lookup', 'is-approved-po');
             page.classList.add('is-workflow', 'is-valuation-report');
             if (findHeaderFilters) findHeaderFilters.hidden = true;
             try { if (window.rptLoader) window.rptLoader.hide(true); } catch (_) {}
@@ -1891,20 +1990,29 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
             }
             page.classList.remove('is-related-po', 'is-related-results', 'is-related-lookup', 'is-lookup', 'is-search-po', 'is-valuation-report', 'is-approved-po');
             page.classList.add('is-workflow', 'is-costing-bulk', 'is-released-po');
-            if (findHeaderFilters) findHeaderFilters.hidden = false;
             var titleEl = document.getElementById('pocPageTitle');
             if (titleEl) titleEl.innerHTML = '<strong>Released Po</strong>';
-            // Load Released Po list now (deferred when user landed on Search PO / other panels)
+            // Only fetch list after filter modal was applied (or reopen keeps prior load)
             try {
-                if (window.pcbBulkList && typeof window.pcbBulkList.ensureLoaded === 'function') {
-                    window.pcbBulkList.ensureLoaded();
+                if (window.pcbBulkList) {
+                    if (typeof window.pcbBulkList.isLookupPending === 'function' && window.pcbBulkList.isLookupPending()) {
+                        if (findHeaderFilters) findHeaderFilters.hidden = true;
+                        if (typeof window.pcbBulkList.showLookup === 'function') window.pcbBulkList.showLookup();
+                    } else {
+                        if (findHeaderFilters) findHeaderFilters.hidden = false;
+                        if (typeof window.pcbBulkList.ensureLoaded === 'function') {
+                            window.pcbBulkList.ensureLoaded();
+                        }
+                    }
+                } else if (findHeaderFilters) {
+                    findHeaderFilters.hidden = false;
                 }
             } catch (_) {}
         } else if (key === 'approved') {
             if (window.pocRelatedPo && typeof window.pocRelatedPo.close === 'function') {
                 window.pocRelatedPo.close();
             }
-            page.classList.remove('is-related-po', 'is-related-results', 'is-related-lookup', 'is-lookup', 'is-costing-bulk', 'is-released-po', 'is-search-po', 'is-valuation-report');
+            page.classList.remove('is-related-po', 'is-related-results', 'is-related-lookup', 'is-lookup', 'is-costing-bulk', 'is-released-po', 'is-released-lookup', 'is-search-po', 'is-valuation-report');
             page.classList.add('is-workflow', 'is-approved-po');
             if (findHeaderFilters) findHeaderFilters.hidden = true;
             var approvedTitle = document.getElementById('pocPageTitle');
@@ -1913,7 +2021,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
             if (window.pocRelatedPo && typeof window.pocRelatedPo.close === 'function') {
                 window.pocRelatedPo.close();
             }
-            page.classList.remove('is-related-po', 'is-related-results', 'is-related-lookup', 'is-lookup', 'is-costing-bulk', 'is-released-po', 'is-search-po', 'is-valuation-report', 'is-approved-po');
+            page.classList.remove('is-related-po', 'is-related-results', 'is-related-lookup', 'is-lookup', 'is-costing-bulk', 'is-released-po', 'is-released-lookup', 'is-search-po', 'is-valuation-report', 'is-approved-po');
             page.classList.toggle('is-workflow', true);
             if (findHeaderFilters) findHeaderFilters.hidden = true;
             var otherTitle = document.getElementById('pocPageTitle');
@@ -2166,6 +2274,7 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
     'manualMapUrl'       => url('purchase-order/manual-map'),
     'pdfUrl'             => url('purchase-order/pdf'),
     'passPoUrl'          => url('purchase-order/pass'),
+    'portalRevertUrl'    => url('purchase-order/portal-revert'),
     'esignSaveUrl'       => url('purchase-order/esign-save'),
     'esignSignatureUrl'  => url('purchase-order/esign-signature'),
     'releaseStatusUrl'   => url('po-costing/related-po/status'),
@@ -2189,6 +2298,8 @@ $panelHref = static function (string $panel) use ($costingHomeUrl): string {
     'currentUser'        => $pcbCurrentUser,
     'currentUserEmail'   => $pcbCurrentUserEmail,
     'canPassPo'          => !empty($canPassPo),
+    'canSapRevert'       => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'sap_revert') : false,
+    'canPortalRevert'    => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'portal_revert') : false,
     'canAssign'          => !empty($canAssign),
     'canValidate'        => !empty($canValidate),
     'canEsign'           => !empty($canEsign),

@@ -982,7 +982,7 @@ class PoPassApprovalService
 
     /**
      * Post POApprovalSet only (no PDF fetch / save).
-     * Value "X" = approve; Value " " = revert.
+     * Value "X" = approve; Value "" = revert.
      * SAP MessageType S = approved, E = unapproved — Message is returned for UI.
      *
      * @return array{success:bool,request_id:string,po:string,value:string,error:?string,approval:?array,payload?:array,message?:string,message_type?:string}
@@ -1013,7 +1013,8 @@ class PoPassApprovalService
             $requestId = (string) (time() % 1000000000);
         }
 
-        $valueFlag = strtoupper(trim($value)) === 'X' ? 'X' : ' ';
+        // Exact SAP flags: "X" = Pass/Approve, "" = Revert (not a space)
+        $valueFlag = strtoupper(trim($value)) === 'X' ? 'X' : '';
         $isApprove = $valueFlag === 'X';
         $approvalPath = (string) ($this->cfg['po_approval_service'] ?? '/sap/opu/odata/sap/ZCOST_SRV/POApprovalSet');
         $payload = [
@@ -1087,6 +1088,20 @@ class PoPassApprovalService
             $logAction
         );
 
+        // Persist local marker so workbench reload keeps Approved / NotApproved
+        // even when CDS ApprovedStatus lags or SQL log is unavailable.
+        $this->writeLocalApprovalMarker(
+            $displayPo,
+            $isApprove,
+            [
+                'request_id' => $requestId,
+                'ebeln' => $ebeln,
+                'value' => $valueFlag,
+                'message' => $uiMessage,
+                'message_type' => $parsed['message_type'],
+            ]
+        );
+
         return [
             'success' => true,
             'request_id' => $requestId,
@@ -1104,7 +1119,7 @@ class PoPassApprovalService
 
     /**
      * Post POApprovalSet.
-     * Value "X" = approve / PASS PO; Value " " (space) = revert.
+     * Value "X" = approve / PASS PO; Value "" (empty) = revert.
      *
      * @return array{success:bool,request_id:string,po:string,value:string,pdf_path:?string,pdf_url:?string,folder:?string,error:?string,approval:?array}
      */
@@ -1135,8 +1150,8 @@ class PoPassApprovalService
             $requestId = (string) (time() % 1000000000);
         }
 
-        // SAP flag: 'X' = approved, single space = revert / un-approve
-        $valueFlag = strtoupper(trim($value)) === 'X' ? 'X' : ' ';
+        // SAP flag: "X" = approved, "" = revert / un-approve
+        $valueFlag = strtoupper(trim($value)) === 'X' ? 'X' : '';
         $isApprove = $valueFlag === 'X';
 
         // Approve API only first (shared with Approved button)
@@ -1182,23 +1197,9 @@ class PoPassApprovalService
             ];
         }
 
-        // Revert only posts Value=" " — no PDF / e-sign step
+        // Revert / approve markers already written inside approveOnly()
         if (!$isApprove) {
             $folder = $this->poFolder($displayPo);
-            if (is_dir($folder)) {
-                @file_put_contents(
-                    $folder . DIRECTORY_SEPARATOR . 'revert.json',
-                    json_encode([
-                        'request_id' => $requestId,
-                        'po' => $displayPo,
-                        'ebeln' => $ebeln,
-                        'value' => $valueFlag,
-                        'reverted_at' => date('c'),
-                        'message' => $sapMessage,
-                        'message_type' => $sapMessageType,
-                    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
-                );
-            }
             return [
                 'success' => true,
                 'request_id' => $requestId,
@@ -1216,26 +1217,6 @@ class PoPassApprovalService
 
         // Approval succeeded — do NOT fetch/cache unsigned SAP PDF.
         // Open PDF / e-Sign stream via resolvePoPdfForView (signed file or SAP in memory).
-        $meta = [
-            'request_id' => $requestId,
-            'po' => $displayPo,
-            'ebeln' => $ebeln,
-            'value' => $valueFlag,
-            'approved_at' => date('c'),
-            'pdf_file' => null,
-            'local_path' => null,
-            'network_path' => null,
-            'approval_http' => $approval['http_code'] ?? null,
-            'message' => $sapMessage,
-            'message_type' => $sapMessageType,
-            'note' => 'Unsigned PDF not cached; use purchase-order/pdf for viewing.',
-        ];
-        $this->writePoFile(
-            $displayPo,
-            'approval.json',
-            (string) json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
-        );
-
         $folder = $this->poFolder($displayPo);
 
         return [
@@ -1465,6 +1446,213 @@ class PoPassApprovalService
         } catch (Throwable $e) {
             return gmdate('d/m/Y g:i A') . ' UTC';
         }
+    }
+
+    /**
+     * Write approval.json or revert.json under public/upload/PoZcostValidation/Po-{po}/.
+     *
+     * @param array<string,mixed> $extra
+     */
+    public function writeLocalApprovalMarker(string $po, bool $approved, array $extra = []): void
+    {
+        $displayPo = $this->displayPoNumber($po);
+        if ($displayPo === '') {
+            return;
+        }
+        $folder = $this->poFolder($displayPo);
+        if (!@is_dir($folder)) {
+            @mkdir($folder, 0775, true);
+        }
+        if (!@is_dir($folder)) {
+            return;
+        }
+        $payload = array_merge([
+            'po' => $displayPo,
+            'status' => $approved ? 'Approved' : 'NotApproved',
+            'updated_at' => date('c'),
+        ], $extra);
+        if ($approved) {
+            $payload['approved_at'] = $payload['approved_at'] ?? date('c');
+            @file_put_contents(
+                $folder . DIRECTORY_SEPARATOR . 'approval.json',
+                (string) json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
+            );
+            @unlink($folder . DIRECTORY_SEPARATOR . 'revert.json');
+        } else {
+            $payload['reverted_at'] = $payload['reverted_at'] ?? date('c');
+            @file_put_contents(
+                $folder . DIRECTORY_SEPARATOR . 'revert.json',
+                (string) json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
+            );
+            @unlink($folder . DIRECTORY_SEPARATOR . 'approval.json');
+        }
+    }
+
+    /**
+     * Local portal approval marker for workbench reload.
+     * Prefers newer of approval.json / revert.json.
+     *
+     * @return 'Approved'|'NotApproved'|''
+     */
+    public function localApprovalUiStatus(string $po): string
+    {
+        $displayPo = $this->displayPoNumber($po);
+        if ($displayPo === '') {
+            return '';
+        }
+        $folder = $this->poFolder($displayPo);
+        $approvalPath = $folder . DIRECTORY_SEPARATOR . 'approval.json';
+        $revertPath = $folder . DIRECTORY_SEPARATOR . 'revert.json';
+        $approvalMtime = @is_file($approvalPath) ? (int) (@filemtime($approvalPath) ?: 0) : 0;
+        $revertMtime = @is_file($revertPath) ? (int) (@filemtime($revertPath) ?: 0) : 0;
+        if ($approvalMtime <= 0 && $revertMtime <= 0) {
+            return '';
+        }
+        if ($revertMtime > $approvalMtime) {
+            return 'NotApproved';
+        }
+        if ($approvalMtime > 0) {
+            return 'Approved';
+        }
+        return '';
+    }
+
+    /**
+     * Portal revert: delete po_release_log rows + PO PDF / e-sign files under
+     * EVOL/uploads/po_esign/PO_New_Module (and local PoZcostValidation mirror).
+     * Does not call SAP POApprovalSet.
+     *
+     * @return array{
+     *   success:bool,
+     *   po:string,
+     *   error:?string,
+     *   release_log:array{success:bool,deleted:int,error:?string},
+     *   deleted_files:list<string>,
+     *   folder:?string
+     * }
+     */
+    public function portalRevert(string $po): array
+    {
+        $displayPo = $this->displayPoNumber($po);
+        $emptyLog = ['success' => false, 'deleted' => 0, 'error' => 'PO is required.'];
+        if ($displayPo === '') {
+            return [
+                'success' => false,
+                'po' => '',
+                'error' => 'Purchase order is required.',
+                'release_log' => $emptyLog,
+                'deleted_files' => [],
+                'folder' => null,
+            ];
+        }
+
+        require_once base_path('app/services/PoReleaseLogService.php');
+        $release = (new PoReleaseLogService())->deleteForPo($displayPo);
+
+        $deletedFiles = [];
+        $folder = $this->poEsignSaveDir();
+        $roots = array_values(array_unique(array_filter([
+            $folder,
+            $this->networkEsignFolder(),
+            $this->esignStorageRoot(),
+        ])));
+
+        $fileNames = [
+            'PO-' . $displayPo . '.pdf',
+            'PO-' . $displayPo . '_signed.pdf',
+            'po-' . $displayPo . '.pdf',
+            'po-' . $displayPo . '_signed.pdf',
+            'PO_' . $displayPo . '_signed.pdf',
+            'PO-' . $displayPo . '.signed',
+            'esign_' . $displayPo . '.json',
+        ];
+
+        foreach ($roots as $root) {
+            if ($root === null || $root === '' || !@is_dir($root)) {
+                continue;
+            }
+            $normRoot = str_replace('\\', '/', (string) $root);
+            if (preg_match('#/po_esign/?$#i', $normRoot)) {
+                continue; // never touch bare po_esign parent
+            }
+            foreach ($fileNames as $name) {
+                $path = rtrim((string) $root, '\\/') . DIRECTORY_SEPARATOR . $name;
+                if (@is_file($path) && @unlink($path)) {
+                    $deletedFiles[] = $path;
+                }
+            }
+            // Optional date subfolders under PO_New_Module
+            $entries = @scandir($root) ?: [];
+            foreach ($entries as $entry) {
+                if ($entry === '.' || $entry === '..') {
+                    continue;
+                }
+                $dayDir = rtrim((string) $root, '\\/') . DIRECTORY_SEPARATOR . $entry;
+                if (!@is_dir($dayDir) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $entry)) {
+                    continue;
+                }
+                foreach ($fileNames as $name) {
+                    $path = $dayDir . DIRECTORY_SEPARATOR . $name;
+                    if (@is_file($path) && @unlink($path)) {
+                        $deletedFiles[] = $path;
+                    }
+                }
+            }
+        }
+
+        // Local validation mirror folder (PO-specific)
+        $localDir = $this->poFolder($displayPo);
+        if (@is_dir($localDir)) {
+            $localFiles = @scandir($localDir) ?: [];
+            foreach ($localFiles as $lf) {
+                if ($lf === '.' || $lf === '..') {
+                    continue;
+                }
+                $path = $localDir . DIRECTORY_SEPARATOR . $lf;
+                if (@is_file($path) && @unlink($path)) {
+                    $deletedFiles[] = $path;
+                }
+            }
+            @rmdir($localDir);
+        }
+
+        $ok = !empty($release['success']);
+        $error = $ok ? null : (string) ($release['error'] ?? 'Portal revert failed.');
+
+        try {
+            $user = function_exists('portal_user') ? portal_user() : null;
+            $this->passLog->save([
+                'user_id' => $user['id'] ?? ($_SESSION['user_id'] ?? null),
+                'username' => $user['username'] ?? ($_SESSION['username'] ?? null),
+                'purchase_order' => $displayPo,
+                'request_id' => (string) (time() % 1000000000),
+                'action' => 'portal_revert',
+                'status' => $ok ? 'PortalReverted' : 'PortalRevertFailed',
+                'value_flag' => '',
+                'method' => 'POST',
+                'url' => 'purchase-order/portal-revert',
+                'payload' => ['po' => $displayPo],
+                'response' => [
+                    'success' => $ok,
+                    'release_log_deleted' => (int) ($release['deleted'] ?? 0),
+                    'files_deleted' => count($deletedFiles),
+                    'error' => $error,
+                ],
+                'http_code' => $ok ? 200 : 500,
+                'success' => $ok,
+            ]);
+        } catch (Throwable $ignored) {
+            // Logging must not break portal revert
+        }
+
+        return [
+            'success' => $ok,
+            'po' => $displayPo,
+            'error' => $error,
+            'release_log' => $release,
+            'deleted_files' => $deletedFiles,
+            'folder' => $folder,
+        ];
     }
 }
 ?>

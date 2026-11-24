@@ -682,6 +682,24 @@ body.rpt-body:has(.is-uac-page) {
   border-color: #0f766e;
 }
 
+.uac-right[data-action="sap_revert"] input:checked + .uac-right-ui {
+  border-color: #c2410c;
+  background: #fff7ed;
+}
+.uac-right[data-action="sap_revert"] input:checked + .uac-right-ui .uac-right-check {
+  background: #c2410c;
+  border-color: #c2410c;
+}
+
+.uac-right[data-action="portal_revert"] input:checked + .uac-right-ui {
+  border-color: #be123c;
+  background: #fff1f2;
+}
+.uac-right[data-action="portal_revert"] input:checked + .uac-right-ui .uac-right-check {
+  background: #be123c;
+  border-color: #be123c;
+}
+
 .uac-mod[data-kind="zcost"] .uac-right input:checked + .uac-right-ui {
   border-color: #b45309;
   background: #fff7ed;

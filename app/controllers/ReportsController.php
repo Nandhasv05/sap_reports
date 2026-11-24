@@ -1386,15 +1386,25 @@ class ReportsController extends Controller
         }
         $po = preg_replace('/\D/', '', (string) ($input['po'] ?? $input['purchase_order'] ?? $_GET['po'] ?? '')) ?? '';
         $requestId = trim((string) ($input['request_id'] ?? $input['RequestId'] ?? ''));
-        // Value: "X" = PASS / approve, " " = REVERT
+        // Value: "X" = PASS / approve, "" = REVERT (empty string, not a space)
         $rawValue = (string) ($input['value'] ?? $input['Value'] ?? $input['action'] ?? 'X');
         $action = strtolower(trim((string) ($input['action'] ?? '')));
         if ($action === 'revert' || $action === 'unapprove') {
-            $valueFlag = ' ';
+            $valueFlag = '';
         } elseif (strtoupper(trim($rawValue)) === 'X' || $action === 'approve' || $action === 'pass') {
             $valueFlag = 'X';
         } else {
-            $valueFlag = ' ';
+            $valueFlag = '';
+        }
+        if ($valueFlag !== 'X' && function_exists('sap_reports_user_can')
+            && !sap_reports_user_can('po-costing', 'sap_revert')) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'You do not have permission to SAP Revert this PO.',
+                'error'   => 'Permission denied.',
+                'status'  => 'NotApproved',
+                'data'    => [],
+            ], 403);
         }
         $svc = new PoPassApprovalService();
 
@@ -1484,15 +1494,15 @@ class ReportsController extends Controller
         if ($valueFlag !== 'X') {
             $this->jsonResponse([
                 'success' => true,
-                'message' => $sapMsg !== '' ? $sapMsg : 'PO reverted (Value = blank)',
+                'message' => $sapMsg !== '' ? $sapMsg : 'PO reverted (Value = "")',
                 'message_type' => $sapType !== '' ? $sapType : 'S',
                 'status'  => 'NotApproved',
                 'data'    => [
                     'request_id' => $res['request_id'],
                     'po'         => $res['po'],
-                    'value'      => ' ',
+                    'value'      => '',
                     'action'     => 'revert',
-                    'message'    => $sapMsg !== '' ? $sapMsg : 'PO reverted (Value = blank)',
+                    'message'    => $sapMsg !== '' ? $sapMsg : 'PO reverted (Value = "")',
                     'message_type' => $sapType !== '' ? $sapType : 'S',
                     'folder'     => null,
                 ],
@@ -1521,6 +1531,72 @@ class ReportsController extends Controller
                 'saved_path'  => null,
                 'folder'      => null,
                 'workflow'    => $wfApply,
+            ],
+        ]);
+    }
+
+    /**
+     * POST purchase-order/portal-revert
+     * Clears portal release log + deletes PO PDF / e-sign files (no SAP call).
+     */
+    public function purchaseOrderPortalRevert(): void
+    {
+        $canAct = true;
+        if (function_exists('sap_reports_user_can')) {
+            $canAct = sap_reports_user_can('po-costing', 'portal_revert');
+        }
+        if (!$canAct) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'You do not have permission to portal-revert this PO.',
+                'error'   => 'Permission denied.',
+                'data'    => [],
+            ], 403);
+        }
+
+        require_once base_path('app/services/PoPassApprovalService.php');
+        $raw = function_exists('sap_reports_request_raw_body')
+            ? sap_reports_request_raw_body()
+            : ((string) (file_get_contents('php://input') ?: ''));
+        $input = json_decode($raw, true);
+        if (!is_array($input)) {
+            $input = $_POST;
+        }
+        $po = preg_replace('/\D/', '', (string) ($input['po'] ?? $input['purchase_order'] ?? $_GET['po'] ?? '')) ?? '';
+        if ($po === '' || !preg_match('/^\d{1,10}$/', $po)) {
+            $this->jsonResponse([
+                'success' => false,
+                'message' => 'Purchase order must be a number of up to 10 digits.',
+                'error'   => 'Invalid purchase order.',
+                'data'    => [],
+            ], 422);
+        }
+
+        $svc = new PoPassApprovalService();
+        $res = $svc->portalRevert($po);
+        if (empty($res['success'])) {
+            $fail = (string) ($res['error'] ?? 'Portal revert failed.');
+            $this->jsonResponse([
+                'success' => false,
+                'message' => $fail,
+                'error'   => $fail,
+                'data'    => $res,
+            ], 502);
+        }
+
+        $deletedCount = count($res['deleted_files'] ?? []);
+        $logDeleted = (int) ($res['release_log']['deleted'] ?? 0);
+        $this->jsonResponse([
+            'success' => true,
+            'message' => 'Portal reverted: removed '
+                . $logDeleted . ' release-log row(s), deleted '
+                . $deletedCount . ' file(s).',
+            'data'    => [
+                'po' => $res['po'] ?? $po,
+                'action' => 'portal_revert',
+                'release_log_deleted' => $logDeleted,
+                'files_deleted' => $deletedCount,
+                'folder' => $res['folder'] ?? null,
             ],
         ]);
     }
@@ -1881,9 +1957,10 @@ class ReportsController extends Controller
     }
 
     /*
-     * SAP trigger — PO additional charges from ZI_PO_CONDITION_HUB only
+     * SAP trigger — PO additional charges from Z_QuotationZCostCom
      * GET purchase-order/charges?po=40000…
-     * Fields: OtherCharges, Freight1/2, MOQ, Screen, Bank
+     * Expand: to_Cond (Other/Freight/MOQ/Screen/Bank) + to_GST (SGST/CGST/IGST)
+     * Fallback: ZI_PO_CONDITION_HUB
      */
     public function purchaseOrderCharges(): void
     {
@@ -1969,11 +2046,55 @@ class ReportsController extends Controller
             } else {
                 $payload['manual_mappings'] = [];
             }
-            // APPROVEDSTATUS from Z_QuotationZCostCom only (no local Pass log override)
-            $sapApproved = trim((string) ($payload['approved_status'] ?? $payload['header']['approved_status'] ?? ''));
-            if ($sapApproved !== 'Approved' && $sapApproved !== 'NotApproved') {
-                $sapApproved = 'NotApproved';
+            // APPROVEDSTATUS resolution order:
+            // 1) Z_QuotationZCostCom ApprovedStatus
+            // 2) Local approval.json / revert.json marker (survives CDS lag + no SQL)
+            // 3) Pass_po_validtion latest approve/pass/revert
+            $sapApprovedRaw = trim((string) ($payload['approved_status'] ?? $payload['header']['approved_status'] ?? ''));
+            $sapApprovedKey = strtolower(preg_replace('/\s+/', '', $sapApprovedRaw) ?? '');
+            $sapApproved = (
+                $sapApprovedKey === 'approved'
+                || $sapApprovedKey === 'a'
+                || $sapApprovedKey === 'x'
+                || $sapApprovedKey === 'true'
+                || $sapApprovedKey === '1'
+                || str_starts_with($sapApprovedKey, 'approv')
+            ) ? 'Approved' : 'NotApproved';
+
+            $fileApproved = '';
+            try {
+                require_once base_path('app/services/PoPassApprovalService.php');
+                $fileApproved = (new PoPassApprovalService())->localApprovalUiStatus($po);
+            } catch (Throwable $ignored) {
+                $fileApproved = '';
             }
+            $dbApproved = '';
+            try {
+                require_once base_path('app/services/PassPoValidationLogService.php');
+                $dbApproved = (new PassPoValidationLogService())->latestApprovalUiStatus($po);
+            } catch (Throwable $ignored) {
+                $dbApproved = '';
+            }
+
+            // Local revert marker wins over stale CDS APPROVED
+            if ($fileApproved === 'NotApproved' || $dbApproved === 'NotApproved') {
+                $sapApproved = 'NotApproved';
+            } elseif ($sapApproved !== 'Approved') {
+                if ($fileApproved === 'Approved' || $dbApproved === 'Approved') {
+                    $sapApproved = 'Approved';
+                }
+            } elseif ($sapApproved === 'Approved' && $fileApproved === '') {
+                // Seed local marker from live CDS so next reload stays Approved
+                try {
+                    require_once base_path('app/services/PoPassApprovalService.php');
+                    (new PoPassApprovalService())->writeLocalApprovalMarker($po, true, [
+                        'source' => 'Z_QuotationZCostCom',
+                        'seeded_on_validate' => true,
+                    ]);
+                } catch (Throwable $ignored) {
+                }
+            }
+
             $payload['approved_status'] = $sapApproved;
             if (isset($payload['header']) && is_array($payload['header'])) {
                 $payload['header']['approved_status'] = $payload['approved_status'];

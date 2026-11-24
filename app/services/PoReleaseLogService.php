@@ -167,6 +167,43 @@ class PoReleaseLogService
     }
 
     /**
+     * Delete all po_release_log rows for a PO (portal revert).
+     *
+     * @return array{success:bool,deleted:int,error:?string}
+     */
+    public function deleteForPo(string $purchaseOrder): array
+    {
+        $po = preg_replace('/\D/', '', $purchaseOrder) ?? '';
+        $norm = ltrim($po, '0');
+        if ($norm === '' || !preg_match('/^\d{1,10}$/', $norm)) {
+            return ['success' => false, 'deleted' => 0, 'error' => 'Invalid purchase order.'];
+        }
+        $this->ensureTable();
+        if (!$this->tableExists()) {
+            return ['success' => true, 'deleted' => 0, 'error' => null];
+        }
+
+        try {
+            $pdo = Database::connection();
+            $variants = array_values(array_unique(array_filter([
+                $norm,
+                str_pad($norm, 10, '0', STR_PAD_LEFT),
+                $po,
+            ])));
+            $ph = implode(',', array_fill(0, count($variants), '?'));
+            $stmt = $pdo->prepare("
+                DELETE FROM [dbo].[" . self::TABLE . "]
+                WHERE [po_number] IN ({$ph})
+            ");
+            $stmt->execute($variants);
+            return ['success' => true, 'deleted' => (int) $stmt->rowCount(), 'error' => null];
+        } catch (Throwable $e) {
+            error_log('PoReleaseLogService deleteForPo: ' . $e->getMessage());
+            return ['success' => false, 'deleted' => 0, 'error' => 'Unable to delete po_release_log rows.'];
+        }
+    }
+
+    /**
      * @return array{status:string,created_by:string,created_on:?string,remarks:string}|null
      */
     public function latestForPo(string $purchaseOrder): ?array

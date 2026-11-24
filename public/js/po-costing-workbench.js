@@ -68,10 +68,10 @@
     const RESULT_COLS = new Set([
         'budget_cost_per_gmt', 'budget_cost_per_piece', 'buom', 'actual_cost', 'variance_pct', 'actions',
     ]);
-    /** Blank these when unmatched (costing + result, except actions) */
+    /** Blank these when unmatched (costing + budget result). ACTUAL_COST stays — it comes from PO PORATE. */
     const COSTING_BLANK_COLS = new Set([
         ...ZCOST_COLS,
-        'budget_cost_per_gmt', 'budget_cost_per_piece', 'buom', 'actual_cost', 'variance_pct',
+        'budget_cost_per_gmt', 'budget_cost_per_piece', 'buom', 'variance_pct',
     ]);
     // Click any cell: show TEMPFIN / SAP API source column + original value
     // (costing_quotation_no excluded — that opens sap_reports/zcost)
@@ -118,7 +118,7 @@
         budget_cost_per_piece: { api: 'TOTALINR', source: 'ZCOSTI / ZCOSTIT / ZCOSTIP / ZCOSTIS', desc: 'Budget cost per garment — zCOST Total in INR (TOTALINR).' },
         conv: { api: 'CONV (unit)', source: 'TEMPFIN / PASSPO', desc: 'Unit conversion factor (not Curr Rate).' },
         buom: { api: 'PurchaseOrderQuantityUnit', source: 'Z_QuotationZCostCom', desc: 'Base / order unit of measure.' },
-        actual_cost: { api: 'PORATE (INR)', source: 'TEMPFIN / PASSPO', desc: 'ACTUAL_COST in INR = TEMPFIN PORATE × PO consumption (classic unit rules). PORATE is already INR — do not × Curr Rate again. Never × zCOST Gross.' },
+        actual_cost: { api: 'PORATE (INR)', source: 'TEMPFIN / PASSPO', desc: 'ACTUAL_COST in INR = PORATE × Cons (classic unit rules). EA is UoM not currency. Buttons with EA/GRO ÷144 when priced per gross. Curr Rate already in PORATE — do not × again.' },
         variance_pct: { api: 'derived', source: 'Computed', desc: '(Actual INR − TotalINR/Gross) ÷ Budget × 100.' },
     };
     const colGroup = (key) => {
@@ -199,7 +199,18 @@
     /**
      * ACTUAL_COST in INR from TEMPFIN PORATE (+ classic unit rules).
      * TEMPFIN PORATE is already INR — never multiply by Curr Rate / BUDGET_CONV_RT again.
+     * EA is UoM (not currency). Buttons often still priced per gross (÷144) even when UoM=EA.
      */
+    function isButtonFamily(r) {
+        const mg = String(r?.matgroup || r?.material_group || '').toUpperCase();
+        const matDesc = String(r?.mat_desc || r?.material_desc || r?.description || '').toUpperCase();
+        return mg.includes('BUTTON') || mg.includes('SEMI DULL') || mg.includes('HOOK')
+            || mg.includes('PEARL BTN') || mg.includes('BADGE') || mg.includes('WASHER')
+            || matDesc.includes('BTN') || matDesc.includes('BUTTON') || matDesc.includes('PLASTIC')
+            || matDesc.includes('WASHER') || matDesc.includes('SNAP') || matDesc.includes('SHANK')
+            || matDesc.includes('BADGE');
+    }
+
     /** zCOST budget per GMT = Total in INR ÷ Gross (fallback RATE). */
     function lineBudgetPerGmt(line) {
         if (!line) return null;
@@ -229,15 +240,86 @@
     }
 
     /**
-     * Budget for green/red: use BUDGET_COST_PER_GARMENT (budget_cost_per_piece) first —
-     * that is the column users compare with ACTUAL_COST (e.g. 2.2491 vs 1.8).
+     * Budget for green/red row compare (unit vs unit).
+     * Prefer BUDGET_COST_PER_GARMENT display field when it is the unit rate users compare.
      */
     function budgetForCompare(r) {
         if (!r) return null;
+        // Prefer Total INR (same as BUDGET_COST_PER_GARMENT column / Map Costing apply)
         const garment = nVal(r.budget_cost_per_piece) ?? nVal(r.budget_cost_per_garment);
         if (garment !== null && garment > 0) return garment;
+        const tot = nVal(r.total_inr) ?? nVal(r.cost_total_inr) ?? nVal(r.budget_inr);
+        if (tot !== null && tot > 0) return tot;
         const piece = nVal(r.budget_cost_per_gmt) ?? nVal(r.expected_unit_cost);
         return (piece !== null && piece > 0) ? piece : null;
+    }
+
+    /**
+     * Per-garment budget rate in INR (TOTALINR ÷ GROSS).
+     * Never use TotalINR alone — multiplying that by PO trim qty inflates the KPI.
+     */
+    function budgetUnitRateForNet(r) {
+        if (!r) return null;
+        const totalInr = nVal(r.total_inr) ?? nVal(r.cost_total_inr) ?? nVal(r.budget_inr);
+        const gross = nVal(r.gross) ?? nVal(r.budgeted_cons);
+        if (totalInr !== null && totalInr > 0 && gross !== null && gross > 0) {
+            return Math.round((totalInr / gross) * 10000) / 10000;
+        }
+        const rate = nVal(r.budget_cost_per_gmt) ?? nVal(r.expected_unit_cost);
+        return (rate !== null && rate > 0) ? rate : null;
+    }
+
+    /**
+     * Garment qty for extending BUDGET_COST_PER_GMT (per garment).
+     * Do NOT use TOT_POQTY (trim EA) — that caused 5,381 USD vs PO 2,647 USD.
+     */
+    function zcostExtendQty(r, fallbackQty) {
+        const soQty = nVal(r.so_qty) ?? nVal(r.prwise_so_qty);
+        if (soQty !== null && soQty > 0) return soQty;
+
+        const poQty = nVal(r.tot_poqty) ?? nVal(r.order_qty) ?? nVal(r.po_qty);
+        const cons = nVal(r.consumption);
+        // tot_poqty ≈ garments × cons → garments = PO qty ÷ cons
+        if (poQty !== null && poQty > 0 && cons !== null && cons > 0.0001 && Math.abs(cons - 1) > 0.0001) {
+            return Math.round((poQty / cons) * 1000) / 1000;
+        }
+        if (fallbackQty !== null && fallbackQty > 0) return fallbackQty;
+        if (poQty !== null && poQty > 0) return poQty;
+        return 1;
+    }
+
+    /**
+     * Line costing net in PO document currency.
+     * (TOTALINR/GROSS) × garment_qty, then INR → PO currency.
+     * When PORATE is already INR but TOTVALUE is USD, use implied FX = (PORATE×POqty)/TOTVALUE.
+     */
+    function zcostLineNetValue(r, fallbackQty) {
+        const rateInr = budgetUnitRateForNet(r);
+        if (rateInr === null || rateInr <= 0) return 0;
+        const gQty = zcostExtendQty(r, fallbackQty);
+        const netInr = rateInr * gQty;
+
+        const poCurr = String(r.po_currency || r.currency || 'INR').trim().toUpperCase();
+        if (poCurr === 'INR' || poCurr === 'IND' || poCurr === '') {
+            return Math.round(netInr * 100) / 100;
+        }
+
+        const poNet = typeof poLineNetValue === 'function' ? poLineNetValue(r) : 0;
+        const porate = nVal(r.porate ?? r.net_price);
+        const poQty = nVal(r.tot_poqty) ?? nVal(r.order_qty) ?? nVal(r.po_qty);
+        if (poNet > 0 && porate !== null && porate > 0 && poQty !== null && poQty > 0) {
+            const porateExtend = porate * poQty;
+            // PORATE already INR while TOTVALUE is document currency → implied FX
+            if (porateExtend > poNet * 1.5) {
+                return Math.round((netInr * poNet / porateExtend) * 100) / 100;
+            }
+        }
+
+        const fx = nVal(r.budget_conv_rt) ?? nVal(r.convr);
+        if (fx !== null && fx > 1.0001) {
+            return Math.round((netInr / fx) * 100) / 100;
+        }
+        return Math.round(netInr * 100) / 100;
     }
 
     /** Actual used for green/red RESULT compare (same value shown in ACTUAL_COST). */
@@ -279,8 +361,8 @@
         const mg = String(r.matgroup || r.material_group || '').toUpperCase();
         const ouom = String(r.ouom || '').toUpperCase();
         const buom = String(r.buom || '').toUpperCase();
-        const matDesc = String(r.mat_desc || r.material_desc || '').toUpperCase();
         // TEMPFIN PORATE is already INR. Only apply Curr Rate when explicitly flagged.
+        // Never auto × Curr Rate just because PO_CURRENCY is USD (double-converts).
         // CONV sometimes mirrors BUDGET_CONV_RT — don't use FX as unit factor
         if (rate > 1 && Math.abs(unitConv - rate) < 0.0001) unitConv = 1;
         if (unitConv > 20) unitConv = 1;
@@ -291,14 +373,17 @@
         } else if (mg === 'THREADS1' && buom === 'BOX') {
             out = Math.round(((porate / 10000) * unitConv) * 10000) / 10000;
         } else {
-            const base = (r.porate_needs_fx === true) ? (porate * rate) : porate;
+            const applyFx = r.porate_needs_fx === true && r.porate_already_inr !== true;
+            const base = applyFx ? (porate * rate) : porate;
             const mid = base * unitConv;
-            const isButtonGro = (ouom === 'GRO' || buom === 'GRO') && (
-                mg.includes('BUTTON') || mg.includes('SEMI DULL') || mg.includes('HOOK')
-                || mg.includes('PEARL BTN') || matDesc.includes('BTN') || matDesc.includes('BUTTON')
-                || matDesc.includes('PLASTIC')
-            );
-            if (isButtonGro) {
+            const buttonLike = isButtonFamily(r);
+            const isGro = ouom === 'GRO' || buom === 'GRO';
+            const isEa = ouom === 'EA' || buom === 'EA' || ouom === 'PCS' || buom === 'PCS';
+            // Buttons: priced per gross (144). UoM may be GRO or EA with per-GRO PORATE
+            // (PO 4000008635: 90 / 26 / 19.5 on EA → ÷144 clears false Need to Review).
+            if (buttonLike && isGro) {
+                out = Math.round((Math.round(mid * cons) / 144) * 10000) / 10000;
+            } else if (buttonLike && isEa && (mid * cons) > 1.5) {
                 out = Math.round((Math.round(mid * cons) / 144) * 10000) / 10000;
             } else if (ouom === 'KG' || buom === 'KG') {
                 out = Math.round(((mid * cons) / 500) * 10000) / 10000;
@@ -472,8 +557,8 @@
             const reason = statusReasonExplain(r);
             steps.push({ label: 'Row status', value: reason.resultLabel });
             steps.push({ label: 'Why this status', value: reason.desc });
-            const budget = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost);
-            const actual = nVal(r.actual_cost ?? r.po_unit_cost);
+            const budget = budgetForCompare(r);
+            const actual = actualCostInr(r);
             if (key === 'budget_cost_per_gmt') {
                 const totInr = nVal(r.budget_inr ?? r.cost_total_inr ?? r.total_inr);
                 const gross = nVal(r.budgeted_cons ?? r.gross);
@@ -494,20 +579,33 @@
                 const porate = nVal(r.porate ?? r.net_price);
                 const fx = nVal(r.budget_conv_rt) ?? nVal(r.convr) ?? 1;
                 const cons = nVal(r.consumption) ?? 1;
-                const applyFx = r.porate_needs_fx === true;
+                const applyFx = r.porate_needs_fx === true && r.porate_already_inr !== true;
+                const uom = String(r.buom || r.ouom || 'EA').toUpperCase();
+                const poCurr = String(r.po_currency || r.currency || 'INR').toUpperCase();
+                const mid = porate !== null ? (porate * (applyFx ? fx : 1) * cons) : null;
+                const usedGrossDiv = isButtonFamily(r)
+                    && (uom === 'GRO' || uom === 'EA' || uom === 'PCS')
+                    && mid !== null && mid > 1.5;
+                let formula;
+                if (porate === null) {
+                    formula = 'PORATE × PO consumption (classic unit rules) → INR';
+                } else if (applyFx) {
+                    formula = `PORATE ${fmtStep(porate, 4)} × Curr Rate ${fmtStep(fx, 4)} × Cons ${fmtStep(cons, 4)} (UoM ${uom}) → INR ${fmtStep(actual, 4)}`;
+                } else if (usedGrossDiv) {
+                    formula = `PORATE ${fmtStep(porate, 4)} × Cons ${fmtStep(cons, 4)} ÷ 144 (button gross, UoM ${uom}) → INR ${fmtStep(actual, 4)}`;
+                } else {
+                    formula = `PORATE ${fmtStep(porate, 4)} × Cons ${fmtStep(cons, 4)} (UoM ${uom}) → INR ${fmtStep(actual, 4)}`;
+                }
+                steps.push({ label: 'Formula', value: formula });
                 steps.push({
-                    label: 'Formula',
-                    value: porate === null
-                        ? 'PORATE (INR) × PO consumption (classic unit rules)'
-                        : (applyFx
-                            ? `PORATE ${fmtStep(porate, 4)} × Rate ${fmtStep(fx, 4)} × Cons ${fmtStep(cons, 4)} → INR ${fmtStep(actual, 4)}`
-                            : `PORATE ${fmtStep(porate, 4)} × Cons ${fmtStep(cons, 4)} → INR ${fmtStep(actual, 4)} (already INR — Curr Rate not applied)`),
+                    label: 'UoM / Currency',
+                    value: `UoM ${uom} · PO curr ${poCurr} · Curr Rate baked into PORATE (not applied again)`,
                 });
                 steps.push({
                     label: 'Module check',
                     value: actual === null
                         ? 'No actual cost on PO line'
-                        : (budget !== null && actual > budget
+                        : (budget !== null && actual > budget + 0.005
                             ? `Actual ${fmtStep(actual, 4)} > Budget ${fmtStep(budget, 4)} → NOT VALIDATED`
                             : `Actual ${fmtStep(actual, 4)} ≤ Budget ${budget === null ? '—' : fmtStep(budget, 4)} → PASS`),
                 });
@@ -923,39 +1021,35 @@
             title = 'Total Net Value (Budget Total)';
             val = fmt(s.zcost_net_value);
             unit = curr;
-            formula = 'Costing Net Value = ∑ (TOT_POQTY × BUDGET_COST_PER_GARMENT) once per matched PO item';
+            formula = 'Costing Net Value = ∑ ((TOTALINR÷GROSS) × garment SO qty) once per matched PO item, in PO currency. Not TotalINR × trim PO qty.';
             const matchedRows = detailRows.filter(isMatchedRow);
             const seenZVal = {};
             const valRows = matchedRows.filter(r => {
-                const it = String(r.poitem || r.po_item || r.item || '').trim();
+                const raw = String(r.poitem || r.po_item || r.item || '').trim();
+                const it = raw.replace(/^0+/, '') || raw;
                 if (it && !seenZVal[it]) { seenZVal[it] = true; return true; }
                 return !it;
             });
-            const budgetQtyOf = (r) => {
-                const po = Number(r.tot_poqty || r.order_qty || 0) || 0;
-                const so = Number(r.so_qty ?? r.prwise_so_qty ?? 0) || 0;
-                return po > 0 ? po : (so > 0 ? so : 1);
-            };
-            const budgetOf = (r) => budgetForCompare(r)
-                ?? nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost ?? r.budget_cost_per_piece)
-                ?? 0;
+            const budgetOf = (r) => budgetUnitRateForNet(r) ?? 0;
             stepsHtml = valRows.length
                 ? valRows.map(r => {
                     const b = budgetOf(r);
-                    const q = budgetQtyOf(r);
-                    return `<div class="pcw-cdm-step-item"><span>Item #${esc(r.poitem || r.po_item || r.item)} (${qty(q)} × ₹${fmtDec(b, 4)})</span><strong>₹${money(b * q)}</strong></div>`;
+                    const q = zcostExtendQty(r, Number(r.tot_poqty || r.order_qty || 0) || 1);
+                    const lineNet = zcostLineNetValue(r);
+                    return `<div class="pcw-cdm-step-item"><span>Item #${esc(r.poitem || r.po_item || r.item)} (${qty(q)} gmt × ${fmtDec(b, 4)} INR/gmt)</span><strong>${esc(curr)} ${money(lineNet)}</strong></div>`;
                 }).join('')
-                + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Expected Budget</span><strong>₹${fmt(s.zcost_net_value)} ${esc(curr)}</strong></div>`
-                : '<div class="pcw-cdm-step-item"><span>No matched value</span><strong>₹0</strong></div>';
+                + `<div class="pcw-cdm-step-item" style="font-weight:800; border-top:1.5px solid #cbd5e1;"><span>Total Expected Budget</span><strong>${esc(curr)} ${fmt(s.zcost_net_value)}</strong></div>`
+                : `<div class="pcw-cdm-step-item"><span>No matched value</span><strong>${esc(curr)} 0</strong></div>`;
             rowsHtml = valRows.map((r, i) => {
                 const b = budgetOf(r);
-                const q = budgetQtyOf(r);
+                const q = zcostExtendQty(r, Number(r.tot_poqty || r.order_qty || 0) || 1);
+                const lineNet = zcostLineNetValue(r);
                 return `<tr>
                     <td>#${esc(r.poitem || r.po_item || r.item || (i + 1))}</td>
                     <td><strong>${esc(r.material)}</strong><br><small style="color:#4338ca;">zCOST: ${esc(r.maktx || r.cost_description || '—')}</small></td>
-                    <td class="num">${qty(q)} ${esc(r.ouom || uom)}</td>
-                    <td class="num">₹${fmtDec(b, 4)}</td>
-                    <td class="num">₹${money(b * q)}</td>
+                    <td class="num">${qty(q)} gmt</td>
+                    <td class="num">${fmtDec(b, 4)}</td>
+                    <td class="num">${esc(curr)} ${money(lineNet)}</td>
                     <td>${statusPill(r.status, r)}</td>
                 </tr>`;
             }).join('');
@@ -2621,24 +2715,75 @@
         return all[0] || { x_pct: 0, y_pct: 0, w_pct: 0, h_pct: 0, page: 0 };
     }
 
-    let poPassState = { po: '', passed: false }; // APPROVEDSTATUS from Pass_po_validtion
+    let poPassState = { po: '', passed: false }; // APPROVEDSTATUS from SAP + local approval.json
 
-    function applyApprovedStatus(po, status) {
+    function approvalStorageKey(po) {
         const digits = String(po || '').replace(/\D/g, '');
-        const st = String(status || '').trim();
-        const approved = st === 'Approved';
-        poPassState = { po: digits, passed: approved };
-        return approved ? 'Approved' : 'NotApproved';
+        return digits ? (`pcwApproved:${digits}`) : '';
+    }
+
+    function writeStoredApproval(po, status) {
+        try {
+            const key = approvalStorageKey(po);
+            if (!key) return;
+            if (status === 'Approved' || status === 'NotApproved') {
+                sessionStorage.setItem(key, status);
+            }
+        } catch (_) {
+            /* ignore */
+        }
+    }
+
+    function readStoredApproval(po) {
+        try {
+            const key = approvalStorageKey(po);
+            if (!key) return '';
+            const v = String(sessionStorage.getItem(key) || '').trim();
+            return v === 'Approved' || v === 'NotApproved' ? v : '';
+        } catch (_) {
+            return '';
+        }
+    }
+
+    function isApprovedStatusValue(status) {
+        const st = String(status || '').trim().toLowerCase().replace(/\s+/g, '');
+        return st === 'approved' || st === 'a' || st === 'x' || st === 'true' || st === '1'
+            || st.startsWith('approv');
+    }
+
+    /**
+     * @param {string} po
+     * @param {string} status
+     * @param {{preferStored?: boolean}} [opts] preferStored=true on validate so a prior Pass
+     *        keeps Approved if API briefly returns NotApproved; Pass/Revert pass preferStored=false.
+     */
+    function applyApprovedStatus(po, status, opts) {
+        const digits = String(po || '').replace(/\D/g, '');
+        const preferStored = !!(opts && opts.preferStored);
+        let next = isApprovedStatusValue(status) ? 'Approved' : 'NotApproved';
+        if (preferStored && next === 'NotApproved' && readStoredApproval(digits) === 'Approved') {
+            next = 'Approved';
+        }
+        writeStoredApproval(digits, next);
+        poPassState = { po: digits, passed: next === 'Approved' };
+        return next;
     }
 
     function syncPassRevertButtons(summary) {
         const passBtn = $('pcwPassPoBtn');
+        const sapRevertBtn = $('pcwSapRevertBtn');
+        const portalRevertBtn = $('pcwPortalRevertBtn');
         const sentBtn = $('pcwSentPoBtn');
         const sentToolbar = $('pcwOpenSentBtn');
         const el = $('pcwPassStatus');
         const po = headerPo();
         const mayPass = cfg.canPassPo !== false;
         const mayEsign = cfg.canEsign !== false;
+        // Revert buttons: only show when Access Studio bit is explicitly granted
+        const maySapRevert = cfg.canSapRevert === true
+            && sapRevertBtn?.getAttribute('data-no-access') !== '1';
+        const mayPortalRevert = cfg.canPortalRevert === true
+            && portalRevertBtn?.getAttribute('data-no-access') !== '1';
         const s = summary || {};
         const exceptions = Number(s.exceptions || 0);
         const review = Number(s.needs_review || 0);
@@ -2659,10 +2804,11 @@
         const dataLoaded = (rows || []).some((r) => r && !isFooterRow(r));
 
         if (passBtn) {
-            // Enable Pass PO when all detail lines pass and PO is not yet approved
+            // Hide Pass PO entirely once approved (do not leave a disabled ghost button)
             const showPassPo = mayPass && !!po && !isThisPoPassed;
             const enablePassPo = showPassPo && dataLoaded && canPassRows;
             passBtn.hidden = !showPassPo;
+            passBtn.style.display = showPassPo ? '' : 'none';
             passBtn.disabled = !enablePassPo;
             passBtn.title = !mayPass
                 ? 'No permission to Pass PO'
@@ -2673,6 +2819,30 @@
                         : !canPassRows
                             ? 'All lines must Pass before Pass PO'
                             : 'Pass PO (Value = X)';
+        }
+        if (sapRevertBtn) {
+            // SAP REVERT only when STATUS is Approved (nothing to revert otherwise)
+            const showSapRevert = maySapRevert && !!po && isThisPoPassed;
+            sapRevertBtn.hidden = !showSapRevert;
+            sapRevertBtn.style.display = showSapRevert ? '' : 'none';
+            sapRevertBtn.disabled = !showSapRevert;
+            sapRevertBtn.title = !maySapRevert
+                ? 'No permission to SAP Revert'
+                : !po
+                    ? 'Enter / load a purchase order first'
+                    : !isThisPoPassed
+                        ? 'SAP Revert is available only when STATUS is Approved'
+                        : 'SAP Revert — POApprovalSet Value = \"\"';
+        }
+        if (portalRevertBtn) {
+            const showPortalRevert = mayPortalRevert && !!po;
+            portalRevertBtn.hidden = !showPortalRevert;
+            portalRevertBtn.disabled = !showPortalRevert;
+            portalRevertBtn.title = !mayPortalRevert
+                ? 'No permission to Portal Revert'
+                : !po
+                    ? 'Enter / load a purchase order first'
+                    : 'Portal Revert — delete po_release_log + PO PDF files';
         }
         // SENT: allow as soon as a PO number is present (does not need compare rows loaded)
         const enableSent = mayEsign && !!po;
@@ -2702,16 +2872,23 @@
     }
 
     async function postPoApproval(action) {
-        if (cfg.canPassPo === false) return;
+        const isRevert = action === 'revert';
+        if (isRevert) {
+            if (cfg.canSapRevert === false) return;
+        } else if (cfg.canPassPo === false) {
+            return;
+        }
         const po = headerPo();
         if (!po) {
             alert('Load a purchase order first.');
             return;
         }
-        const isRevert = action === 'revert';
-        const value = isRevert ? ' ' : 'X';
+        // SAP POApprovalSet: "X" = Pass/Approve, "" = Revert
+        const value = isRevert ? '' : 'X';
         const passBtn = $('pcwPassPoBtn');
+        const sapRevertBtn = $('pcwSapRevertBtn');
         if (passBtn) passBtn.disabled = true;
+        if (sapRevertBtn) sapRevertBtn.disabled = true;
         showSpinner(true);
         try {
             const endpoint = cfg.passPoUrl || 'purchase-order/pass';
@@ -3154,8 +3331,65 @@
     }
 
     async function revertPoApproval() {
-        if (!confirm('Revert this PO approval? SAP Value will be sent as blank.')) return;
+        if (!confirm('SAP Revert this PO?\n\nPOApprovalSet Value will be sent as empty ("").')) return;
         await postPoApproval('revert');
+    }
+
+    async function portalRevertPo() {
+        if (cfg.canPortalRevert === false) {
+            alert('You do not have Portal Revert access for PO Costing.');
+            return;
+        }
+        const po = headerPo();
+        if (!po) {
+            alert('Load a purchase order first.');
+            return;
+        }
+        if (!confirm(
+            `Portal Revert PO ${po}?\n\n`
+            + '• Deletes rows from po_release_log\n'
+            + '• Deletes PO PDF / e-sign files under EVOL/uploads/po_esign/PO_New_Module\n\n'
+            + 'This does NOT call SAP.'
+        )) {
+            return;
+        }
+        const btn = $('pcwPortalRevertBtn');
+        if (btn) btn.disabled = true;
+        showSpinner(true);
+        try {
+            const endpoint = cfg.portalRevertUrl || 'purchase-order/portal-revert';
+            const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ po, action: 'portal_revert' }),
+            });
+            const rawText = await res.text();
+            let json = {};
+            try {
+                json = rawText ? JSON.parse(rawText) : {};
+            } catch (_) {
+                throw new Error(
+                    rawText
+                        ? `Portal revert returned non-JSON (HTTP ${res.status}): ${rawText.slice(0, 180)}`
+                        : `Portal revert returned empty response (HTTP ${res.status}).`
+                );
+            }
+            if (!res.ok || json.success === false) {
+                throw new Error(json.message || json.error || `HTTP ${res.status}`);
+            }
+            const toast = document.createElement('div');
+            toast.className = 'pcw-toast is-ok';
+            toast.textContent = json.message || `PO ${po} portal reverted`;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 4500);
+            syncPassRevertButtons(summarizeRows(rows || []));
+        } catch (err) {
+            alert(String(err.message || 'Portal revert failed'));
+            syncPassRevertButtons(summarizeRows(rows || []));
+        } finally {
+            showSpinner(false);
+        }
     }
 
     function dataUrlToUint8(dataUrl) {
@@ -4626,22 +4860,21 @@
             if (mat) materials[mat] = true;
             const so = String(r.salordno || r.sales_order || '').trim();
             if (so) salesOrders[so] = true;
-            const item = String(r.poitem || r.po_item || '').trim();
+            const itemRaw = String(r.poitem || r.po_item || '').trim();
+            const item = itemRaw.replace(/^0+/, '') || itemRaw;
             if (item) items[item] = true;
 
             const rowSoQty = Number(r.so_qty ?? r.prwise_so_qty ?? 0) || 0;
             const rowOrderQty = Number(r.tot_poqty ?? r.order_qty ?? r.po_qty ?? 0) || 0;
             // PO net = SAP TOTVALUE once per line (not PORATE×QTY — that drifts after rate round).
-            const poRate = nVal(r.porate ?? r.po_unit_cost ?? r.net_price ?? r.actual_cost);
-            // Prefer garment budget (TOTALINR / BUDGET_COST_PER_PIECE) — same as Valid compare
-            const budget = budgetForCompare(r)
-                ?? nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost ?? r.budget_cost_per_piece);
             const actual = actualForCompare(r)
                 ?? nVal(r.porate ?? r.actual_cost ?? r.po_unit_cost);
             const poQty = rowOrderQty > 0 ? rowOrderQty : (rowSoQty > 0 ? rowSoQty : 0);
-            // Full PO line qty for net value (comparable to TOTVALUE) — not SO-split qty
+            // Full PO line qty for PO net value — not SO-split qty
             const lineQty = rowOrderQty > 0 ? rowOrderQty : (rowSoQty > 0 ? rowSoQty : 1);
             const poLineNet = poLineNetValue(r);
+            // Per-garment budget × garment qty → PO currency (never TotalINR × trim PO qty)
+            const zLineNet = zcostLineNetValue(r, lineQty);
 
             // Once per PO line — TOTVALUE / TOT_POQTY repeat on every SO split
             const valueKey = footPoLineKey(r);
@@ -4650,7 +4883,7 @@
                 totalValue += poLineNet;
                 totalOrderQty += poQty;
                 poSoQty += poQty;
-                if (budget !== null) totalExpected += budget * lineQty;
+                totalExpected += zLineNet;
                 if (actual !== null) totalActual += actual * lineQty;
             }
 
@@ -4665,11 +4898,10 @@
                 if (item && !seenZItem[item]) {
                     seenZItem[item] = true;
                     zcostSoQty += poQty;
-                    // Budget per garment × TOT_POQTY (same scale as PO TOTAL NET VALUE)
-                    zcostExpected += (budget || 0) * lineQty;
+                    zcostExpected += zLineNet;
                 } else if (!item) {
                     zcostSoQty += poQty;
-                    zcostExpected += (budget || 0) * lineQty;
+                    zcostExpected += zLineNet;
                 }
             }
 
@@ -4789,7 +5021,8 @@
     let lastChargesSummary = {};
 
     /**
-     * Trigger SAP charges API (ZI_PO_CONDITION_HUB only) and refresh MOQ / Total P.O Value.
+     * Trigger SAP charges API (Z_QuotationZCostCom?$expand=to_Cond,to_GST)
+     * and refresh Freight / MOQ / GST / Total P.O Value.
      */
     async function refreshChargesFromSap(po, baseSummary) {
         const poDigits = String(po || '').replace(/\D/g, '');
@@ -5183,7 +5416,10 @@
         if (/\b(BUTTON|BTN|PEARLBTN|HOOK\s*EYE|SNAP)\b/.test(t) || t.includes('BUTTON')) return 'BUTTON';
         if (/\b(ELASTIC|ELASTANE|RUBBERTAPE)\b/.test(t) || t.includes('ELASTIC')) return 'ELASTIC';
         if (/\b(THREAD|THREADS)\b/.test(t) || t.includes('THREAD')) return 'THREAD';
-        if (/\b(ZIPPER|ZIP)\b/.test(t) || t.includes('ZIPPER')) return 'ZIPPER';
+        if (/\b(ZIPPER|ZIPPERS|ZIP)\b/.test(t) || t.includes('ZIPPER') || t.includes('ZIPPERS')
+            || /\bSEM\s*LK\b/.test(t) || /\bSLIDER\b/.test(t) || /\bMTL\b.*\bLK\b/.test(t)) {
+            return 'ZIPPER';
+        }
         if (/\b(STICKER|STICKERS|RFID)\b/.test(t) || t.includes('STICKER') || t.includes('RFID')) return 'STICKER';
         if (/\b(LABEL|LBL|HANGTAG)\b/.test(t) || t.includes('LABEL') || t.includes('HANGTAG')
             || /CARE\s*&?\s*CONTENT|WASH\s*CARE/.test(t)) return 'LABEL';
@@ -5356,9 +5592,11 @@
         r.variance_pct = null;
         r.cost_mismatch = false;
         r.cost_matrix = null;
-        // Hide costing ACTUAL until a line is selected (PO PORATE kept for runtime calc)
-        r.actual_cost = null;
+        // Keep ACTUAL from PO PORATE — budget/variance stay blank until Map Costing
         r._zcost_pending = true;
+        const inrKeep = actualCostInr(r);
+        r.actual_cost = (inrKeep !== null && inrKeep > 0) ? inrKeep : null;
+        r.po_unit_cost = r.actual_cost;
     }
 
     function clearWrongZcostMatch(r, reason) {
@@ -5371,6 +5609,172 @@
         r.status = 'NOT_MATCHED';
         r.validation_result = reason || 'NOT MATCHED — zCOST section/matrix does not match PO MATGROUP / MAT_DESC — select matching line';
         r._editingMatch = true;
+    }
+
+    /** Ensure Total INR is also on budget_cost_per_piece so refresh keeps Valid. */
+    function syncRowBudgetPieceFromTotal(r) {
+        if (!r) return;
+        const tot = nVal(r.total_inr) ?? nVal(r.cost_total_inr) ?? nVal(r.budget_inr);
+        if (tot !== null && tot > 0) {
+            r.budget_cost_per_piece = Math.round(tot * 10000) / 10000;
+            r.total_inr = tot;
+            r.cost_total_inr = tot;
+            r.budget_inr = tot;
+        }
+    }
+
+    /** Recompute ACTUAL + PASS/EXCEPTION using the same ceiling as statusDisplay. */
+    function refreshRowActualAndStatus(r) {
+        if (!r || isFooterRow(r)) return;
+        const inr = actualCostInr(r);
+        if (inr !== null && inr > 0) {
+            r.actual_cost = inr;
+            r.po_unit_cost = inr;
+        } else if (!r.manual_match) {
+            r.actual_cost = null;
+        }
+        if (r.family_mismatch && !r.manual_match) return;
+        const budget = budgetForCompare(r);
+        const actual = (inr !== null && inr > 0) ? inr : nVal(r.actual_cost);
+        if (budget !== null && budget > 0 && actual !== null && actual > 0) {
+            r.variance_pct = Math.round((((actual - budget) / budget) * 100) * 100) / 100;
+            if (actual <= budget + 0.005) {
+                r.status = 'PASS';
+                r.cost_mismatch = false;
+                r.needs_manual_match = false;
+                if (r.manual_match && !/manually matched|auto-matched/i.test(String(r.validation_result || ''))) {
+                    r.validation_result = 'PASS — manually matched to zCOST line';
+                }
+            } else {
+                r.status = 'EXCEPTION';
+                r.cost_mismatch = true;
+            }
+        } else if (budget !== null && budget > 0 && (actual === null || actual <= 0) && !r.manual_match) {
+            r.status = 'NEEDS_REVIEW';
+            r.cost_mismatch = false;
+        }
+    }
+
+    /**
+     * Apply API manual_mappings onto rows (and re-link live costLines when possible)
+     * so refresh keeps the same Map Costing the user saved.
+     */
+    function applySavedManualMappings(maps) {
+        if (!Array.isArray(maps) || !maps.length || !Array.isArray(rows)) return;
+        const byKey = new Map();
+        maps.forEach((m) => {
+            if (!m) return;
+            const item = String(m.po_item || '').replace(/\D/g, '').replace(/^0+/, '') || String(m.po_item || '').trim();
+            const mat = String(m.material || '').trim().toLowerCase();
+            if (!item) return;
+            const key = `${item}|${mat}`;
+            if (!byKey.has(key)) byKey.set(key, m);
+        });
+        rows.forEach((r) => {
+            if (!r || isFooterRow(r)) return;
+            const item = String(r.poitem || r.po_item || '').replace(/\D/g, '').replace(/^0+/, '')
+                || String(r.poitem || r.po_item || '').trim();
+            const mat = String(r.material || '').trim().toLowerCase();
+            let m = byKey.get(`${item}|${mat}`) || null;
+            if (!m && item) {
+                // Fallback: item-only when material blank on either side
+                for (const [k, cand] of byKey.entries()) {
+                    if (k === `${item}|` || k.startsWith(`${item}|`)) {
+                        const candMat = String(cand.material || '').trim().toLowerCase();
+                        if (!candMat || !mat || candMat === mat) {
+                            m = cand;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (!m) return;
+
+            // Prefer live CDS line so applyCostLineToRow fills all fields
+            const pickKey = String(m.matched_line_key || '').trim();
+            let line = null;
+            if (pickKey && Array.isArray(costLines) && costLines.length) {
+                line = costLines.find((l, i) => lineKey(l, i) === pickKey) || null;
+            }
+            if (!line && Array.isArray(costLines) && costLines.length) {
+                const zItem = String(m.zcost_item || '').trim();
+                const quote = String(m.quotation_no || '').replace(/\D/g, '');
+                const maktx = String(m.maktx || '').trim().toLowerCase();
+                line = costLines.find((l) => {
+                    const li = String(l.item || l.material || '').trim();
+                    const lq = String(l.quotation_no || '').replace(/\D/g, '');
+                    const ld = String(l.maktx || l.description || '').trim().toLowerCase();
+                    if (quote && lq && quote !== lq) return false;
+                    if (zItem && li && zItem === li) return true;
+                    if (maktx && ld && maktx === ld) return true;
+                    return false;
+                }) || null;
+            }
+            if (line) {
+                applyCostLineToRow(r, line);
+                r.matched_line_key = pickKey || r.matched_line_key || lineKey(line, 0);
+            } else {
+                // Payload-only restore when CDS line is not in current quote filter
+                const tot = nVal(m.total_inr);
+                const gross = nVal(m.gross);
+                if (tot !== null) {
+                    r.total_inr = tot;
+                    r.cost_total_inr = tot;
+                    r.budget_inr = tot;
+                    r.budget_cost_per_piece = Math.round(tot * 10000) / 10000;
+                }
+                if (gross !== null && gross > 0) {
+                    r.gross = gross;
+                    r.budgeted_cons = gross;
+                    if (tot !== null && tot > 0) {
+                        r.budget_cost_per_gmt = Math.round((tot / gross) * 1000000) / 1000000;
+                        r.expected_unit_cost = r.budget_cost_per_gmt;
+                    }
+                } else {
+                    let payload = null;
+                    try {
+                        payload = m.payload_json ? JSON.parse(String(m.payload_json)) : null;
+                    } catch (_) { payload = null; }
+                    const gmt = nVal(m.budget_cost_per_gmt) ?? nVal(payload?.budget_cost_per_gmt);
+                    if (gmt !== null && gmt > 0) {
+                        r.budget_cost_per_gmt = gmt;
+                        r.expected_unit_cost = gmt;
+                    }
+                }
+                const zItem = String(m.zcost_item || '').trim();
+                const maktx = String(m.maktx || '').trim();
+                const section = String(m.zsection || '').trim();
+                const quote = String(m.quotation_no || '').trim();
+                if (zItem) {
+                    r.zcost_item = zItem;
+                    r.cost_item = zItem;
+                    r.costing_item_no = zItem;
+                }
+                if (maktx) {
+                    r.maktx = maktx;
+                    r.cost_description = maktx;
+                }
+                if (section) {
+                    r.zsection = section;
+                    r.cost_section = section;
+                }
+                if (quote) {
+                    r.costing_quotation_no = quote;
+                    r.matched_quotation = quote;
+                }
+                if (nVal(m.convr) !== null && nVal(m.convr) > 0) r.budget_conv_rt = nVal(m.convr);
+                if (m.currency) r.budget_currency = String(m.currency);
+                if (m.matched_line_key) r.matched_line_key = String(m.matched_line_key);
+                if (m.line_no) r.matched_line_no = String(m.line_no);
+            }
+            r.manual_match = true;
+            r.needs_manual_match = false;
+            r.family_mismatch = false;
+            r._zcost_pending = false;
+            r._editingMatch = false;
+            syncRowBudgetPieceFromTotal(r);
+            refreshRowActualAndStatus(r);
+        });
     }
 
     /** On first load: reject wrong auto links (e.g. HANGTAG → CARE & CONTENT). */
@@ -5529,11 +5933,8 @@
     function candidateLinesForRow(r) {
         const mat = selectedMat();
         const matCode = String(r.material || '').trim().toLowerCase();
-        const desc = String(r.mat_desc || r.material_desc || r.description || '').trim().toLowerCase();
-        const group = String(r.matgroup || '').trim().toLowerCase();
         const poText = poMatchText(r);
         const poFamily = trimFamily(poText);
-        const poKind = labelKind(poText);
         const wantSections = sectionsForPoRow(r).map((s) => s.toLowerCase());
         const packingOnly = wantSections.length === 1 && wantSections[0] === 'packing';
         const wantQuote = quotationForRow(r);
@@ -5541,8 +5942,9 @@
             [wantQuote, ...(validatedQuotes || []).map((q) => String(q || '').replace(/\D/g, ''))]
                 .filter(Boolean)
         );
-        return (costLines || []).filter((line) => {
-            // Only matching quotation (+ validated quotes for this PO) — never all quotes
+
+        const passBase = (line, opts = {}) => {
+            const strictFamily = opts.strictFamily !== false;
             const lq = lineQuotationNo(line);
             if (wantQuote) {
                 if (lq && lq !== wantQuote) return false;
@@ -5556,28 +5958,47 @@
                 return false;
             }
             const sec = lineSectionName(line).toLowerCase();
-            // PACKING1 / packing PO → Packing section of matching quotation only
             if (packingOnly) {
                 return sec === 'packing';
             }
             if (wantSections.length && sec && !wantSections.includes(sec)) {
-                // Allow exact material-code hits across section
                 const item = String(line.item || line.material || '').toLowerCase();
                 if (!(matCode && item && (item === matCode || item.includes(matCode)))) {
                     return false;
                 }
             }
+            if (!strictFamily) return true;
             const lineText = costMatchText(line);
             const lineFamily = trimFamily(lineText);
-            // Only same family in dropdown (Label PO → Label lines only)
+            // Same family only when both sides detect a family (Label → Label)
             if (poFamily && lineFamily && poFamily !== lineFamily) {
                 return false;
             }
-            if (poFamily && !lineFamily) {
-                if (!poCostTokensOverlap(poText, lineText)) return false;
-            }
+            // Do not hard-require token overlap when zCOST desc has no family
+            // (ZIPPERS1 PO desc often has no shared tokens with sheet lines).
             return true;
-        }).sort((a, b) => scoreCostLineForPo(r, b) - scoreCostLineForPo(r, a));
+        };
+
+        let list = (costLines || []).filter((line) => passBase(line, { strictFamily: true }));
+        // Fallback: quote + section only (so Map Costing is never empty when lines exist)
+        if (!list.length && (costLines || []).length) {
+            list = (costLines || []).filter((line) => passBase(line, { strictFamily: false }));
+        }
+        // Last resort: any non-fabric line on this quotation, then any trim line on PO
+        if (!list.length && (costLines || []).length) {
+            list = (costLines || []).filter((line) => {
+                if (wantQuote) {
+                    const lq = lineQuotationNo(line);
+                    if (lq && lq !== wantQuote) return false;
+                }
+                if (mat === 'trims' && String(line.section || '') === 'Fabric') return false;
+                return true;
+            });
+        }
+        if (!list.length && (costLines || []).length && mat === 'trims') {
+            list = (costLines || []).filter((line) => String(line.section || '') !== 'Fabric');
+        }
+        return list.sort((a, b) => scoreCostLineForPo(r, b) - scoreCostLineForPo(r, a));
     }
 
     function findSameValueRows(sourceRow, sourceIndex) {
@@ -5828,18 +6249,20 @@
         let variancePct = null;
         let status = priorStatus || 'PASS';
         let result = String(r.validation_result || 'PASS — manually matched to zCOST line');
-        if (finalBudget !== null && finalBudget > 0 && inrActual !== null && inrActual > 0) {
-            variancePct = roundPct(((inrActual - finalBudget) / finalBudget) * 100);
-            if (inrActual <= finalBudget + 0.005) {
+        // Same ceiling as statusDisplay: Total INR (piece), then TotalINR/Gross
+        const compareBudget = (totalInr !== null && totalInr > 0) ? totalInr : finalBudget;
+        if (compareBudget !== null && compareBudget > 0 && inrActual !== null && inrActual > 0) {
+            variancePct = roundPct(((inrActual - compareBudget) / compareBudget) * 100);
+            if (inrActual <= compareBudget + 0.005) {
                 status = 'PASS';
                 result = 'PASS — manually matched to zCOST line';
                 r.cost_mismatch = false;
             } else {
                 status = 'EXCEPTION';
-                result = 'NOT VALIDATED — actual cost exceeds Total INR / Gross budget';
+                result = 'NOT VALIDATED — actual cost exceeds Total INR budget';
                 r.cost_mismatch = true;
             }
-        } else if (finalBudget !== null && finalBudget > 0) {
+        } else if (compareBudget !== null && compareBudget > 0) {
             status = 'NEEDS_REVIEW';
             result = 'Matched zCOST line but actual cost is missing — Needs Review';
             r.cost_mismatch = false;
@@ -6756,11 +7179,19 @@
             currentMode = data.mode || mode;
             selectedCustomer = String(data.customer_quotation || customer || '');
             selectedEndUser = String(data.end_user_quotation || endUser || '');
+            // Re-hydrate saved Map Costing on the client (belt + suspenders with server applyToRecords)
+            applySavedManualMappings(Array.isArray(data.manual_mappings) ? data.manual_mappings : []);
             // Z_QUOTATIONZCOSTCOM empty (same as Postman) → never show stale TEMPFIN costing columns
             const cdsEmpty = !costLines.length;
             rows.forEach((r) => {
                 if (typeof r.selected !== 'boolean') r.selected = false;
                 if (isFooterRow(r)) return;
+                // Keep persisted Map Costing — never wipe Passed rows on refresh
+                if (r.manual_match) {
+                    syncRowBudgetPieceFromTotal(r);
+                    refreshRowActualAndStatus(r);
+                    return;
+                }
                 if (cdsEmpty) {
                     emptyZcostDisplayFields(r);
                     r.status = 'NOT_MATCHED';
@@ -6770,59 +7201,36 @@
                 }
                 // First load: zCOST section/matrix vs PO matgroup + mat_desc
                 enforceFirstLoadZcostMatch(r);
-                // Unmatched → keep costing cells empty (no ACTUAL/BUDGET until dropdown select)
+                // Unmatched → blank costing/budget; keep ACTUAL from PO PORATE
                 if (isUnmatchedZcost(r)) {
                     emptyZcostDisplayFields(r);
                     r.status = 'NOT_MATCHED';
                     return;
                 }
-                // Normalize ACTUAL_COST from TEMPFIN PORATE (already INR; matched rows only)
-                const inr = actualCostInr(r);
-                if (inr !== null && inr > 0) {
-                    r.actual_cost = inr;
-                    r.po_unit_cost = inr;
-                    const budget = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost);
-                    if (budget !== null && budget > 0) {
-                        r.variance_pct = Math.round((((inr - budget) / budget) * 100) * 100) / 100;
-                        if (!r.family_mismatch && !r.needs_manual_match) {
-                            if (inr <= budget + 0.005) {
-                                r.status = 'PASS';
-                                r.validation_result = r.validation_result && /family|does not match/i.test(String(r.validation_result))
-                                    ? r.validation_result
-                                    : 'PASS — actual cost within budget';
-                                r.cost_mismatch = false;
-                            } else if (String(r.status || '').toUpperCase() !== 'NEEDS_REVIEW') {
-                                r.status = 'EXCEPTION';
-                                r.cost_mismatch = true;
-                            }
-                        }
-                    }
-                } else {
-                    r.actual_cost = null;
-                    if (!r.family_mismatch && !r.needs_manual_match) {
-                        const budget = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost);
-                        if (budget !== null && budget > 0) {
-                            r.status = 'NEEDS_REVIEW';
-                            r.cost_mismatch = false;
-                        }
-                    }
-                }
+                refreshRowActualAndStatus(r);
             });
 
             // Auto-map only when live CDS lines exist (never invent costing when API is [])
             if (!cdsEmpty) {
                 autoMapUnmatchedFromCostLines();
             }
+            // Always refresh ACTUAL from PORATE (matched and unmatched)
             rows.forEach((r) => {
-                if (isFooterRow(r) || isUnmatchedZcost(r) || cdsEmpty) return;
+                if (isFooterRow(r) || cdsEmpty) return;
+                if (r.manual_match) {
+                    syncRowBudgetPieceFromTotal(r);
+                    refreshRowActualAndStatus(r);
+                    return;
+                }
                 const inr = actualCostInr(r);
                 if (inr === null || inr <= 0) {
-                    r.actual_cost = null;
+                    if (isUnmatchedZcost(r)) r.actual_cost = null;
                     return;
                 }
                 r.actual_cost = inr;
                 r.po_unit_cost = inr;
-                const budget = nVal(r.budget_cost_per_gmt ?? r.expected_unit_cost);
+                if (isUnmatchedZcost(r)) return;
+                const budget = budgetForCompare(r);
                 if (budget !== null && budget > 0 && !r.family_mismatch) {
                     r.variance_pct = Math.round((((inr - budget) / budget) * 100) * 100) / 100;
                     if (inr <= budget + 0.005) {
@@ -6836,8 +7244,14 @@
                 }
             });
 
-            applyApprovedStatus(po, data.approved_status || 'NotApproved');
+            applyApprovedStatus(
+                po,
+                data.approved_status || data.header?.approved_status || 'NotApproved',
+                { preferStored: true }
+            );
             fillKpis(data.summary || {});
+            // Re-sync after KPIs so Pass PO stays hidden when Approved
+            syncPassRevertButtons(data.summary || summarizeRows(rows));
             renderTable();
             // Explicit SAP ZI_PO_CONDITION_HUB trigger so MOQ / charges update
             refreshChargesFromSap(po, data.summary || {});
@@ -7659,6 +8073,7 @@
             line_no: String(line?.line_no || r.matched_line_no || ''),
             matched_line_key: String(r.matched_line_key || ''),
             budget_cost_per_gmt: nVal(r.budget_cost_per_gmt),
+            budget_cost_per_piece: nVal(r.budget_cost_per_piece) ?? nVal(line?.total_inr ?? r.total_inr),
             cost_description: String(r.cost_description || r.maktx || ''),
         };
         try {
@@ -7867,6 +8282,20 @@
             }
             // PASS PO → new tab with e-sign + Approved button
             openWorkbenchActionInNewTab('pass');
+        });
+        $('pcwSapRevertBtn')?.addEventListener('click', () => {
+            if (cfg.canSapRevert === false || $('pcwSapRevertBtn')?.getAttribute('data-no-access') === '1') {
+                alert('You do not have SAP Revert access for PO Costing.');
+                return;
+            }
+            void revertPoApproval();
+        });
+        $('pcwPortalRevertBtn')?.addEventListener('click', () => {
+            if (cfg.canPortalRevert === false || $('pcwPortalRevertBtn')?.getAttribute('data-no-access') === '1') {
+                alert('You do not have Portal Revert access for PO Costing.');
+                return;
+            }
+            void portalRevertPo();
         });
         $('pcwSentPoBtn')?.addEventListener('click', (e) => {
             e.preventDefault();

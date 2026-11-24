@@ -97,9 +97,23 @@ class PoManualCostingMapService
         return $n !== '' ? $n : ($digits !== '' ? $digits : trim($item));
     }
 
+    private function normMaterial(string $material): string
+    {
+        $m = strtoupper(trim($material));
+        if ($m === '') {
+            return '';
+        }
+        // Align padded SAP material codes (000000001234567890 ↔ 1234567890)
+        if (preg_match('/^\d+$/', $m)) {
+            $n = ltrim($m, '0');
+            return $n !== '' ? $n : $m;
+        }
+        return $m;
+    }
+
     private function mapKey(string $poItem, string $material): string
     {
-        return strtolower($this->normItem($poItem) . '|' . trim($material));
+        return strtolower($this->normItem($poItem) . '|' . $this->normMaterial($material));
     }
 
     /**
@@ -119,7 +133,8 @@ class PoManualCostingMapService
 
         $po = $this->displayPo((string) ($payload['purchase_order'] ?? $payload['po'] ?? ''));
         $poItem = $this->normItem((string) ($payload['po_item'] ?? $payload['poitem'] ?? ''));
-        $material = trim((string) ($payload['material'] ?? ''));
+        $materialRaw = trim((string) ($payload['material'] ?? ''));
+        $material = $this->normMaterial($materialRaw);
         if ($po === '' || $poItem === '') {
             return ['success' => false, 'id' => null, 'error' => 'PO and PO item are required.'];
         }
@@ -128,7 +143,7 @@ class PoManualCostingMapService
         $row = [
             'purchase_order' => $po,
             'po_item' => $poItem,
-            'material' => $material,
+            'material' => $material !== '' ? $material : $materialRaw,
             'mat_cat' => trim((string) ($payload['mat_cat'] ?? '')),
             'quotation_no' => trim((string) ($payload['quotation_no'] ?? $payload['costing_quotation_no'] ?? '')),
             'zcost_item' => trim((string) ($payload['zcost_item'] ?? $payload['cost_item'] ?? '')),
@@ -147,26 +162,34 @@ class PoManualCostingMapService
 
         try {
             $pdo = Database::connection();
+            $storeMaterial = $material !== '' ? $material : $materialRaw;
             $existing = $pdo->prepare("
-                SELECT TOP 1 id FROM [dbo].[" . self::TABLE . "]
+                SELECT TOP 1 id, material FROM [dbo].[" . self::TABLE . "]
                 WHERE purchase_order = ?
                   AND po_item = ?
-                  AND ISNULL(material, '') = ?
             ");
-            $existing->execute([$po, $poItem, $material]);
-            $id = (int) ($existing->fetchColumn() ?: 0);
+            $existing->execute([$po, $poItem]);
+            $id = 0;
+            while ($ex = $existing->fetch(PDO::FETCH_ASSOC)) {
+                $exMat = $this->normMaterial((string) ($ex['material'] ?? ''));
+                if ($exMat === $this->normMaterial($storeMaterial)
+                    || trim((string) ($ex['material'] ?? '')) === trim($storeMaterial)) {
+                    $id = (int) ($ex['id'] ?? 0);
+                    break;
+                }
+            }
 
             if ($id > 0) {
                 $stmt = $pdo->prepare("
                     UPDATE [dbo].[" . self::TABLE . "] SET
-                        mat_cat = ?, quotation_no = ?, zcost_item = ?, maktx = ?, zsection = ?,
+                        material = ?, mat_cat = ?, quotation_no = ?, zcost_item = ?, maktx = ?, zsection = ?,
                         total_inr = ?, gross = ?, currency = ?, convr = ?, unit = ?,
                         line_no = ?, matched_line_key = ?, payload_json = ?,
                         updated_by = ?, updated_at = SYSUTCDATETIME()
                     WHERE id = ?
                 ");
                 $stmt->execute([
-                    $row['mat_cat'], $row['quotation_no'], $row['zcost_item'], $row['maktx'], $row['zsection'],
+                    $storeMaterial, $row['mat_cat'], $row['quotation_no'], $row['zcost_item'], $row['maktx'], $row['zsection'],
                     $row['total_inr'], $row['gross'], $row['currency'], $row['convr'], $row['unit'],
                     $row['line_no'], $row['matched_line_key'], $row['payload_json'],
                     $row['updated_by'], $id,
@@ -184,7 +207,7 @@ class PoManualCostingMapService
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
             $stmt->execute([
-                $row['purchase_order'], $row['po_item'], $row['material'], $row['mat_cat'],
+                $row['purchase_order'], $row['po_item'], $storeMaterial, $row['mat_cat'],
                 $row['quotation_no'], $row['zcost_item'], $row['maktx'], $row['zsection'],
                 $row['total_inr'], $row['gross'], $row['currency'], $row['convr'], $row['unit'],
                 $row['line_no'], $row['matched_line_key'], $row['payload_json'],
@@ -322,6 +345,14 @@ class PoManualCostingMapService
             $rec['total_inr'] = $totalInr;
             $rec['cost_total_inr'] = $totalInr;
             $rec['budget_inr'] = $totalInr;
+            // Must set piece so refresh statusDisplay matches Map Costing apply
+            // (client compares ACTUAL vs Total INR, not only TotalINR/Gross).
+            $rec['budget_cost_per_piece'] = round($totalInr, 4);
+        } elseif (isset($extra['budget_cost_per_piece'])) {
+            $piece = $this->numOrNull($extra['budget_cost_per_piece']);
+            if ($piece !== null && $piece > 0) {
+                $rec['budget_cost_per_piece'] = $piece;
+            }
         }
         if ($gross !== null) {
             $rec['gross'] = $gross;
@@ -354,28 +385,49 @@ class PoManualCostingMapService
         if ($cons === null || $cons <= 0) {
             $cons = 1.0;
         }
-        $needsFx = !empty($rec['porate_needs_fx']);
+        $needsFx = !empty($rec['porate_needs_fx']) && empty($rec['porate_already_inr']);
         $rate = ($needsFx && $convr !== null && $convr > 0) ? $convr : 1.0;
         $actual = null;
         if ($porate !== null) {
-            $actual = round($porate * $rate * $cons, 6);
+            $mid = $porate * $rate * $cons;
+            $ouom = strtoupper(trim((string) ($rec['ouom'] ?? $rec['unit'] ?? '')));
+            $buom = strtoupper(trim((string) ($rec['buom'] ?? '')));
+            $mg = strtoupper(trim((string) ($rec['matgroup'] ?? $rec['material_group'] ?? '')));
+            $matDesc = strtoupper(trim((string) ($rec['mat_desc'] ?? $rec['material_desc'] ?? $rec['description'] ?? '')));
+            $buttonLike = str_contains($mg, 'BUTTON') || str_contains($mg, 'BADGE') || str_contains($mg, 'WASHER')
+                || str_contains($mg, 'HOOK') || str_contains($matDesc, 'BUTTON') || str_contains($matDesc, 'BTN')
+                || str_contains($matDesc, 'WASHER') || str_contains($matDesc, 'SNAP') || str_contains($matDesc, 'SHANK')
+                || str_contains($matDesc, 'BADGE');
+            $isGro = ($ouom === 'GRO' || $buom === 'GRO');
+            $isEa = ($ouom === 'EA' || $buom === 'EA' || $ouom === 'PCS' || $buom === 'PCS');
+            if ($buttonLike && ($isGro || ($isEa && $mid > 1.5))) {
+                $actual = round(round($mid, 0) / 144.0, 6);
+            } else {
+                $actual = round($mid, 6);
+            }
             $rec['actual_cost'] = $actual;
             $rec['po_unit_cost'] = $actual;
-            $rec['porate_already_inr'] = !$needsFx;
+            $rec['porate_already_inr'] = true;
+            $rec['porate_needs_fx'] = false;
         }
 
-        if ($budget !== null && $budget > 0 && $actual !== null) {
-            $rec['variance_pct'] = round((($actual - $budget) / $budget) * 100, 2);
-            if ($actual <= $budget + 0.005) {
+        // Same ceiling as workbench statusDisplay / budgetForCompare: prefer Total INR.
+        $compareBudget = $this->numOrNull($rec['budget_cost_per_piece'] ?? null);
+        if ($compareBudget === null || $compareBudget <= 0) {
+            $compareBudget = $budget;
+        }
+        if ($compareBudget !== null && $compareBudget > 0 && $actual !== null) {
+            $rec['variance_pct'] = round((($actual - $compareBudget) / $compareBudget) * 100, 2);
+            if ($actual <= $compareBudget + 0.005) {
                 $rec['status'] = 'PASS';
                 $rec['validation_result'] = 'PASS — manually matched to zCOST line';
                 $rec['cost_mismatch'] = false;
             } else {
                 $rec['status'] = 'EXCEPTION';
-                $rec['validation_result'] = 'NOT VALIDATED — actual cost exceeds Total INR / Gross budget';
+                $rec['validation_result'] = 'NOT VALIDATED — actual cost exceeds Total INR budget';
                 $rec['cost_mismatch'] = true;
             }
-        } elseif ($budget !== null && $budget > 0) {
+        } elseif ($compareBudget !== null && $compareBudget > 0) {
             $rec['status'] = 'PASS';
             $rec['validation_result'] = 'PASS — manually matched to zCOST line';
             $rec['cost_mismatch'] = false;
@@ -385,7 +437,7 @@ class PoManualCostingMapService
         }
 
         $rec['cost_matrix'] = [
-            'budget' => $budget,
+            'budget' => $compareBudget,
             'actual' => $actual,
             'status' => $rec['status'],
         ];

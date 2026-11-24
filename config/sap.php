@@ -63,8 +63,8 @@ return [
     'quotation_costing_service' => '/sap/opu/odata/sap/Z_QUOTATIONZCOSTCOM_CDS/Z_QuotationZCostCom',
     // PO header pricing conditions (Other / Freight / MOQ / Screen / Bank) — SAP only
     'po_condition_service'      => '/sap/opu/odata/sap/Z_QUOTATIONZCOSTCOM_CDS/ZI_PO_CONDITION_HUB',
-    // SAP PO PDF IGST rate on Sub Total (excl. freight) when tax is not on the condition hub
-    'po_pdf_igst_rate'          => 0.18,
+    // Reserved — IGST/SGST/CGST are not invented when ZI_PO_CONDITION_HUB returns 0
+    'po_pdf_igst_rate'          => 0,
     /*
      * PO Material Group text → ZCOST section names (case-insensitive contains match).
      * Adjust when SAP naming differs from Fabric / Trim / Packing / Special.

@@ -1196,21 +1196,33 @@ final class PoTempfinCostingService
             return null;
         }
 
-        // Classic: OUOM=GRO + button family only (BUOM=GRO alone is not enough)
-        $isButtonGro = ($ouom === 'GRO' || $buom === 'GRO') && (
+        // Buttons priced per gross (144). UoM may be GRO or EA with per-GRO PORATE.
+        $isButtonLike = (
             str_contains($mg, 'BUTTON')
             || str_contains($mg, 'SEMI DULL')
-            || str_contains($mg, 'HOOK & EYE')
+            || str_contains($mg, 'HOOK')
             || str_contains($mg, 'PEARL BTN')
+            || str_contains($mg, 'BADGE')
+            || str_contains($mg, 'WASHER')
             || str_contains($matDesc, 'BTN')
             || str_contains($matDesc, 'BUTTON')
             || str_contains($matDesc, 'PLASTIC')
+            || str_contains($matDesc, 'WASHER')
+            || str_contains($matDesc, 'SNAP')
+            || str_contains($matDesc, 'SHANK')
+            || str_contains($matDesc, 'BADGE')
         );
+        $isGro = ($ouom === 'GRO' || $buom === 'GRO');
+        $isEa = ($ouom === 'EA' || $buom === 'EA' || $ouom === 'PCS' || $buom === 'PCS');
 
+        // Caller passes currency=INR for TEMPFIN (FX already in PORATE).
         $base = ($currency !== 'INR') ? ($porate * $fx) : $porate;
         $mid = $base * $conv;
 
-        if ($isButtonGro) {
+        if ($isButtonLike && $isGro) {
+            return round(round($mid * $cons, 0) / 144.0, 4);
+        }
+        if ($isButtonLike && $isEa && ($mid * $cons) > 1.5) {
             return round(round($mid * $cons, 0) / 144.0, 4);
         }
         if ($ouom === 'KG' || $buom === 'KG') {

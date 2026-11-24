@@ -1,7 +1,7 @@
 /*
  * AUTHOR : NANDHAKUMAR S V
  * DATE : 20/11/2026
- * DESCRIPTION : PO Valuation Report — KPIs + Recent Activity cards / modal (no table view)
+ * DESCRIPTION : PO Validation Report — KPIs + PO activity table / detail modal
  */
 (function () {
     'use strict';
@@ -22,7 +22,6 @@
         search: document.getElementById('pvrTableSearch'),
         searchClear: document.getElementById('pvrTableSearchClear'),
         list: document.getElementById('pvrActivityList'),
-        empty: document.getElementById('pvrActivityEmpty'),
         excelBody: document.getElementById('pvrTableBody'),
         title: document.getElementById('pocPageTitle'),
         modal: document.getElementById('pvrActivityModal'),
@@ -30,6 +29,10 @@
         modalBody: document.getElementById('pvrModalBody'),
         modalClose: document.getElementById('pvrModalClose'),
         modalBackdrop: document.getElementById('pvrModalBackdrop'),
+        statusFilters: document.getElementById('pvrStatusFilters'),
+        showingCount: document.getElementById('pvrShowingCount'),
+        refresh: document.getElementById('pvrRefreshBtn'),
+        wrap: document.getElementById('pvrTableWrap'),
     };
 
     let rows = [];
@@ -37,6 +40,7 @@
     let loaded = false;
     let loading = false;
     let poTimer = null;
+    let statusFilter = '';
 
     function esc(s) {
         return String(s ?? '')
@@ -107,15 +111,44 @@
 
     function setStats(summary) {
         const s = summary || {};
-        ['pending', 'review', 'released', 'total', 'approved'].forEach((k) => {
+        ['draft', 'review', 'released', 'approved', 'total'].forEach((k) => {
             const el = document.getElementById('pvrStat-' + k);
             if (el) el.textContent = fmtN(s[k] || 0);
         });
+        // Legacy pending card id (if present)
+        const pendingEl = document.getElementById('pvrStat-pending');
+        if (pendingEl) pendingEl.textContent = fmtN(s.draft || s.pending || 0);
+    }
+
+    /** KPI cards must match the same PO set shown in the activity table. */
+    function summaryFromGroups(poGroups) {
+        const summary = { draft: 0, review: 0, released: 0, approved: 0, total: poGroups.length };
+        poGroups.forEach((g) => {
+            const key = String(g.stage?.filterKey || g.bucket || 'draft');
+            if (Object.prototype.hasOwnProperty.call(summary, key) && key !== 'total') {
+                summary[key] += 1;
+            } else {
+                summary.draft += 1;
+            }
+        });
+        return summary;
+    }
+
+    function titleCase(s) {
+        const t = String(s || '').trim();
+        if (!t) return '';
+        if (t === t.toUpperCase() && t.length <= 12) {
+            return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
+        }
+        return t.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
     }
 
     function stepMeta(r) {
         const type = String(r.event_type || '').toLowerCase();
         const status = String(r.status || '').toLowerCase();
+        if (status.includes('comment')) {
+            return { icon: 'chat_bubble', tone: 'orange', label: 'Commented by' };
+        }
         if (type === 'sent') {
             return { icon: 'swap_horiz', tone: 'blue', label: 'Routed by' };
         }
@@ -132,33 +165,98 @@
             if (status.includes('release')) {
                 return { icon: 'task_alt', tone: 'teal', label: 'Released by' };
             }
+            if (status.includes('draft') || status.includes('pending')) {
+                return { icon: 'pending_actions', tone: 'amber', label: 'Submitted by' };
+            }
             return { icon: 'person', tone: 'slate', label: 'Updated by' };
         }
         return { icon: 'history', tone: 'slate', label: 'Updated by' };
     }
 
-    function stageMeta(latest) {
+    function stageMeta(latest, bucketHint) {
         const status = String(latest?.status || '').trim();
         const type = String(latest?.event_type || '').toLowerCase();
         const low = status.toLowerCase();
-        if (low.includes('release') || type === 'pass' && low.includes('e-sign')) {
-            return { stage: status || 'Released', badge: 'Released', badgeTone: 'teal', waiting: false };
+        const bucket = String(bucketHint || latest?.bucket || '').toLowerCase();
+
+        if (bucket === 'approved' || low === 'approved' || (type === 'pass' && low.includes('approv'))) {
+            return {
+                stage: 'Approved',
+                badge: 'Approved',
+                badgeTone: 'teal',
+                waiting: false,
+                filterKey: 'approved',
+            };
         }
-        if (low.includes('review') || low.includes('checker')) {
-            return { stage: status || 'Review', badge: 'Pending', badgeTone: 'amber', waiting: true, waitingLabel: 'Awaiting Checker Review' };
+        if (bucket === 'released' || low.includes('release')) {
+            return {
+                stage: 'Released',
+                badge: 'Released',
+                badgeTone: 'teal',
+                waiting: false,
+                filterKey: 'released',
+            };
         }
-        if (low.includes('draft') || low.includes('pending') || low === 'comment') {
-            return { stage: status || 'Pending', badge: 'Pending', badgeTone: 'amber', waiting: true, waitingLabel: status || 'Pending' };
+        if (bucket === 'review' || low.includes('review') || low.includes('checker')) {
+            return {
+                stage: 'Review',
+                badge: 'Review',
+                badgeTone: 'amber',
+                waiting: true,
+                waitingLabel: 'Awaiting Checker Review',
+                filterKey: 'review',
+            };
         }
-        if (type === 'sent') {
-            return { stage: status || 'Routed', badge: 'Pending', badgeTone: 'amber', waiting: true, waitingLabel: 'Awaiting next action' };
+        if (low.includes('comment')) {
+            return {
+                stage: 'Comment',
+                badge: 'Draft',
+                badgeTone: 'slate',
+                waiting: false,
+                actionLabel: 'Commented by',
+                filterKey: 'draft',
+            };
         }
+        // Draft (default) — includes pending / no status
         return {
-            stage: status || (latest?.event_label || 'In progress'),
-            badge: status || 'Active',
+            stage: 'Draft',
+            badge: 'Draft',
             badgeTone: 'slate',
             waiting: false,
+            filterKey: 'draft',
         };
+    }
+
+    function lastActionText(g) {
+        const latest = g.latest || null;
+        const stage = g.stage || {};
+        const name = String(latest?.user || '—').trim() || '—';
+        if (stage.waiting) return stage.waitingLabel || 'Awaiting action';
+        if (stage.actionLabel) return `${stage.actionLabel} ${name}`;
+        const meta = latest ? stepMeta(latest) : null;
+        return meta ? `${meta.label} ${name}` : '—';
+    }
+
+    function updateReportMeta(visibleCount) {
+        if (els.showingCount) {
+            els.showingCount.textContent = `Showing ${fmtN(visibleCount)} purchase order${visibleCount === 1 ? '' : 's'}`;
+        }
+        const allGroups = groupByPo(filteredRows());
+        const counts = { all: allGroups.length, draft: 0, review: 0, released: 0, approved: 0 };
+        allGroups.forEach((g) => {
+            const key = String(g.stage?.filterKey || 'draft');
+            if (counts[key] !== undefined) counts[key] += 1;
+        });
+        const setPill = (id, n) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = fmtN(n);
+        };
+        setPill('pvrPillAll', counts.all);
+        setPill('pvrPillDraft', counts.draft);
+        setPill('pvrPillPending', counts.draft);
+        setPill('pvrPillReview', counts.review);
+        setPill('pvrPillReleased', counts.released);
+        setPill('pvrPillApproved', counts.approved);
     }
 
     function relativeWhen(raw) {
@@ -184,6 +282,37 @@
     }
 
     function groupByPo(list) {
+        // New API: one record per PO (with optional nested events)
+        if (list.length && Array.isArray(list[0]?.events)) {
+            const out = list.map((r) => {
+                const po = String(r.purchase_order || '').replace(/\D/g, '') || '—';
+                const events = Array.isArray(r.events) && r.events.length
+                    ? r.events.slice()
+                    : [r];
+                events.sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
+                const latest = {
+                    purchase_order: r.purchase_order,
+                    status: r.status,
+                    event_type: r.event_type,
+                    event_label: r.event_label,
+                    user: r.user,
+                    remarks: r.remarks,
+                    created_at: r.created_at,
+                    bucket: r.bucket,
+                };
+                return {
+                    po,
+                    bucket: r.bucket || '',
+                    events,
+                    latest,
+                    stage: stageMeta(latest, r.bucket),
+                };
+            });
+            out.sort((a, b) => String(b.latest?.created_at || '').localeCompare(String(a.latest?.created_at || '')));
+            return out;
+        }
+
+        // Legacy flat activity rows
         const map = new Map();
         list.forEach((r) => {
             const po = String(r.purchase_order || '').replace(/\D/g, '') || '—';
@@ -214,23 +343,39 @@
         if (!q) return rows;
         return rows.filter((r) => {
             const blob = [
-                r.purchase_order, r.event_label, r.event_type, r.status, r.user, r.remarks, r.created_at,
+                r.purchase_order, r.event_label, r.event_type, r.status, r.bucket, r.user, r.remarks, r.created_at,
             ].join(' ').toLowerCase();
             return blob.includes(q);
         });
     }
 
-    function renderExcelBody(list) {
+    function progressExportText(g) {
+        const events = Array.isArray(g.events) ? g.events : [];
+        if (!events.length) return String(g.stage?.badge || g.stage?.stage || '');
+        return events.map((r) => {
+            const meta = stepMeta(r);
+            const name = String(r.user || '').trim();
+            return name ? `${meta.label} ${name}` : meta.label;
+        }).join(' → ');
+    }
+
+    function renderExcelBody(poGroups) {
         if (!els.excelBody) return;
-        els.excelBody.innerHTML = list.map((r, i) => `<tr>
-            <td>${i + 1}</td>
-            <td>${esc(r.purchase_order || '')}</td>
-            <td>${esc(r.event_label || '')}</td>
-            <td>${esc(r.status || '')}</td>
-            <td>${esc(r.user || '')}</td>
-            <td>${esc(r.remarks || '')}</td>
-            <td>${esc(r.created_at || '')}</td>
-        </tr>`).join('');
+        els.excelBody.innerHTML = poGroups.map((g, i) => {
+            const owner = String(g.latest?.user || '').trim();
+            const whenParts = relativeWhenParts(g.latest?.created_at);
+            const when = whenParts.absolute === '—' ? '' : whenParts.absolute;
+            const action = lastActionText(g);
+            return `<tr data-orig-sno="${i + 1}">
+                <td>${i + 1}</td>
+                <td>${esc(g.po === '—' ? '' : g.po)}</td>
+                <td>${esc(g.stage.badge || g.stage.stage || '')}</td>
+                <td>${esc(when)}</td>
+                <td>${esc(owner && owner !== '—' ? owner : '')}</td>
+                <td>${esc(action === '—' ? '' : action)}</td>
+                <td>${esc(progressExportText(g))}</td>
+            </tr>`;
+        }).join('');
     }
 
     function renderSteps(events, opts) {
@@ -258,6 +403,70 @@
             </div>`);
         }
         return `<div class="pvr-steps">${steps.join('<span class="pvr-step-sep material-icons-round">play_arrow</span>')}</div>`;
+    }
+
+    function renderTrail(events) {
+        const stage = stageMeta(events[events.length - 1] || null);
+        const max = 4;
+        const hidden = Math.max(0, events.length - max);
+        const list = events.length > max ? events.slice(events.length - max) : events;
+        const dots = [];
+        if (hidden > 0) {
+            dots.push(`<span class="pvr-trail-more" title="${esc(hidden + ' earlier step' + (hidden === 1 ? '' : 's'))}">+${hidden}</span>`);
+        }
+        list.forEach((r) => {
+            const meta = stepMeta(r);
+            const name = String(r.user || '—').trim() || '—';
+            const tip = `${meta.label} ${name}`;
+            dots.push(`<span class="pvr-trail-dot is-${esc(meta.tone)}" title="${esc(tip)}">
+                <span class="material-icons-round">${esc(meta.icon)}</span>
+            </span>`);
+        });
+        if (stage.waiting) {
+            dots.push(`<span class="pvr-trail-dot is-waiting" title="${esc(stage.waitingLabel || 'Awaiting action')}">
+                <span class="material-icons-round">hourglass_empty</span>
+            </span>`);
+        }
+        const last = events[events.length - 1] || null;
+        const lastMeta = last ? stepMeta(last) : null;
+        const lastName = String(last?.user || '').trim();
+        let caption;
+        if (stage.waiting) {
+            caption = esc(stage.waitingLabel || 'Awaiting action');
+        } else if (stage.actionLabel) {
+            caption = `${esc(stage.actionLabel)} ${esc(lastName || '—')}`;
+        } else if (lastMeta) {
+            caption = `${esc(lastMeta.label)} ${esc(lastName || '—')}`;
+        } else {
+            caption = '—';
+        }
+        const captionClass = stage.waiting ? 'is-waiting' : '';
+        return `<div class="pvr-trail">
+            <div class="pvr-trail-dots">${dots.join('<span class="pvr-trail-line" aria-hidden="true"></span>')}</div>
+            <div class="pvr-trail-cap ${captionClass}">${caption}</div>
+        </div>`;
+    }
+
+    function relativeWhenParts(raw) {
+        const s = String(raw || '').trim();
+        if (!s) return { absolute: '—', ago: '' };
+        const d = new Date(s.replace(' ', 'T'));
+        if (Number.isNaN(d.getTime())) return { absolute: s, ago: '' };
+        const diff = Date.now() - d.getTime();
+        const mins = Math.floor(diff / 60000);
+        const hours = Math.floor(mins / 60);
+        const days = Math.floor(hours / 24);
+        let ago = '';
+        if (mins < 1) ago = 'just now';
+        else if (mins < 60) ago = `${mins} min ago`;
+        else if (hours < 24) ago = `${hours}h ago`;
+        else ago = `${days}d ago`;
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const yyyy = d.getFullYear();
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mi = String(d.getMinutes()).padStart(2, '0');
+        return { absolute: `${dd}/${mm}/${yyyy} ${hh}:${mi}`, ago };
     }
 
     function renderCard(g, opts) {
@@ -294,19 +503,72 @@
         </article>`;
     }
 
+    function emptyRowHtml(message) {
+        return `<tr class="rpt-table-no-match">
+            <td colspan="7" class="rpt-table-empty">
+                <div class="rpt-no-match-card">
+                    <span class="material-icons-round">filter_alt_off</span>
+                    <p>${esc(message)}</p>
+                </div>
+            </td>
+        </tr>`;
+    }
+
+    function renderRow(g, index) {
+        const latest = g.latest || {};
+        const owner = String(latest.user || '—').trim() || '—';
+        const when = relativeWhenParts(latest.created_at);
+        const href = g.po && g.po !== '—'
+            ? `${poBase}?po=${encodeURIComponent(g.po)}&view=costing`
+            : '#';
+        const poLabel = g.po === '—' ? '—' : String(g.po);
+        return `<tr class="pvr-row" data-po="${esc(g.po)}" data-orig-sno="${index + 1}" tabindex="0" title="View validation timeline">
+            <td class="sno">${index + 1}</td>
+            <td>
+                <a class="po-num-link pvr-po-link" href="${esc(href)}" onclick="event.stopPropagation()" title="${esc(g.po === '—' ? 'PO —' : 'PO-' + g.po)}">${esc(poLabel)}</a>
+            </td>
+            <td>
+                <span class="pvr-badge is-${esc(g.stage.badgeTone)}">${esc(g.stage.badge)}</span>
+            </td>
+            <td>
+                <div class="pvr-when-cell">
+                    <span class="pvr-when-abs">${esc(when.absolute)}</span>
+                    ${when.ago ? `<span class="pvr-when-ago">${esc(when.ago)}</span>` : ''}
+                </div>
+            </td>
+            <td>
+                <div class="pvr-owner is-table">
+                    <span class="pvr-avatar" aria-hidden="true">${esc((owner || '?').charAt(0).toUpperCase())}</span>
+                    <span class="pvr-owner-name">${esc(owner)}</span>
+                </div>
+            </td>
+            <td>
+                <span class="pvr-action-txt ${g.stage.waiting ? 'is-waiting' : ''}">${esc(lastActionText(g))}</span>
+            </td>
+            <td class="pvr-td-flow">${renderTrail(g.events)}</td>
+        </tr>`;
+    }
+
     function renderList() {
-        const list = filteredRows();
-        groups = groupByPo(list);
+        const allGroups = groupByPo(filteredRows());
+        setStats(summaryFromGroups(allGroups));
+        groups = statusFilter
+            ? allGroups.filter((g) => String(g.stage?.filterKey || '') === statusFilter)
+            : allGroups;
         if (els.searchClear) els.searchClear.hidden = !String(els.search?.value || '').trim();
-        renderExcelBody(list);
+        renderExcelBody(groups);
+        updateReportMeta(groups.length);
         if (!els.list) return;
         if (!groups.length) {
-            els.list.innerHTML = `<div class="pvr-activity-empty">${
-                loaded ? 'No PO log activity for these filters.' : 'Apply filters to load PO activity.'
-            }</div>`;
+            const msg = !loaded
+                ? 'Apply filters to load PO validation activity.'
+                : (statusFilter || String(els.search?.value || '').trim()
+                    ? 'No purchase orders match these filters.'
+                    : 'No PO validation activity for this period.');
+            els.list.innerHTML = emptyRowHtml(msg);
             return;
         }
-        els.list.innerHTML = groups.map((g) => renderCard(g, { compact: true })).join('');
+        els.list.innerHTML = groups.map((g, i) => renderRow(g, i)).join('');
     }
 
     function openModal(po) {
@@ -330,8 +592,9 @@
     async function load() {
         if (loading) return;
         loading = true;
+        if (els.wrap) els.wrap.classList.add('is-loading');
         if (els.list) {
-            els.list.innerHTML = '<div class="pvr-activity-empty">Loading…</div>';
+            els.list.innerHTML = emptyRowHtml('Loading…');
         }
         const { from, to } = resolveRange();
         const params = new URLSearchParams();
@@ -351,24 +614,36 @@
             if (!json.success && json.success !== undefined && !data.summary) {
                 throw new Error(json.message || json.error || 'Failed to load report');
             }
-            setStats(data.summary || {});
             rows = Array.isArray(data.records) ? data.records : [];
             loaded = true;
             renderList();
         } catch (err) {
-            setStats({});
             rows = [];
             loaded = true;
+            setStats({});
+            updateReportMeta(0);
             if (els.list) {
-                els.list.innerHTML = `<div class="pvr-activity-empty">${esc(err.message || 'Load failed')}</div>`;
+                els.list.innerHTML = emptyRowHtml(err.message || 'Load failed');
             }
         } finally {
             loading = false;
+            if (els.wrap) els.wrap.classList.remove('is-loading');
         }
     }
 
+    function setStatusFilter(key) {
+        statusFilter = String(key || '') === 'pending' ? 'draft' : String(key || '');
+        if (!els.statusFilters) return;
+        els.statusFilters.querySelectorAll('.pvr-status-pill').forEach((btn) => {
+            const on = String(btn.getAttribute('data-status') || '') === statusFilter;
+            btn.classList.toggle('is-on', on);
+            btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+        renderList();
+    }
+
     function open() {
-        if (els.title) els.title.innerHTML = '<strong>poValaition Report</strong>';
+        if (els.title) els.title.innerHTML = '<strong>PO Validation Report</strong>';
         page.classList.add('is-valuation-report');
         page.classList.remove(
             'is-related-po', 'is-related-results', 'is-related-lookup',
@@ -376,11 +651,12 @@
         );
         const header = document.getElementById('pocValuationHeaderFilters');
         if (header) header.hidden = false;
-        // Clear leftover quick-search so cards are not filtered to empty
         if (els.search) els.search.value = '';
         if (els.searchClear) els.searchClear.hidden = true;
+        statusFilter = '';
+        setStatusFilter('');
         syncCustomVisibility();
-        // Always refresh when opening — avoids stuck empty state after a failed load
+        updateReportMeta(0);
         load();
         setTimeout(() => { els.po?.focus(); }, 40);
     }
@@ -414,18 +690,25 @@
         if (els.search) els.search.value = '';
         renderList();
     });
+    els.statusFilters?.addEventListener('click', (e) => {
+        const btn = e.target.closest('.pvr-status-pill');
+        if (!btn) return;
+        setStatusFilter(btn.getAttribute('data-status') || '');
+    });
+    els.refresh?.addEventListener('click', () => load());
 
     els.list?.addEventListener('click', (e) => {
-        const card = e.target.closest('.pvr-card');
-        if (!card) return;
-        openModal(card.getAttribute('data-po') || '');
+        if (e.target.closest('a')) return;
+        const row = e.target.closest('.pvr-row');
+        if (!row) return;
+        openModal(row.getAttribute('data-po') || '');
     });
     els.list?.addEventListener('keydown', (e) => {
         if (e.key !== 'Enter' && e.key !== ' ') return;
-        const card = e.target.closest('.pvr-card');
-        if (!card) return;
+        const row = e.target.closest('.pvr-row');
+        if (!row) return;
         e.preventDefault();
-        openModal(card.getAttribute('data-po') || '');
+        openModal(row.getAttribute('data-po') || '');
     });
     els.modalClose?.addEventListener('click', closeModal);
     els.modalBackdrop?.addEventListener('click', closeModal);

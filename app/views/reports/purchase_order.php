@@ -151,6 +151,22 @@ $listCards = $isCostingView
                     <button type="button" class="pcw-cb-btn is-pass" id="pcwPassPoBtn" disabled
                             title="<?= $canPassPoBar ? 'Pass PO — opens eSign in a new tab' : 'Pass PO permission required' ?>"
                             <?= $canPassPoBar ? '' : 'data-no-access="1"' ?>>PASS PO</button>
+                    <?php
+                        $canSapRevertBar = function_exists('sap_reports_user_can')
+                            ? sap_reports_user_can('po-costing', 'sap_revert')
+                            : false;
+                        $canPortalRevertBar = function_exists('sap_reports_user_can')
+                            ? sap_reports_user_can('po-costing', 'portal_revert')
+                            : false;
+                    ?>
+                    <?php if ($canSapRevertBar): ?>
+                    <button type="button" class="pcw-cb-btn is-revert" id="pcwSapRevertBtn" hidden disabled
+                            title="SAP Revert — POApprovalSet Value = &quot;&quot;">SAP REVERT</button>
+                    <?php endif; ?>
+                    <?php if ($canPortalRevertBar): ?>
+                    <button type="button" class="pcw-cb-btn is-portal-revert" id="pcwPortalRevertBtn" hidden disabled
+                            title="Portal Revert — clear release log + delete PO PDF">PORTAL REVERT</button>
+                    <?php endif; ?>
                     <div class="pcw-cb-status" id="pcwPassStatus">STATUS : NotApproved</div>
                 </form>
             <?php elseif ($isCostingBulk): ?>
@@ -759,6 +775,7 @@ $pcbCurrentUserEmail = trim((string) (
     'manualMapUrl'       => url('purchase-order/manual-map'),
     'pdfUrl'             => url('purchase-order/pdf'),
     'passPoUrl'          => url('purchase-order/pass'),
+    'portalRevertUrl'    => url('purchase-order/portal-revert'),
     'esignSaveUrl'       => url('purchase-order/esign-save'),
     'esignSignatureUrl'  => url('purchase-order/esign-signature'),
     'releaseStatusUrl'   => url('po-costing/related-po/status'),
@@ -783,6 +800,8 @@ $pcbCurrentUserEmail = trim((string) (
     'currentUser'        => $pcbCurrentUser,
     'currentUserEmail'   => $pcbCurrentUserEmail,
     'canPassPo'          => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'approve') : true,
+    'canSapRevert'       => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'sap_revert') : false,
+    'canPortalRevert'    => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'portal_revert') : false,
     'canAssign'          => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'assign') : true,
     'canValidate'        => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'validate') : true,
     'canEsign'           => function_exists('sap_reports_user_can') ? sap_reports_user_can('po-costing', 'esign') : true,
