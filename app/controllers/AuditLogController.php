@@ -22,14 +22,17 @@ class AuditLogController extends Controller
             return;
         }
 
-        // Full table history (no rolling 15-day cut) — only UI payload capped.
+        // POST-only activity, last 30 days (older rows purged on read).
+        ApiAuditLogService::purgeExpired();
         $records = ApiAuditLogService::latest(2000);
         $this->view('reports/audit_log', [
-            'pageTitle' => 'API Activity Log',
-            'appShell'  => true,
-            'records'   => $records,
-            'total'     => count($records),
-            'stats'     => ApiAuditLogService::buildStats($records),
+            'pageTitle'      => 'API Activity Log',
+            'appShell'       => true,
+            'records'        => $records,
+            'total'          => count($records),
+            'stats'          => ApiAuditLogService::buildStats($records),
+            'actionFilters'  => ApiAuditLogService::ACTION_FILTERS,
+            'retentionDays'  => 30,
         ]);
     }
 
@@ -47,15 +50,18 @@ class AuditLogController extends Controller
                 ], 403);
             }
 
+            ApiAuditLogService::purgeExpired();
             $limit = (int) ($_GET['limit'] ?? 2000);
             $rows = ApiAuditLogService::latest($limit);
             $this->jsonResponse([
                 'success' => true,
-                'message' => 'API audit log',
+                'message' => 'API audit log (POST only, last 30 days)',
                 'data' => [
                     'records' => $rows,
                     'total' => count($rows),
                     'stats' => ApiAuditLogService::buildStats($rows),
+                    'action_filters' => ApiAuditLogService::ACTION_FILTERS,
+                    'retention_days' => 30,
                     'timezone' => 'Asia/Kolkata',
                 ],
             ]);

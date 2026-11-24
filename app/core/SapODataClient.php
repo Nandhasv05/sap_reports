@@ -368,7 +368,9 @@ class SapODataClient
         curl_close($ch);
 
         if ($fetchResponse === false) {
-            return ['success' => false, 'http_code' => $fetchCode, 'body' => null, 'raw' => null, 'error' => $fetchErr !== '' ? $fetchErr : 'CSRF fetch failed.', 'url' => $postUrl];
+            $fail = ['success' => false, 'http_code' => $fetchCode, 'body' => null, 'raw' => null, 'error' => $fetchErr !== '' ? $fetchErr : 'CSRF fetch failed.', 'url' => $postUrl];
+            $this->auditRememberSap($postUrl, $payload, $fail);
+            return $fail;
         }
 
         $csrfToken = '';
@@ -410,12 +412,14 @@ class SapODataClient
         curl_close($chPost);
 
         if ($postRes === false) {
-            return ['success' => false, 'http_code' => $postCode, 'body' => null, 'raw' => null, 'error' => $postErr !== '' ? $postErr : 'SAP POST failed.', 'url' => $postUrl];
+            $fail = ['success' => false, 'http_code' => $postCode, 'body' => null, 'raw' => null, 'error' => $postErr !== '' ? $postErr : 'SAP POST failed.', 'url' => $postUrl];
+            $this->auditRememberSap($postUrl, $payload, $fail);
+            return $fail;
         }
 
         $decoded = json_decode((string) $postRes, true);
         if ($postCode >= 200 && $postCode < 300) {
-            return [
+            $ok = [
                 'success'   => true,
                 'http_code' => $postCode,
                 'body'      => is_array($decoded) ? $decoded : null,
@@ -423,6 +427,8 @@ class SapODataClient
                 'error'     => null,
                 'url'       => $postUrl,
             ];
+            $this->auditRememberSap($postUrl, $payload, $ok);
+            return $ok;
         }
 
         $message = "SAP HTTP {$postCode}";
@@ -432,7 +438,7 @@ class SapODataClient
             $message = (string) $decoded['error']['message'];
         }
 
-        return [
+        $fail = [
             'success'   => false,
             'http_code' => $postCode,
             'body'      => is_array($decoded) ? $decoded : null,
@@ -440,6 +446,40 @@ class SapODataClient
             'error'     => $message,
             'url'       => $postUrl,
         ];
+        $this->auditRememberSap($postUrl, $payload, $fail);
+        return $fail;
+    }
+
+    /**
+     * Attach SAP POST exchange to the current portal audit log row (if available).
+     *
+     * @param array<string,mixed> $payload
+     * @param array<string,mixed> $result
+     */
+    private function auditRememberSap(string $url, array $payload, array $result): void
+    {
+        try {
+            $serviceFile = base_path('app/services/ApiAuditLogService.php');
+            if (!is_file($serviceFile)) {
+                return;
+            }
+            require_once $serviceFile;
+            if (!class_exists('ApiAuditLogService', false)) {
+                return;
+            }
+            $response = [
+                'success'   => $result['success'] ?? null,
+                'http_code' => $result['http_code'] ?? null,
+                'error'     => $result['error'] ?? null,
+                'body'      => $result['body'] ?? null,
+            ];
+            if (!empty($result['raw']) && $result['body'] === null) {
+                $response['raw'] = mb_substr((string) $result['raw'], 0, 4000);
+            }
+            ApiAuditLogService::rememberSapCall($url, $payload, $response);
+        } catch (Throwable $e) {
+            // Never break SAP calls because of audit capture.
+        }
     }
 
     /*
