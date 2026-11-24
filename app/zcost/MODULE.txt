@@ -1,0 +1,4 @@
+﻿Zcost module backend (SapClient, Database, AuditLog, PortalAuth, config).
+Views: app/views/zcost/
+Assets: public/css/zcost/, public/js/zcost/
+Legacy mirror: public/zcost/

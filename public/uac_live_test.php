@@ -11,7 +11,7 @@ if (!defined('EVOLV_ROOT')) {
 }
 require EVOLV_ROOT . '/app/core/helpers.php';
 require EVOLV_ROOT . '/app/core/Database.php';
-require EVOLV_ROOT . '/app/controllers/UserAccessControlController.php';
+require EVOLV_ROOT . '/app/controllers/UserAccessControl/UserAccessControlController.php';
 
 $table = UserAccessControlController::ACCESS_TABLE;
 

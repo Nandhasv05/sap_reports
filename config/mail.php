@@ -10,18 +10,17 @@
 return [
     'enabled' => true,
     'driver'  => 'smtp', // smtp | mail
-    // Same working Office365 mailbox as EVOL portal (password_reset / fabric statement / PO e-sign)
+    // Outbound mailbox (Office 365) — From: apps <apps@evolvclothing.com>
     'from' => [
-        'address' => getenv('EVOLV_SMTP_USER') ?: 'support@evolvclothing.com',
-        'name'    => 'Evolv Apps',
+        'address' => 'apps@evolvclothing.com',
+        'name'    =>  'EVOLV Applications',
     ],
     'smtp' => [
         'host'       => getenv('EVOLV_SMTP_HOST') ?: 'smtp.office365.com',
         'port'       => (int) (getenv('EVOLV_SMTP_PORT') ?: 587),
         'encryption' => getenv('EVOLV_SMTP_ENCRYPTION') ?: 'tls', // tls | ssl | ''
-        'username'   => getenv('EVOLV_SMTP_USER') ?: 'support@evolvclothing.com',
-        // Microsoft 365 app password (shared with EVOL mail senders)
-        'password'   => getenv('EVOLV_SMTP_PASS') ?: 'qjjyjbddpgcbjkmn',
+        'username'   => 'apps@evolvclothing.com',
+        'password'   => '#EvloveND5791@',
         'timeout'    => 20,
     ],
     // If a tagged user has no Email in users table, append this domain

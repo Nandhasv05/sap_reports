@@ -116,7 +116,7 @@ class Router
             sap_reports_json_error(404, 'Not found.', 'not_found');
         }
 
-        require_once base_path('app/controllers/ErrorController.php');
+        sap_reports_require_controller('ErrorController');
         (new ErrorController())->notFound();
     }
 }

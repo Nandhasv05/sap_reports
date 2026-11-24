@@ -546,7 +546,7 @@
                     if (!clean) return '';
                     const qtyText = item.qty === null || item.qty === undefined ? '' : dashCell(item.qty).replace('\u2014', '-');
                     const exportText = qtyText ? `${clean} (${qtyText})` : clean;
-                    const title = `Direct API call for Sales Order ${clean}` + (qtyText ? ` Â· Qty ${qtyText}` : '');
+                    const title = `Direct API call for Sales Order ${clean}` + (qtyText ? ` | Qty ${qtyText}` : '');
                     const qtyBadge = qtyText ? `<span class="so-chip-qty">${escapeHtml(qtyText)}</span>` : '';
                     return `<a href="${escapeHtml(pageUrl)}?so=${encodeURIComponent(clean)}" class="so-chip" data-export="${escapeHtml(exportText)}" title="${escapeHtml(title)}">${escapeHtml(clean)}${qtyBadge}</a>`;
                 }).join('') + '</div>';

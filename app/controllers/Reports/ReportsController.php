@@ -633,7 +633,7 @@ class ReportsController extends Controller
         }
         // Ensure PO Costing aside bits (incl. can_search_po) exist before permission checks
         try {
-            require_once base_path('app/controllers/UserAccessControlController.php');
+            sap_reports_require_controller('UserAccessControlController');
             UserAccessControlController::ensureAccessBitColumns();
         } catch (Throwable $e) {
             error_log('showPoCosting ensureAccessBitColumns: ' . $e->getMessage());

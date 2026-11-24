@@ -12,7 +12,7 @@ if (!defined('EVOLV_ROOT')) {
 require EVOLV_ROOT . '/app/core/helpers.php';
 require EVOLV_ROOT . '/app/core/Database.php';
 require EVOLV_ROOT . '/app/core/portal_auth.php';
-require EVOLV_ROOT . '/app/controllers/UserAccessControlController.php';
+require EVOLV_ROOT . '/app/controllers/UserAccessControl/UserAccessControlController.php';
 require_once EVOLV_ROOT . '/app/services/ApiAuditLogService.php';
 
 if (session_status() !== PHP_SESSION_ACTIVE) {

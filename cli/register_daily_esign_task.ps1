@@ -4,26 +4,18 @@
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$phpCandidates = @(
-    'C:\MAMP\bin\php\php8.3.1\php.exe',
-    'C:\MAMP\bin\php\php8.2.0\php.exe',
-    'C:\MAMP\bin\php\php.exe'
-)
-$php = $phpCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-if (-not $php) { throw 'PHP executable not found under C:\MAMP\bin\php' }
+$bat = Join-Path $root 'cli\schedule_daily_esign_report.bat'
+if (-not (Test-Path $bat)) { throw "Missing $bat" }
 
-$script = Join-Path $root 'cli\send_daily_esign_report.php'
-if (-not (Test-Path $script)) { throw "Missing $script" }
-
+# Prefer the .bat (HTTP cron first, then CLI with Apache php.ini)
 $taskName = 'Evolv_Daily_PO_Esign_Report'
-$action = New-ScheduledTaskAction -Execute $php -Argument "`"$script`"" -WorkingDirectory $root
-# 23:00 local time (set PC timezone to India Standard Time for IST)
+$action = New-ScheduledTaskAction -Execute $bat -WorkingDirectory $root
 $trigger = New-ScheduledTaskTrigger -Daily -At '23:00'
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Highest
 
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
 Write-Host "Registered task '$taskName' — daily 23:00"
-Write-Host "PHP: $php"
-Write-Host "Script: $script"
-Write-Host "Dry-run test: `"$php`" `"$script`" --dry-run"
+Write-Host "Action: $bat"
+Write-Host "Dry-run (CLI with Apache php.ini):"
+Write-Host '  C:\MAMP\bin\php\php8.3.1\php.exe -c C:\MAMP\conf\php8.3.1\php.ini cli\send_daily_esign_report.php --dry-run'

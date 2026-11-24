@@ -14,6 +14,53 @@ function base_path(string $path = ''): string
     return $path === '' ? $root : $root . DIRECTORY_SEPARATOR . ltrim(str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $path), DIRECTORY_SEPARATOR);
 }
 
+/**
+ * Resolve controller path: app/controllers/{Module}/{Module}Controller.php
+ * Example: AuditLogController → app/controllers/AuditLog/AuditLogController.php
+ */
+function sap_reports_controller_path(string $classOrFile): string
+{
+    $name = basename(str_replace('\\', '/', $classOrFile));
+    $name = preg_replace('/\.php$/i', '', $name) ?: $name;
+    if (!str_ends_with($name, 'Controller')) {
+        $name .= 'Controller';
+    }
+    $module = substr($name, 0, -strlen('Controller'));
+    if ($module === '') {
+        $module = $name;
+    }
+    return base_path('app/controllers/' . $module . '/' . $name . '.php');
+}
+
+/**
+ * require_once a controller by class name (folder layout).
+ */
+function sap_reports_require_controller(string $classOrFile): void
+{
+    $path = sap_reports_controller_path($classOrFile);
+    if (!is_file($path)) {
+        throw new RuntimeException('Controller not found: ' . $path);
+    }
+    require_once $path;
+}
+
+// Autoload app/controllers/{Module}/{Class}.php
+spl_autoload_register(static function (string $class): void {
+    if (!str_ends_with($class, 'Controller') || str_contains($class, '\\')) {
+        return;
+    }
+    $path = sap_reports_controller_path($class);
+    if (is_file($path)) {
+        require_once $path;
+    }
+});
+
+// Shared cross-module utilities
+$generalFile = base_path('app/common/general.php');
+if (is_file($generalFile)) {
+    require_once $generalFile;
+}
+
 /*
  * Get the configuration file
  */
@@ -41,17 +88,32 @@ function url(string $path = ''): string
 }
 
 /*
- * Get the asset
+ * Get the asset (resolves module folders via sap_reports_resolve_public_path)
  */
 function asset(string $path): string
 {
-    $rel = ltrim($path, '/');
+    $rel = ltrim(str_replace('\\', '/', $path), '/');
+    if (function_exists('sap_reports_resolve_public_path')) {
+        $rel = sap_reports_resolve_public_path($rel);
+    }
     $href = url($rel);
     $file = base_path('public/' . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $rel));
     if (is_file($file)) {
         $href .= (str_contains($href, '?') ? '&' : '?') . 'v=' . filemtime($file);
     }
     return $href;
+}
+
+/**
+ * Absolute path under public/ for a logical asset (module-aware).
+ */
+function sap_reports_public_file(string $path): string
+{
+    $rel = ltrim(str_replace('\\', '/', $path), '/');
+    if (function_exists('sap_reports_resolve_public_path')) {
+        $rel = sap_reports_resolve_public_path($rel);
+    }
+    return base_path('public/' . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $rel));
 }
 
 /*

@@ -3,6 +3,9 @@ DirectoryIndex index.php
 
 RewriteRule ^(css|js|assets|zcost)/(.*)$ public/$1/$2 [L]
 
+# Standalone cron (key auth only — no portal login)
+RewriteRule ^cron_daily_esign_report\.php$ public/cron_daily_esign_report.php [L,QSA]
+
 RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d
 RewriteRule ^ - [L]

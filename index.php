@@ -19,7 +19,8 @@ $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 $rel = preg_replace('#^/sap_reports(?=/|$)#', '', $path) ?: '/';
 $rel = preg_replace('#/index\.php$#', '/', $rel) ?: '/';
 
-if (preg_match('#^/(login|logout|uac_repair|uac_diag|uac_save_test)\.php$#', $rel, $m)) {
+// Public PHP entrypoints (no portal session) — cron uses ?key= secret only
+if (preg_match('#^/(login|logout|uac_repair|uac_diag|uac_save_test|cron_daily_esign_report)\.php$#', $rel, $m)) {
     require EVOLV_ROOT . '/public/' . $m[1] . '.php';
     exit;
 }

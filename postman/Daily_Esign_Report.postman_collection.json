@@ -1,0 +1,143 @@
+{
+  "info": {
+    "_postman_id": "evolv-daily-esign-report",
+    "name": "EVOLV — Daily PO E-Signature Report",
+    "description": "Trigger the Daily PO E-Signature email report.\n\n**Authorize:** pass cron secret as `key` (query or body).\nDefault key: `evolv-daily-esign-2300` (from config/app.php → daily_esign_report.cron_key).\n\nUse the **standalone cron URL** (no portal login). The routed `/cron/daily-esign-report` needs a portal session cookie.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://apps.evolvclothing.com/sap_reports"
+    },
+    {
+      "key": "cronKey",
+      "value": "evolv-daily-esign-2300"
+    }
+  ],
+  "item": [
+    {
+      "name": "Trigger Daily E-Sign Report (GET + key)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "auth": {
+          "type": "noauth"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/cron_daily_esign_report.php?key={{cronKey}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["cron_daily_esign_report.php"],
+          "query": [
+            {
+              "key": "key",
+              "value": "{{cronKey}}",
+              "description": "Cron secret (Authorize)"
+            }
+          ]
+        },
+        "description": "Recommended. No portal login. Sends the Daily Report email to Workflow → Daily Report assignees."
+      },
+      "response": [
+        {
+          "name": "200 — sent",
+          "originalRequest": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/cron_daily_esign_report.php?key={{cronKey}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["cron_daily_esign_report.php"],
+              "query": [{ "key": "key", "value": "{{cronKey}}" }]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": "json",
+          "body": "{\n  \"success\": true,\n  \"message\": \"Daily report sent to 1 recipient(s)\",\n  \"data\": {\n    \"success\": true,\n    \"sent\": 1,\n    \"failed\": 0,\n    \"summary\": {\n      \"draft\": 2,\n      \"review\": 1,\n      \"released\": 3,\n      \"approved\": 5,\n      \"pending_for_sign\": 1\n    },\n    \"recipients\": [\"nandhakumar@evolvclothing.com\"]\n  }\n}"
+        },
+        {
+          "name": "403 — bad key",
+          "status": "Forbidden",
+          "code": 403,
+          "_postman_previewlanguage": "json",
+          "body": "{\n  \"success\": false,\n  \"error\": \"Forbidden\",\n  \"data\": []\n}"
+        }
+      ]
+    },
+    {
+      "name": "Trigger Daily E-Sign Report (POST + key)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/x-www-form-urlencoded"
+          }
+        ],
+        "auth": {
+          "type": "noauth"
+        },
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {
+              "key": "key",
+              "value": "{{cronKey}}",
+              "description": "Cron secret (Authorize)"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/cron_daily_esign_report.php",
+          "host": ["{{baseUrl}}"],
+          "path": ["cron_daily_esign_report.php"]
+        },
+        "description": "Same trigger via POST body `key`."
+      },
+      "response": []
+    },
+    {
+      "name": "Routed API (needs portal cookie)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Cookie",
+            "value": "PHPSESSID=paste_portal_session_here",
+            "description": "Optional — only if calling via app router"
+          }
+        ],
+        "auth": {
+          "type": "noauth"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/cron/daily-esign-report?key={{cronKey}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["cron", "daily-esign-report"],
+          "query": [
+            {
+              "key": "key",
+              "value": "{{cronKey}}"
+            }
+          ]
+        },
+        "description": "Goes through public/index.php → portal login required. Prefer the standalone cron_daily_esign_report.php request instead."
+      },
+      "response": []
+    }
+  ]
+}

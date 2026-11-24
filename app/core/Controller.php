@@ -13,7 +13,9 @@ class Controller
     {
         extract($data, EXTR_SKIP);
 
-        $viewFile = base_path('app/views/' . str_replace('.', '/', $view) . '.php');
+        $viewFile = function_exists('sap_reports_resolve_view_file')
+            ? sap_reports_resolve_view_file($view)
+            : base_path('app/views/' . str_replace('.', '/', $view) . '.php');
         if (!is_file($viewFile)) {
             http_response_code(500);
             echo 'View not found: ' . e($view);
@@ -25,7 +27,9 @@ class Controller
             return;
         }
 
-        $layoutFile = base_path('app/views/' . str_replace('.', '/', $layout) . '.php');
+        $layoutFile = function_exists('sap_reports_resolve_view_file')
+            ? sap_reports_resolve_view_file((string) $layout)
+            : base_path('app/views/' . str_replace('.', '/', $layout) . '.php');
         if (!is_file($layoutFile)) {
             require $viewFile;
             return;
@@ -49,7 +53,7 @@ class Controller
      */
     protected function notFound(string $message = 'Page not found.'): void
     {
-        require_once base_path('app/controllers/ErrorController.php');
+        sap_reports_require_controller('ErrorController');
         (new ErrorController())->notFound($message);
     }
 

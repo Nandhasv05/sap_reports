@@ -5,7 +5,7 @@
  * DESCRIPTION : Token-gated cron endpoint for Daily PO E-Signature report (no portal login)
  *
  * Schedule at 23:00 IST:
- *   curl "http://localhost:8888/sap_reports/cron_daily_esign_report.php?key=evolv-daily-esign-2300"
+ *   curl "https://apps.evolvclothing.com/sap_reports/cron_daily_esign_report.php?key=evolv-daily-esign-2300"
  *   OR: php ../cli/send_daily_esign_report.php
  */
 declare(strict_types=1);
