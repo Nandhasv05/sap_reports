@@ -12,7 +12,7 @@ final class PoTempfinCostingService
     /** @var list<string> */
     public const DETAIL_COLUMNS = [
         'PONO', 'POITEM', 'PRNO', 'SALORDNO', 'STYLE', 'MATERIAL', 'MATGROUP',
-        'SO_QTY', 'PRWISE_SO_QTY', 'CONSUMPTION', 'REQQTY', 'TOT_POQTY',
+        'SO_QTY', 'PRWISE_SO_QTY', 'FG_HEAD_QTY', 'CONSUMPTION', 'REQQTY', 'TOT_POQTY',
         'SO_WISE_POQTY', 'SO_WISE_PO_VAL', 'OUOM', 'PORATE', 'TOTVALUE',
         'MAT_DESC', 'PO_CURRENCY', 'BUDGETED_CONS', 'BUDGET_INR', 'BUDGET_CURRENCY',
         'BUDGET_CONV_RT', 'BUDGET_COST_PER_GMT', 'CONV', 'BUOM', 'ACTUAL_COST',
@@ -488,6 +488,7 @@ final class PoTempfinCostingService
         // Classic TEMPFIN numeric fields (align with PO Costing Validation)
         $soQty = $this->num($get($row, 'SO_QTY'));
         $prSoQty = $this->num($get($row, 'PRWISE_SO_QTY'));
+        $fgHeadQty = $this->num($get($row, 'FG_HEAD_QTY', 'FGHEADQTY', 'FgHeadQty'));
         $consumption = $this->num($get($row, 'CONSUMPTION'));
         $reqqty = $this->num($get($row, 'REQQTY'));
         $totPoQty = $this->num($get($row, 'TOT_POQTY'));
@@ -693,6 +694,8 @@ final class PoTempfinCostingService
             'matgroup'             => (string) $get($row, 'MATGROUP'),
             'so_qty'               => $soQty,
             'prwise_so_qty'        => $prSoQty,
+            'fg_head_qty'          => $fgHeadQty,
+            'FG_HEAD_QTY'          => $fgHeadQty,
             'consumption'          => $consumption,
             'reqqty'               => $reqqty,
             'tot_poqty'            => $totPoQty,

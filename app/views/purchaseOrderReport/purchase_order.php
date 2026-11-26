@@ -426,20 +426,20 @@ $listCards = $isCostingView
             </form>
         <?php else: ?>
             <!-- Detail header with Back to List & PO Search -->
-            <div style="display: flex; align-items: center; gap: 10px;">
+            <div class="po-detail-tools">
                 <a href="<?= e($pageUrl) ?>" class="po-back-nav" title="Back to PO List">
                     <span class="material-icons-round">arrow_back</span>
-                    <span>PO List</span>
+                    <span class="po-back-nav-label">PO List</span>
                 </a>
-                <form class="rpt-search" method="get" action="<?= e($pageUrl) ?>" id="poFilterForm" novalidate>
-                    <label class="rpt-field">
+                <form class="rpt-search po-detail-search" method="get" action="<?= e($pageUrl) ?>" id="poFilterForm" novalidate>
+                    <label class="rpt-field po-detail-po-field">
                         <span class="material-icons-round">receipt</span>
                         <input id="po" name="po" value="<?= e($purchaseOrder) ?>" placeholder="Purchase order" inputmode="numeric" maxlength="10" autocomplete="off" required>
                     </label>
-                    <button class="rpt-btn" type="submit" title="Load report">
+                    <button class="rpt-btn po-detail-action" type="submit" title="Load report" aria-label="Load report">
                         <span class="material-icons-round">sync</span>
                     </button>
-                    <a class="rpt-btn rpt-btn-ghost" href="<?= e($csvUrl) ?>" title="Download CSV">
+                    <a class="rpt-btn rpt-btn-ghost po-detail-action" href="<?= e($csvUrl) ?>" title="Download CSV" aria-label="Download CSV">
                         <span class="material-icons-round">file_download</span>
                     </a>
                 </form>

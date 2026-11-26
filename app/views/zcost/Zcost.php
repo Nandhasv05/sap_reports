@@ -24,7 +24,10 @@ $userRole = !empty($user['role']) ? $user['role'] : 'ADMIN';
   <link rel="stylesheet" href="<?= e(asset('css/zcost/sap_theme.css')) ?>">
   <link rel="stylesheet" href="<?= e(asset('css/zcost/sap_initial.css')) ?>">
   <link rel="stylesheet" href="<?= e(asset('css/zcost/evolv_landing.css')) ?>">
+  <link rel="stylesheet" href="<?= e(asset('css/mobile-fix.css')) ?>">
   <script>
+
+    // Function uerlpragmate
     (function () {
       try {
         var p = new URLSearchParams(location.search);

@@ -315,6 +315,32 @@ $totalVisibleCards = ($canUtil ? 1 : 0) + ($canFabric ? 1 : 0) + ($canTrims ? 1 
                     <span class="hub-bento-arrow"><i class="fas fa-arrow-right"></i></span>
                 </div>
             </a>
+
+            <!-- 8b. PO Wise Costing Validation — list → detail aside -->
+            <a class="hub-bento-card is-po-costing animate-card" style="--stagger: 8;" href="<?= e(url('posalecosting')) ?>" data-category="orders" data-keywords="po wise costing validation item aside bom sales order pass po posalecosting">
+                <div class="hub-bento-ambient-glow"></div>
+                <div class="hub-bento-shine"></div>
+                <div class="hub-bento-head">
+                    <div class="hub-bento-icon-medallion"><i class="fas fa-clipboard-check"></i></div>
+                    <div class="hub-bento-head-meta">
+                        <div class="hub-bento-kicker"><span class="hub-bento-dot"></span><span>MODULE 08B • LIVE SAP</span></div>
+                        <span class="hub-bento-tag">PO WISE</span>
+                    </div>
+                </div>
+                <div class="hub-bento-body">
+                    <h2 class="hub-bento-title">PO Wise Costing</h2>
+                    <p class="hub-bento-desc">PO list with item aside validation, SO/BOM checks, coverage, and Pass PO.</p>
+                    <div class="hub-bento-chips">
+                        <span class="hub-bento-chip"><i class="fas fa-table"></i> Draft PO List</span>
+                        <span class="hub-bento-chip"><i class="fas fa-list"></i> PO Items Aside</span>
+                        <span class="hub-bento-chip"><i class="fas fa-check"></i> Pass PO</span>
+                    </div>
+                </div>
+                <div class="hub-bento-footer">
+                    <span class="hub-bento-action-label">Launch PO Wise Costing</span>
+                    <span class="hub-bento-arrow"><i class="fas fa-arrow-right"></i></span>
+                </div>
+            </a>
             <?php endif; ?>
 
             <?php if ($canFabricSale): ?>
@@ -1956,6 +1982,32 @@ html, body {
     }
     .hub-status-pill {
         display: none !important;
+    }
+}
+
+@media (max-width: 420px) {
+    .hub-brand-subtitle,
+    .hub-footer-center {
+        display: none !important;
+    }
+    .hub-brand-logo {
+        height: 22px !important;
+        max-width: 96px;
+    }
+    .hub-header-container {
+        padding: 0 10px;
+    }
+    .hub-main-container {
+        padding: 10px 8px 20px;
+    }
+    .hub-bento-card {
+        padding: 14px 12px;
+    }
+    .hub-footer-container {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+        padding: 10px 12px;
     }
 }
 </style>

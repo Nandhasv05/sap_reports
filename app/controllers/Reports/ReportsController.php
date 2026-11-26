@@ -117,7 +117,8 @@ class ReportsController extends Controller
             'chart'       => $payload['chart'] ?? [],
             'liveClient'  => $liveClient,
             'extraHead'   => $isMaterialReport
-                ? '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>'
+                ? '<link rel="stylesheet" href="' . e(asset($report === 'trims' ? 'css/trims.css' : 'css/fabric.css')) . '">'
+                    . '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>'
                 : '',
         ]);
     }
@@ -174,7 +175,8 @@ class ReportsController extends Controller
             'presets'    => SapProductionService::rangePresets(),
             'presetDates' => SapProductionService::presetDates(),
             'columns'    => SapProductionService::columns(),
-            'extraHead'  => '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>',
+            'extraHead'  => '<link rel="stylesheet" href="' . e(asset('css/production.css')) . '">'
+                . '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>',
         ]);
     }
 
@@ -1397,7 +1399,8 @@ class ReportsController extends Controller
             $valueFlag = '';
         }
         if ($valueFlag !== 'X' && function_exists('sap_reports_user_can')
-            && !sap_reports_user_can('po-costing', 'sap_revert')) {
+            && !sap_reports_user_can('po-costing', 'sap_revert')
+            && !sap_reports_user_can('posalecosting', 'sap_revert')) {
             $this->jsonResponse([
                 'success' => false,
                 'message' => 'You do not have permission to SAP Revert this PO.',
@@ -1543,7 +1546,8 @@ class ReportsController extends Controller
     {
         $canAct = true;
         if (function_exists('sap_reports_user_can')) {
-            $canAct = sap_reports_user_can('po-costing', 'portal_revert');
+            $canAct = sap_reports_user_can('po-costing', 'portal_revert')
+                || sap_reports_user_can('posalecosting', 'portal_revert');
         }
         if (!$canAct) {
             $this->jsonResponse([

@@ -9,12 +9,13 @@
 .rpt-app.is-sales-page .hub-ambient-bg { display: none !important; }
 
 .rpt-app.is-sales-page .rpt-bar {
-    height: 58px !important;
+    height: auto !important;
     min-height: 58px !important;
-    padding: 0 16px !important;
+    padding: 8px 16px !important;
     background: #ffffff !important;
     border-bottom: 1px solid #e6eaf2 !important;
     box-shadow: none !important;
+    flex-wrap: wrap !important;
 }
 
 .rpt-app.is-sales-page .hub-brand-logo { height: 28px !important; }
@@ -1255,5 +1256,56 @@
     .rpt-app.is-sales-page .sales-charts-main,
     .rpt-app.is-sales-page .sales-kpi-grid {
         grid-template-columns: 1fr !important;
+    }
+}
+
+/* Sales dashboard responsive polish */
+@media (max-width: 1024px) {
+    .rpt-app.is-sales-page .rpt-bar {
+        height: auto !important;
+        min-height: 58px !important;
+        flex-wrap: wrap !important;
+        padding: 8px 12px !important;
+    }
+    .rpt-app.is-sales-page .rpt-bar-center {
+        order: 3 !important;
+        flex: 1 1 100% !important;
+        width: 100% !important;
+        justify-content: flex-start !important;
+        flex-wrap: wrap !important;
+    }
+    .rpt-app.is-sales-page .header-so-search {
+        flex: 1 1 180px !important;
+        max-width: none !important;
+        min-width: 0 !important;
+    }
+    .rpt-app.is-sales-page .sales-kpi-grid,
+    .rpt-app.is-sales-page .sales-charts-main {
+        grid-template-columns: 1fr !important;
+    }
+}
+
+@media (max-width: 768px) {
+    .rpt-app.is-sales-page .sales-table-search,
+    .rpt-app.is-sales-page .sales-tb-search {
+        min-width: 0 !important;
+        max-width: 100% !important;
+        flex: 1 1 100% !important;
+        width: 100% !important;
+    }
+}
+
+@media (max-width: 640px) {
+    .rpt-app.is-sales-page .header-so-search,
+    .rpt-app.is-sales-page .period-filter {
+        flex: 1 1 100% !important;
+        width: 100% !important;
+        max-width: none !important;
+    }
+}
+
+@media (max-width: 420px) {
+    .rpt-app.is-sales-page .hub-brand-title {
+        display: none !important;
     }
 }

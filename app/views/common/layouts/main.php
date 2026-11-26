@@ -29,6 +29,7 @@ if (!empty($loaderContentScoped)) {
     <link rel="stylesheet" href="<?= e(asset('css/app.css')) ?>">
     <link rel="stylesheet" href="<?= e(asset('css/loader.css')) ?>">
     <?php if (!empty($extraHead)) echo $extraHead; ?>
+    <link rel="stylesheet" href="<?= e(asset('css/mobile-fix.css')) ?>">
 </head>
 <body class="<?= e($bodyClass) ?>">
     <?php

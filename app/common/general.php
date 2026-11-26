@@ -24,6 +24,7 @@ function sap_reports_load_module_routes(Router $router): void
         'procurementReport/ProcurementReportWeb.php',
         'purchaseOrderReport/PurchaseOrderReportWeb.php',
         'PoCostingValidation/PoCostingValidationWeb.php',
+        'poSaleCosting/PoSaleCostingWeb.php',
         'fabricSaleReport/FabricSaleReportWeb.php',
         'salesDashboard/SalesDashboardWeb.php',
         'audit/AuditLogWeb.php',
@@ -64,6 +65,7 @@ function sap_reports_asset_aliases(): array
         'js/table-columns.js' => 'js/common/table-columns.js',
         'css/app.css' => 'css/common/app.css',
         'css/loader.css' => 'css/common/loader.css',
+        'css/mobile-fix.css' => 'css/common/mobile-fix.css',
         'css/zcost/logo.png' => 'css/common/logo.png',
 
         // fabric / trims (utilization)
@@ -90,6 +92,10 @@ function sap_reports_asset_aliases(): array
         'js/search-po.js' => 'js/PoCostingValidation/search-po.js',
         'js/po-valuation-report.js' => 'js/PoCostingValidation/po-valuation-report.js',
         'js/po-validation-history.js' => 'js/PoCostingValidation/po-validation-history.js',
+
+        // po sale costing (standalone PO Wise UI)
+        'js/po-sale-costing.js' => 'js/poSaleCosting/po-sale-costing.js',
+        'css/po-sale-costing.css' => 'css/poSaleCosting/po-sale-costing.css',
 
         // fabric sale
         'js/fabric-sale.js' => 'js/fabricSaleReport/fabric-sale.js',

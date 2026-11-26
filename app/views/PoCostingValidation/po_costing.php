@@ -4,7 +4,7 @@
  * DATE : 04/11/2026 - Updated: 13/11/2026
  * DESCRIPTION : PO Costing Validation - Modern Unified UI
  *               Left icon sidenav | Unified Data Tables across Receive, Sent & Approved POs
-*/
+*/  
 // Keep boot/page loader over main content only - aside + header stay visible
 $loaderContentScoped = true;
 $home = (string) ($home ?? sap_reports_evol_url('portal_dashboard.php'));
@@ -128,6 +128,9 @@ if (!isset($canValuationReportPage)) {
 }
 $canAsideValuation = (bool) $canValuationReportPage;
 $costingHomeUrl = (string) ($costingHomeUrl ?? url('po-costing'));
+$poSaleCostingUrl = (string) ($poSaleCostingUrl ?? url('posalecosting'));
+$canAsidePoSaleCosting = !empty($canAsideDashboard)
+    || (function_exists('sap_reports_user_can_access') && sap_reports_user_can_access('posalecosting'));
 $panelHref = static function (string $panel) use ($costingHomeUrl): string {
     $panel = trim($panel);
     if ($panel === '' || $panel === 'dashboard') {
@@ -437,6 +440,13 @@ $poCostingAppClass = 'rpt-app is-po-costing is-workflow is-costing-bulk is-relea
                    title="Released Po - shown because Access Studio granted Released PO. Bulk list of purchase orders for costing validation.">
                     <span class="poc-sidenav-ico" aria-hidden="true"><span class="material-icons-round">space_dashboard</span></span>
                     <span class="poc-sidenav-copy">Released Po</span>
+                </a>
+                <?php endif; ?>
+                <?php if (!empty($canAsidePoSaleCosting)): ?>
+                <a href="<?= e($poSaleCostingUrl) ?>" class="poc-sidenav-item" data-access="find_po"
+                   title="PO Wise Costing Validation — open list → detail with PO Items aside.">
+                    <span class="poc-sidenav-ico" aria-hidden="true"><span class="material-icons-round">assignment_turned_in</span></span>
+                    <span class="poc-sidenav-copy">PO Wise Costing</span>
                 </a>
                 <?php endif; ?>
                 <?php if ($canAsideReceive): ?>

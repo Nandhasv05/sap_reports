@@ -167,3 +167,52 @@
   .audit-filter input,
   .audit-filter select { min-width: 0; width: 100%; }
 }
+
+/* Audit page responsive polish */
+.audit-page-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 1024px) {
+  .audit-page-hero {
+    align-items: flex-start;
+  }
+  .audit-filter {
+    width: 100%;
+  }
+  .audit-filter label {
+    flex: 1 1 160px;
+    min-width: 0;
+  }
+  .audit-filter input,
+  .audit-filter select {
+    min-width: 0;
+    width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  .audit-page-main {
+    padding: 12px 10px 20px;
+  }
+  .audit-page-hero {
+    padding: 14px 12px;
+  }
+  .audit-filter label {
+    flex: 1 1 100%;
+  }
+  .audit-filter button,
+  .audit-filter .studio-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 420px) {
+  .audit-page-hero h1 {
+    font-size: 18px;
+  }
+}

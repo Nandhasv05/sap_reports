@@ -1762,3 +1762,50 @@ input.is-invalid, select.is-invalid, .sap-table-cell-input.is-invalid {
   border-radius: 8px;
   margin-bottom: 12px;
 }
+/* Zcost sap_theme — earlier toolbar wrap + fluid fields */
+@media (max-width: 1024px) {
+  .sheet-toolbar-actions {
+    flex-wrap: wrap;
+    width: 100%;
+    margin-left: 0;
+  }
+  .sheet-doc-fields,
+  .sheet-toolbar-meta {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  .sheet-field {
+    flex: 1 1 140px;
+    min-width: 120px;
+  }
+  .sheet-field input,
+  #hdr-vbeln,
+  #hdr-posnr,
+  #hdr-kwmeng,
+  #hdr-cnv,
+  #hdr-cnvf,
+  #hdr-maktx {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .sheet-toolbar-actions .studio-btn {
+    flex: 1 1 calc(50% - 6px);
+    justify-content: center;
+  }
+  .total-board {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 420px) {
+  .studio-page-title {
+    font-size: 12px;
+  }
+  .sheet-toolbar-actions .studio-btn {
+    flex: 1 1 100%;
+  }
+}

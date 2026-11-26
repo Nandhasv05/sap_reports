@@ -322,3 +322,52 @@
         height: 32px !important;
     }
 }
+
+/* Fabric Sale — sticky offsets + mobile toolbar polish */
+@media (max-width: 1024px) {
+    .rpt-app.is-fabric-sale .fso-table-wrap:not(.is-scroll-body) .fso-page-table thead .rpt-header-row th {
+        top: 0 !important;
+    }
+    .rpt-app.is-fabric-sale .fso-table-wrap:not(.is-scroll-body) .fso-page-table thead .rpt-filter-row th {
+        top: var(--rpt-header-h, 42px) !important;
+    }
+    .rpt-app.is-fabric-sale .fso-table-wrap.is-scroll-body {
+        max-height: calc(100vh - 320px) !important;
+        min-height: 260px !important;
+    }
+}
+
+@media (max-width: 768px) {
+    .rpt-app.is-fabric-sale .fso-header-filters {
+        width: 100% !important;
+        flex-wrap: wrap !important;
+    }
+    .rpt-app.is-fabric-sale .fso-table-toolbar {
+        flex-direction: column !important;
+        align-items: stretch !important;
+    }
+    .rpt-app.is-fabric-sale .fso-table-actions {
+        overflow-x: auto !important;
+        flex-wrap: nowrap !important;
+        -webkit-overflow-scrolling: touch !important;
+    }
+}
+
+@media (max-width: 640px) {
+    .rpt-app.is-fabric-sale .fso-stat-row {
+        grid-template-columns: 1fr !important;
+    }
+    .rpt-app.is-fabric-sale .fso-hdr-search,
+    .rpt-app.is-fabric-sale .rpt-field,
+    .rpt-app.is-fabric-sale .rpt-btn {
+        flex: 1 1 100% !important;
+        width: 100% !important;
+        max-width: none !important;
+    }
+}
+
+@media (max-width: 420px) {
+    .rpt-app.is-fabric-sale .rpt-name {
+        display: none !important;
+    }
+}

@@ -1,0 +1,286 @@
+/* ==========================================================================
+   GLOBAL MOBILE FIX (LAST) — wins over module nowrap / fixed header heights
+   Breakpoints: 1024 / 768 / 640 / 420
+   Tables stay horizontal-scroll inside wraps.
+   ========================================================================== */
+
+html, body {
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: clip;
+}
+
+.rpt-app,
+.hub-wrapper,
+.rpt-body,
+.wrap,
+.wrap-wide,
+.audit-page {
+    width: 100%;
+    max-width: 100vw;
+    box-sizing: border-box;
+    min-width: 0;
+}
+
+.rpt-table-wrap,
+.fso-table-wrap,
+.sales-table-wrap,
+.mat-table,
+.prod-table-wrap,
+.audit-page-table-wrap,
+.table-responsive,
+.table-wrap {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 1024px) {
+    .rpt-bar,
+    .rpt-app .rpt-bar,
+    .rpt-app.is-sales-page .rpt-bar,
+    .rpt-app.is-purchase-order .rpt-bar,
+    .rpt-app.is-purchase-order.is-po-list .rpt-bar,
+    .rpt-app.is-purchase-order.is-po-detail .rpt-bar,
+    .rpt-app.is-fabric-sale .rpt-bar,
+    .rpt-app.is-fabric .rpt-bar,
+    .rpt-app.is-trims .rpt-bar,
+    .rpt-app.is-production .rpt-bar,
+    .rpt-app.is-po-costing .rpt-bar,
+    .rpt-app.is-po-sale-costing .rpt-bar,
+    .rpt-app.is-uac-page .rpt-bar,
+    .is-sales-page .rpt-bar {
+        height: auto !important;
+        max-height: none !important;
+        min-height: 52px !important;
+        flex-wrap: wrap !important;
+        align-items: center !important;
+        row-gap: 8px !important;
+        padding-top: 8px !important;
+        padding-bottom: 8px !important;
+    }
+
+    .rpt-search,
+    .prod-filters,
+    .po-filters,
+    .fso-header-filters,
+    .rpt-app.is-purchase-order.is-po-list .po-filters,
+    .rpt-app.is-purchase-order.is-po-list .po-filters.rpt-search,
+    .is-sales-page .rpt-bar-center {
+        flex-wrap: wrap !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    .hub-header {
+        height: auto !important;
+        min-height: 52px !important;
+    }
+    .hub-header-container {
+        flex-wrap: wrap !important;
+        gap: 8px !important;
+    }
+}
+
+@media (max-width: 768px) {
+    .rpt-bar,
+    .rpt-app .rpt-bar,
+    .is-sales-page .rpt-bar {
+        padding-left: 10px !important;
+        padding-right: 10px !important;
+    }
+
+    .rpt-search,
+    .prod-filters,
+    .po-filters,
+    .fso-header-filters,
+    .is-sales-page .rpt-bar-center,
+    .pcb-header-filters {
+        order: 3 !important;
+        flex: 1 1 100% !important;
+        width: 100% !important;
+        margin-left: 0 !important;
+        justify-content: flex-start !important;
+    }
+
+    .rpt-field,
+    .rpt-field-filter,
+    .rpt-field-range,
+    .rpt-field-mat-cat,
+    .rpt-field-date,
+    .fso-hdr-search,
+    .po-direct-search,
+    .pcb-header-search,
+    .is-sales-page .header-so-search,
+    .is-sales-page .period-filter {
+        flex: 1 1 calc(50% - 6px) !important;
+        min-width: 140px !important;
+        max-width: none !important;
+        width: auto !important;
+    }
+
+    /* Compact icon actions stay side-by-side */
+    .rpt-btn,
+    .po-direct-search-btn,
+    .po-detail-action,
+    .rpt-btn-ghost {
+        flex: 0 0 auto !important;
+        width: auto !important;
+    }
+
+    .rpt-app.is-purchase-order.is-po-detail .po-detail-search.rpt-search {
+        order: 0 !important;
+        flex: 1 1 auto !important;
+        width: auto !important;
+        flex-wrap: nowrap !important;
+    }
+    .rpt-app.is-purchase-order.is-po-detail .po-detail-po-field.rpt-field {
+        flex: 1 1 auto !important;
+        min-width: 110px !important;
+        width: auto !important;
+    }
+
+    .hub-header-center {
+        order: 3 !important;
+        flex: 1 1 100% !important;
+        max-width: 100% !important;
+        width: 100% !important;
+    }
+    .hub-user-meta,
+    .hub-brand-subtitle,
+    .hub-footer-center,
+    .hub-status-pill .hub-status-label,
+    .hub-status-pill .hub-ecg-icon {
+        display: none !important;
+    }
+
+    .rpt-main {
+        padding: 10px 8px !important;
+    }
+
+    .rpt-stats,
+    .fso-stat-row,
+    .po-stat-row,
+    .pcb-kpis,
+    .prod-stat-row,
+    .sales-kpi-grid,
+    .bom-stat-grid,
+    .rpt-kpis,
+    .rpt-cards-row {
+        display: grid !important;
+        grid-auto-flow: row !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        overflow: visible !important;
+        gap: 8px !important;
+    }
+
+    .rpt-stat,
+    .kpi-card,
+    .orders-kpi-card,
+    .pcb-kpi {
+        flex: none !important;
+        width: auto !important;
+        min-width: 0 !important;
+    }
+
+    .rpt-table-toolbar,
+    .fso-table-toolbar,
+    .sales-qt-toolbar,
+    .sales-table-toolbar,
+    .pcb-table-toolbar {
+        flex-wrap: wrap !important;
+        gap: 8px !important;
+    }
+
+    .rpt-tb-actions,
+    .fso-table-actions,
+    .sales-tb-actions {
+        display: flex !important;
+        flex-wrap: nowrap !important;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+        width: 100% !important;
+        gap: 6px !important;
+    }
+}
+
+@media (max-width: 640px) {
+    .rpt-name,
+    .hub-brand-title {
+        max-width: 38vw;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .rpt-field,
+    .rpt-field-filter,
+    .rpt-field-range,
+    .rpt-field-mat-cat,
+    .rpt-field-date,
+    .fso-hdr-search,
+    .po-direct-search,
+    .pcb-header-search,
+    .is-sales-page .header-so-search,
+    .is-sales-page .period-filter {
+        flex: 1 1 100% !important;
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    .rpt-stats,
+    .fso-stat-row,
+    .po-stat-row,
+    .pcb-kpis,
+    .prod-stat-row,
+    .sales-kpi-grid,
+    .bom-stat-grid,
+    .rpt-kpis,
+    .rpt-cards-row,
+    .hub-cards-grid {
+        grid-template-columns: 1fr !important;
+    }
+
+    .hub-status-pill {
+        display: none !important;
+    }
+
+    /* Keep PO detail actions inline even when fields go full width elsewhere */
+    .rpt-app.is-purchase-order.is-po-detail .po-detail-tools {
+        width: 100%;
+        flex-wrap: nowrap !important;
+    }
+    .rpt-app.is-purchase-order.is-po-detail .po-detail-search.rpt-search {
+        flex-wrap: nowrap !important;
+        width: auto !important;
+        flex: 1 1 auto !important;
+    }
+    .rpt-app.is-purchase-order.is-po-detail .po-detail-po-field.rpt-field {
+        flex: 1 1 auto !important;
+        width: auto !important;
+    }
+    .rpt-app.is-purchase-order.is-po-detail .po-detail-action.rpt-btn {
+        flex: 0 0 36px !important;
+        width: 36px !important;
+        min-width: 36px !important;
+        height: 36px !important;
+        padding: 0 !important;
+    }
+}
+
+@media (max-width: 420px) {
+    .rpt-name {
+        display: none !important;
+    }
+    .rpt-brand img,
+    .hub-brand-logo {
+        height: 22px !important;
+        max-width: 96px !important;
+    }
+    .hub-footer-container {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 6px !important;
+    }
+}

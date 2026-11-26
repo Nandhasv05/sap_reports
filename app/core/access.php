@@ -85,6 +85,11 @@ function sap_reports_user_can_access(string $module, ?array $user = null): bool
         $mod = 'purchase-order';
     }
 
+    if ($mod === 'posalecosting' || $mod === 'po-sale-costing') {
+        // Standalone PO Wise page: own route or shared PO Costing rights
+        return sap_reports_user_can('posalecosting', 'view', $user)
+            || sap_reports_user_can_access('po-costing', $user);
+    }
     if ($mod === 'po-costing') {
         return sap_reports_user_can($mod, 'view', $user)
             || sap_reports_user_can($mod, 'find_po', $user)
@@ -154,6 +159,7 @@ function sap_reports_access_route_aliases(string $module): array
     $map = [
         'purchase-order'        => ['purchase-order', 'purchaseorder', 'po'],
         'po-costing'            => ['po-costing', 'pocosting', 'purchase-order-costing', 'purchase-order?view=costing'],
+        'posalecosting'         => ['posalecosting', 'po-sale-costing', 'posalecosting-validation', 'po-wise-costing'],
         'sales'                 => ['sales', 'sale'],
         'fabric'                => ['fabric', 'fabric-utilization'],
         'fabric-sale'           => ['fabric-sale', 'fabricsale'],

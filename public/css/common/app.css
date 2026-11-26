@@ -3448,18 +3448,18 @@ body.so-canvas-open {
 .po-back-nav .material-icons-round {
     font-size: 18px;
 }
-/* Purchase Order list header — single row: brand | filters | profile */
+/* Purchase Order list header — brand | filters | profile */
 .is-purchase-order.is-po-list .rpt-bar {
     display: flex;
     flex-direction: row;
     align-items: center;
     justify-content: flex-start;
-    flex-wrap: nowrap !important;
+    flex-wrap: wrap;
     gap: 12px;
     padding: 10px 16px;
     overflow: visible;
     z-index: 100;
-    height: 64px;
+    height: auto;
     min-height: 64px;
     max-height: none;
     background: #fff;
@@ -3489,7 +3489,7 @@ body.so-canvas-open {
     display: flex !important;
     align-items: center;
     gap: 8px;
-    flex-wrap: nowrap !important;
+    flex-wrap: wrap;
     flex: 1 1 auto !important;
     min-width: 0;
     margin-left: 8px !important;
@@ -22733,5 +22733,335 @@ body.pvr-modal-open { overflow: hidden; }
     }
     .rpt-app.is-po-costing .pvr-card-foot {
         grid-template-columns: 1fr;
+    }
+}
+
+/* ==========================================================================
+   PROJECT-WIDE RESPONSIVE HARDENING (1280 / 1024 / 768 / 640 / 420)
+   Tables stay horizontal-scroll; chrome wraps without page-level overflow.
+   ========================================================================== */
+
+.rpt-app,
+.hub-wrapper,
+.rpt-main,
+.rpt-table-wrap,
+.mat-table,
+.prod-table-wrap {
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.mat-table,
+.prod-table-wrap,
+.rpt-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 1280px) {
+    .rpt-bar {
+        gap: 10px;
+    }
+    .rpt-field,
+    .rpt-field-filter,
+    .rpt-field-range {
+        min-width: 110px;
+    }
+}
+
+@media (max-width: 1024px) {
+    .rpt-bar {
+        flex-wrap: wrap;
+        align-items: center;
+        row-gap: 8px;
+    }
+    .rpt-search,
+    .prod-filters,
+    .po-filters {
+        flex-wrap: wrap;
+        max-width: 100%;
+    }
+    .rpt-table-toolbar,
+    .fso-table-toolbar,
+    .sales-table-toolbar,
+    .pcb-table-toolbar {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    .rpt-kpis,
+    .rpt-cards-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .hub-footer-center {
+        display: none !important;
+    }
+}
+
+@media (max-width: 768px) {
+    .rpt-main {
+        padding: 10px 8px !important;
+        gap: 10px !important;
+    }
+    .rpt-bar-left {
+        min-width: 0;
+        flex: 1 1 auto;
+    }
+    .rpt-name {
+        font-size: 14px !important;
+        max-width: 42vw;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .rpt-search,
+    .prod-filters,
+    .po-filters,
+    .fso-header-filters {
+        width: 100% !important;
+        flex: 1 1 100% !important;
+        margin-left: 0 !important;
+        flex-wrap: wrap !important;
+    }
+    .rpt-kpis,
+    .rpt-cards-row,
+    .rpt-charts {
+        grid-template-columns: 1fr !important;
+    }
+    .rpt-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+    .hub-header-container {
+        flex-wrap: wrap !important;
+    }
+    .hub-header-center {
+        order: 3 !important;
+        flex: 1 1 100% !important;
+        max-width: 100% !important;
+    }
+    .hub-user-meta,
+    .hub-footer-center {
+        display: none !important;
+    }
+    .mat-table table,
+    .prod-table,
+    .rpt-table {
+        /* keep wide tables; scroll inside wrap */
+        max-width: none;
+    }
+}
+
+@media (max-width: 640px) {
+    .rpt-field,
+    .rpt-field-filter,
+    .rpt-field-range,
+    .rpt-field-mat-cat,
+    .rpt-field-date {
+        flex: 1 1 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        width: 100% !important;
+    }
+    .rpt-btn {
+        width: 100%;
+        justify-content: center;
+    }
+    .rpt-table-toolbar .rpt-tb-actions,
+    .fso-table-actions,
+    .sales-tb-actions {
+        width: 100%;
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        -webkit-overflow-scrolling: touch;
+    }
+    .rpt-stats {
+        grid-template-columns: 1fr !important;
+    }
+    .hub-status-pill {
+        display: none !important;
+    }
+    .hub-cards-grid {
+        grid-template-columns: 1fr !important;
+    }
+}
+
+@media (max-width: 420px) {
+    .rpt-name {
+        display: none !important;
+    }
+    .rpt-brand img,
+    .hub-brand-logo {
+        height: 22px !important;
+        max-width: 96px !important;
+    }
+    .rpt-home,
+    .hub-quick-icon-btn {
+        width: 30px !important;
+        height: 30px !important;
+    }
+    .hub-footer-container {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 6px !important;
+        padding: 10px 12px !important;
+    }
+}
+
+/* Utilization / Purchase Order / Procurement — module chrome */
+@media (max-width: 1024px) {
+    .rpt-app.is-purchase-order .rpt-bar,
+    .rpt-app.is-procurement .rpt-bar,
+    .rpt-app.is-utilization .rpt-bar {
+        flex-wrap: wrap;
+        row-gap: 8px;
+    }
+    .rpt-app.is-purchase-order .po-filters,
+    .rpt-app.is-purchase-order .rpt-search {
+        flex: 1 1 100%;
+        width: 100%;
+        flex-wrap: wrap;
+        margin-left: 0;
+    }
+    .rpt-app.is-purchase-order .po-stat-row,
+    .rpt-app.is-purchase-order .rpt-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 768px) {
+    .rpt-app.is-purchase-order .rpt-main,
+    .rpt-app.is-procurement .rpt-main {
+        padding: 10px 8px;
+    }
+    .rpt-app.is-purchase-order .po-page-table,
+    .rpt-app.is-purchase-order .rpt-table {
+        /* wide table remains; parent wrap scrolls */
+    }
+    .rpt-app.is-purchase-order .rpt-table-wrap,
+    .rpt-app.is-procurement .rpt-table-wrap {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+}
+
+@media (max-width: 640px) {
+    .rpt-app.is-purchase-order .po-filters .rpt-field,
+    .rpt-app.is-purchase-order .po-filters .rpt-field-date,
+    .rpt-app.is-purchase-order .po-filters .rpt-btn {
+        flex: 1 1 100% !important;
+        width: 100% !important;
+        max-width: none !important;
+    }
+    .rpt-app.is-purchase-order .po-stat-row {
+        grid-template-columns: 1fr !important;
+    }
+}
+
+@media (max-width: 420px) {
+    .rpt-app.is-purchase-order .rpt-name,
+    .rpt-app.is-procurement .rpt-name {
+        display: none !important;
+    }
+}
+
+/* ==========================================================================
+   PO Detail header tools — keep PO # / Sync / Download in one row on mobile
+   ========================================================================== */
+.rpt-app.is-purchase-order.is-po-detail .po-detail-tools {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1 1 auto;
+    min-width: 0;
+    flex-wrap: wrap;
+}
+
+.rpt-app.is-purchase-order.is-po-detail .po-detail-search.rpt-search {
+    display: flex !important;
+    align-items: center;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-width: 0;
+    flex-wrap: nowrap !important;
+    width: auto !important;
+    margin: 0 !important;
+    order: 0 !important;
+}
+
+.rpt-app.is-purchase-order.is-po-detail .po-detail-po-field.rpt-field {
+    flex: 1 1 auto !important;
+    min-width: 120px !important;
+    max-width: 280px !important;
+    width: auto !important;
+}
+
+.rpt-app.is-purchase-order.is-po-detail .po-detail-action.rpt-btn {
+    flex: 0 0 auto !important;
+    width: 40px !important;
+    min-width: 40px !important;
+    height: 40px !important;
+    padding: 0 !important;
+    justify-content: center !important;
+}
+
+@media (max-width: 1024px) {
+    .rpt-app.is-purchase-order.is-po-detail .rpt-bar {
+        flex-wrap: wrap !important;
+        height: auto !important;
+        min-height: 56px !important;
+        row-gap: 8px;
+    }
+    .rpt-app.is-purchase-order.is-po-detail .po-detail-tools {
+        order: 3;
+        flex: 1 1 100%;
+        width: 100%;
+    }
+    .rpt-app.is-purchase-order.is-po-detail .po-detail-search.rpt-search {
+        flex: 1 1 auto;
+        width: auto !important;
+    }
+}
+
+@media (max-width: 768px) {
+    .rpt-app.is-purchase-order.is-po-detail .po-back-nav-label {
+        display: none;
+    }
+    .rpt-app.is-purchase-order.is-po-detail .po-back-nav {
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        justify-content: center;
+        border-radius: 10px;
+    }
+    .rpt-app.is-purchase-order.is-po-detail .po-detail-po-field.rpt-field {
+        max-width: none !important;
+        flex: 1 1 auto !important;
+    }
+}
+
+@media (max-width: 640px) {
+    .rpt-app.is-purchase-order.is-po-detail .po-detail-tools {
+        flex-wrap: nowrap;
+        gap: 8px;
+    }
+    .rpt-app.is-purchase-order.is-po-detail .po-detail-search.rpt-search,
+    .rpt-app.is-purchase-order.is-po-detail .po-detail-po-field.rpt-field,
+    .rpt-app.is-purchase-order.is-po-detail .po-detail-action.rpt-btn {
+        width: auto !important;
+        max-width: none !important;
+    }
+    .rpt-app.is-purchase-order.is-po-detail .po-detail-search.rpt-search {
+        flex: 1 1 auto !important;
+    }
+    .rpt-app.is-purchase-order.is-po-detail .rpt-name {
+        display: none !important;
+    }
+}
+
+@media (max-width: 420px) {
+    .rpt-app.is-purchase-order.is-po-detail .po-detail-action.rpt-btn {
+        width: 36px !important;
+        min-width: 36px !important;
+        height: 36px !important;
     }
 }

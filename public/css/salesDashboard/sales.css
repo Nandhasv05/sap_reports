@@ -3485,12 +3485,13 @@ body.kapis-lite .sales-hub .kpi-card.proj-card.tone-rose .kpi-icon .material-ico
     background: #f8fafc !important;
     border: none !important;
     border-bottom: 1px solid #e8eef5 !important;
-    flex-wrap: nowrap !important;
+    flex-wrap: wrap !important;
 }
 
 .procurement-toolbar-top {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.75rem;
 }
 
@@ -5357,13 +5358,14 @@ body.kapis-lite .sales-table-head-right {
     align-items: center !important;
     gap: 0.75rem !important;
     margin-left: auto !important;
-    flex-wrap: nowrap !important;
+    flex-wrap: wrap !important;
+    min-width: 0 !important;
 }
 
 body.kapis-lite .sales-table-search {
-    min-width: 250px !important;
+    min-width: 0 !important;
     max-width: 380px !important;
-    flex: 1 1 auto !important;
+    flex: 1 1 220px !important;
 }
 
 body.kapis-lite .sales-table-export {
@@ -8224,13 +8226,14 @@ body.kapis-lite .sales-page-right .sales-select {
     position: sticky;
     top: 0;
     z-index: 100;
-    height: 56px;
+    height: auto;
     min-height: 56px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
-    padding: 0 24px;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 8px 24px;
     background: rgba(255, 255, 255, 0.88);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
@@ -11016,8 +11019,9 @@ body.sales-detail-open {
    ========================================================================== */
 
 .is-sales-page .rpt-bar {
-    height: 64px !important;
-    min-height: 64px !important;
+    height: auto !important;
+    min-height: 58px !important;
+    flex-wrap: wrap !important;
     padding: 0 22px !important;
     background: #ffffff !important;
     border-bottom: 1px solid #e7edf4 !important;
@@ -11241,3 +11245,78 @@ body.sales-detail-open {
 
 
 
+
+/* ==========================================================================
+   Sales / Procurement — project-wide responsive polish
+   ========================================================================== */
+
+@media (max-width: 1024px) {
+    .procurement-toolbar {
+        flex-wrap: wrap !important;
+    }
+    .procurement-toolbar-top {
+        flex-wrap: wrap !important;
+        gap: 0.6rem !important;
+    }
+    .procurement-search-wrap {
+        flex: 1 1 220px !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+    }
+    .proc-pipeline-flow {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+    body.kapis-lite .sales-table-head-right {
+        flex-wrap: wrap !important;
+        width: 100% !important;
+        margin-left: 0 !important;
+    }
+    body.kapis-lite .sales-table-search {
+        min-width: 0 !important;
+        max-width: 100% !important;
+        flex: 1 1 100% !important;
+    }
+}
+
+@media (max-width: 768px) {
+    .procurement-toolbar-top {
+        flex-direction: column !important;
+        align-items: stretch !important;
+    }
+    .procurement-search-wrap {
+        width: 100% !important;
+        border-radius: 12px !important;
+    }
+    .proc-pipeline-flow {
+        grid-template-columns: 1fr !important;
+        gap: 0.5rem !important;
+    }
+    .sales-detail-drawer,
+    .sales-detail-drawer.so-sheet,
+    .sales-detail-drawer.open {
+        width: 100vw !important;
+        max-width: 100vw !important;
+    }
+    body.kapis-lite .sales-table-head-right {
+        flex-direction: column !important;
+        align-items: stretch !important;
+    }
+}
+
+@media (max-width: 640px) {
+    .procurement-stats-bar {
+        overflow-x: auto !important;
+        flex-wrap: nowrap !important;
+        -webkit-overflow-scrolling: touch !important;
+    }
+    .sales-live-badge span:not(.live-dot) {
+        display: none;
+    }
+}
+
+@media (max-width: 420px) {
+    .proc-flow-node {
+        padding: 0.65rem 0.75rem !important;
+        font-size: 0.7rem !important;
+    }
+}

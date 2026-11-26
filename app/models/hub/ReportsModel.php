@@ -82,6 +82,15 @@ class ReportsModel
                 'bg'    => '#f3e8ff',
                 'group' => 'Procurement Reports',
             ],
+            'posalecosting' => [
+                'title' => 'PO Wise Costing Validation',
+                'blurb' => 'PO-wise costing validation with item aside, SO/BOM checks, and Pass PO.',
+                'icon'  => 'fa-clipboard-check',
+                'color' => '#6d28d9',
+                'bg'    => '#ede9fe',
+                'group' => 'Procurement Reports',
+                'href'  => 'posalecosting',
+            ],
             'fabric-sale' => [
                 'title' => 'Fabric Sale Order',
                 'blurb' => 'Fabric sales quotations and orders with buyer intelligence and revenue.',

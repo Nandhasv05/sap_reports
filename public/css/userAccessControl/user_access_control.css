@@ -774,3 +774,46 @@ body.rpt-body:has(.is-uac-page) {
     padding-left: 36px;
   }
 }
+
+/* UAC responsive polish */
+@media (max-width: 1024px) {
+  .uac-shell {
+    grid-template-columns: 1fr;
+  }
+  .uac-rail {
+    position: relative;
+    width: 100%;
+    max-height: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .uac-mod {
+    grid-template-columns: 28px 1fr;
+    grid-template-rows: auto auto;
+  }
+  .uac-rights {
+    grid-column: 1 / -1;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    padding-left: 36px;
+  }
+  .uac-profile-text {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .uac-module-list,
+  .uac-matrix-wrap,
+  .uac-panel {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (max-width: 420px) {
+  .uac-rights {
+    padding-left: 0;
+  }
+}

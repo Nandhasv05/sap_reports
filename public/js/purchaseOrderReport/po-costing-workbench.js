@@ -7333,13 +7333,14 @@
             // Workflow Assignment: load statuses + ack if assigned viewer opened via link
             void loadWorkflow(po).then(() => workflowAckOnOpen(po));
 
-            // New-tab launch: ?open=esign|pass → open the modal after data is ready
-            if (openAction === 'esign' || openAction === 'pass') {
+            // New-tab launch: ?open=esign|pass|sent|remarks → open after data is ready
+            if (openAction === 'esign' || openAction === 'pass' || openAction === 'sent'
+                || openAction === 'remarks' || openAction === 'validate') {
                 try {
                     const sp = new URLSearchParams(window.location.search);
                     const from = String(sp.get('from') || '').toLowerCase();
                     const ret = String(sp.get('return') || '').trim();
-                    esignOpenedViaDeepLink = true;
+                    esignOpenedViaDeepLink = openAction === 'esign' || openAction === 'pass' || openAction === 'sent';
                     if (ret && (ret.startsWith('/') || ret.startsWith(window.location.origin))) {
                         esignDeepLinkReturnUrl = ret.startsWith('http') ? ret : (window.location.origin + ret);
                     } else if (from === 'related') {
@@ -7348,10 +7349,27 @@
                         esignDeepLinkReturnUrl = '';
                     }
                 } catch (_) {
-                    esignOpenedViaDeepLink = true;
+                    esignOpenedViaDeepLink = openAction === 'esign' || openAction === 'pass' || openAction === 'sent';
                     esignDeepLinkReturnUrl = '';
                 }
                 window.setTimeout(() => {
+                    if (openAction === 'remarks' || openAction === 'validate') {
+                        if (cfg.canValidate === false) {
+                            alert('You do not have Remarks access for PO Costing.');
+                            return;
+                        }
+                        openValidateModal();
+                        return;
+                    }
+                    if (openAction === 'sent') {
+                        if (cfg.canEsign === false) {
+                            alert('You do not have eSign / send access for PO Costing.');
+                            leaveEsignDeepLink();
+                            return;
+                        }
+                        passPoAndOpenEsign({ fromPassPo: false, fromSent: true });
+                        return;
+                    }
                     if (openAction === 'esign') {
                         if (cfg.canEsign === false) {
                             alert('You do not have eSign access for PO Costing.');

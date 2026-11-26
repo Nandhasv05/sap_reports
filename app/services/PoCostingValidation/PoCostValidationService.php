@@ -1224,6 +1224,9 @@ class PoCostValidationService
 
                 $soQty = $this->sapNumber($row['SaleOrderQuantity'] ?? $row['SO_QTY'] ?? 0);
                 $reqQty = $this->sapNumber($row['ReqBOMQuantity'] ?? $row['REQQTY'] ?? 0);
+                $fgHeadQty = $this->sapNumber(
+                    $row['FG_HEAD_QTY'] ?? $row['FgHeadQty'] ?? $row['fg_head_qty'] ?? 0
+                );
                 $style = trim((string) ($row['style'] ?? $row['Style'] ?? ''));
 
                 $itemsMap[$rowKey] = [
@@ -1261,12 +1264,16 @@ class PoCostValidationService
                     'is_validated_quote' => $isValidatedRow,
                     'so_qty'             => $soQty,
                     'prwise_so_qty'      => $soQty,
+                    'fg_head_qty'        => $fgHeadQty,
                     'reqqty'             => $reqQty,
                     'style'              => $style,
                 ];
             } else {
                 $soQty = $this->sapNumber($row['SaleOrderQuantity'] ?? $row['SO_QTY'] ?? 0);
                 $reqQty = $this->sapNumber($row['ReqBOMQuantity'] ?? $row['REQQTY'] ?? 0);
+                $fgHeadQty = $this->sapNumber(
+                    $row['FG_HEAD_QTY'] ?? $row['FgHeadQty'] ?? $row['fg_head_qty'] ?? 0
+                );
                 $style = trim((string) ($row['style'] ?? $row['Style'] ?? ''));
                 if (($itemsMap[$rowKey]['so_qty'] ?? 0) <= 0 && $soQty > 0) {
                     $itemsMap[$rowKey]['so_qty'] = $soQty;
@@ -1274,6 +1281,9 @@ class PoCostValidationService
                 }
                 if (($itemsMap[$rowKey]['reqqty'] ?? 0) <= 0 && $reqQty > 0) {
                     $itemsMap[$rowKey]['reqqty'] = $reqQty;
+                }
+                if (($itemsMap[$rowKey]['fg_head_qty'] ?? 0) <= 0 && $fgHeadQty > 0) {
+                    $itemsMap[$rowKey]['fg_head_qty'] = $fgHeadQty;
                 }
                 if (($itemsMap[$rowKey]['style'] ?? '') === '' && $style !== '') {
                     $itemsMap[$rowKey]['style'] = $style;
@@ -1780,6 +1790,7 @@ class PoCostValidationService
             $soQty = $prSoQty;
         }
         $reqQty = (float) ($item['reqqty'] ?? $item['ReqBOMQuantity'] ?? 0);
+        $fgHeadQty = (float) ($item['fg_head_qty'] ?? $item['FG_HEAD_QTY'] ?? $item['FgHeadQty'] ?? 0);
         $style = (string) ($item['style'] ?? '');
 
         $gross = isset($match['gross']) && $match['gross'] !== null ? (float) $match['gross'] : null;
@@ -1934,6 +1945,8 @@ class PoCostValidationService
             'mat_category'        => $matCat,
             'so_qty'              => $soQty,
             'prwise_so_qty'       => $soQty,
+            'fg_head_qty'         => $fgHeadQty,
+            'FG_HEAD_QTY'         => $fgHeadQty,
             'consumption'         => $consumption,
             'reqqty'              => $reqQty,
             'tot_poqty'           => $totPoQty,

@@ -744,3 +744,33 @@ pre.code-block {
     padding: 12px;
   }
 }
+
+/* Zcost style.css toolbar / filter responsive */
+@media (max-width: 1024px) {
+  .table-toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+  }
+  .filter-input {
+    width: 100%;
+    max-width: 100%;
+    flex: 1 1 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  .table-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .filter-input {
+    width: 100%;
+  }
+}
+
+@media (max-width: 420px) {
+  .container {
+    padding: 10px;
+  }
+}

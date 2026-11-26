@@ -1,2 +1,2 @@
 <?php
-require_once base_path('app/models/salesDashboard/data/dashboards.php');
+return require base_path('app/models/salesDashboard/data/dashboards.php');

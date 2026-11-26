@@ -49,6 +49,7 @@ if (!function_exists('statusLabel')) {
   <link rel="stylesheet" href="<?= e(asset('css/zcost/sap_theme.css')) ?>">
   <link rel="stylesheet" href="<?= e(asset('css/zcost/evolv_landing.css')) ?>">
   <link rel="stylesheet" href="<?= e(asset('css/zcost/audit_page.css')) ?>">
+  <link rel="stylesheet" href="<?= e(asset('css/mobile-fix.css')) ?>">
 </head>
 <body class="sap-body audit-page-body">
   <?php
